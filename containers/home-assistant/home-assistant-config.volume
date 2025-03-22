@@ -1,0 +1,3 @@
+[Volume]
+Device=/home/moonpie/home-assistant/config
+Options=bind

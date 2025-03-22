@@ -1,0 +1,13 @@
+[Container]
+ContainerName=home-assistant
+DNS=192.168.0.100
+EnvironmentFile=/home/moonpie/git/abhaile/containers/home-assistant/.env
+HostName=home-assistant
+Image=home-assistant.image
+Network=secure.network
+PodmanArgs=--mac-address=5a:49:7a:4f:ce:6b --ip=192.168.20.11
+Timezone=local
+Volume=home-assistant-config.volume:/config
+
+[Service]
+Restart=always

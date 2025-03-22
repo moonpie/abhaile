@@ -2,7 +2,9 @@
 Home Server configs
 
 ## commands.txt
-apt install podman crun vim git vlan curl systemd-resolved 
+apt install podman crun vim git vlan curl systemd-resolved lm-sensor
+
+modprobe nct6683 force=on
 
 modprobe 8021q
 echo "8021q" >> /etc/modules
