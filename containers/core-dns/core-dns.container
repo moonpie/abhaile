@@ -1,0 +1,12 @@
+[Container]
+ContainerName=core-dns
+EnvironmentFile=/home/moonpie/git/abhaile/containers/core-dns/.env
+HostName=core-dns
+Image=core-dns.image
+Network=management.network
+PodmanArgs=--mac-address=22:9f:9e:2f:79:5c --ip=192.168.0.100
+Secret=core-dns-pw,type=env,target=OMADA_PASSWORD
+Timezone=local
+
+[Service]
+Restart=always
