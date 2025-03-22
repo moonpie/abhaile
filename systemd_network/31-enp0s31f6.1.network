@@ -1,0 +1,11 @@
+[Match]
+Name=enp0s31f6.1
+
+[Link]
+RequiredForOnline=carrier
+
+[Network]
+DHCP=no
+LinkLocalAddressing=no
+KeepConfiguration=yes
+UseDomains=true
