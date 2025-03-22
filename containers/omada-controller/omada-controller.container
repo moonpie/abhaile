@@ -1,0 +1,15 @@
+[Container]
+ContainerName=omada-controller
+EnvironmentFile=/home/moonpie/git/abhaile/containers/omada-controller/.env
+HostName=omada-controller
+Image=omada-controller.image
+Network=management.network
+PodmanArgs=--mac-address=36:be:1f:72:1a:3b --ip=192.168.0.10
+StopTimeout=60
+Timezone=local
+Ulimit=nofile=4096:8192
+Volume=omada-controller-data.volume:/opt/tplink/EAPController/data
+Volume=omada-controller-logs.volume:/opt/tplink/EAPController/logs
+
+[Service]
+Restart=always

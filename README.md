@@ -2,7 +2,7 @@
 Home Server configs
 
 ## commands.txt
-apt install crun vim git vlan curl systemd-resolved
+apt install podman crun vim git vlan curl systemd-resolved
 
 modprobe 8021q
 echo "8021q" >> /etc/modules
@@ -13,3 +13,7 @@ mv network/* /etc/systemd/network/
 
 systemctl enable systemd-resolved
 ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+
+systemctl enable --now netavark-dhcp-proxy.socket
+mv podman/* /etc/containers/systemd/
+systemctl daemon-reload
