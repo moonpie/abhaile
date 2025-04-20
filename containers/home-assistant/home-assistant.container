@@ -11,3 +11,7 @@ Volume=home-assistant-config.volume:/config
 
 [Service]
 Restart=always
+
+[Install]
+After=core-dns.service
+WantedBy=multi-user.target

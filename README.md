@@ -2,10 +2,18 @@
 Home Server configs
 
 ## commands.txt
-apt install podman crun vim git vlan curl systemd-resolved lm-sensor
+apt install sudo
+usermod -aG sudo moonpie
+echo 'moonpie  ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/user
+
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y unattended-upgrades
+echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | sudo debconf-set-selections
+sudo dpkg-reconfigure -f noninteractive unattended-upgrades
+
+apt install podman crun vim git vlan curl systemd-resolved lm-sensors
 
 modprobe nct6683 force=on
-
 modprobe 8021q
 echo "8021q" >> /etc/modules
 

@@ -13,3 +13,6 @@ Volume=omada-controller-logs.volume:/opt/tplink/EAPController/logs
 
 [Service]
 Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -10,3 +10,7 @@ Timezone=local
 
 [Service]
 Restart=always
+
+[Install]
+After=omada-controller.service
+WantedBy=multi-user.target
