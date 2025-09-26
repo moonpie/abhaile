@@ -1,0 +1,3 @@
+[Volume]
+Device=/home/moonpie/frigate/storage
+Options=bind
