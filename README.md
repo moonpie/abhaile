@@ -42,6 +42,10 @@ sudo sh -c "echo 'SUBSYSTEM==\"apex\", MODE=\"0660\", GROUP=\"apex\"' >> /etc/ud
 sudo groupadd apex && sudo adduser $USER apex
 sudo reboot
 
+## Dynamic DNS
+sudo apt install -y ddclient
+systemctl enable ddclient.service
+systemctl start ddclient.service
 
 ## Containers
 systemctl enable --now netavark-dhcp-proxy.socket
