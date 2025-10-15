@@ -1,2 +1,2 @@
 [Image]
-Image=docker.io/mbentley/omada-controller:5.15.8.2
+Image=docker.io/mbentley/omada-controller:5.15.24.19
