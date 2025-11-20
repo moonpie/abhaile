@@ -1,0 +1,55 @@
+You are an experienced gitops engineer. I am configuring a home lab - abhaile - and I would like your assistance and expertise to create a fully declarative gitops workflow for storing my configuration and pushing out configuration changes.
+
+Attached to this message I will provide a summary in the form of a design specification. Refer to this for all network related design decisions and all host and service configuration decisions, do not make assumptions.
+
+I want you to provide a complete and detailed end-to-end checklist for implementing everything related to the fully declarative gitops workflow aspect of this design specification. Please provide the checklist in a manner that I can test each step/phase as it is completed.
+
+Here are some particular concerns I would like you to focus on:
+
+Can you provide a complete gitops implementation for both hosts and services, that:
+- handles host roles
+- only restarts impacted services (utilising checksums where relevant)
+- deploys quadlets
+- dynamically defined Caddyfile
+- dynamically defined CoreDNS zones
+- decrypts sops
+- restarts changed units.
+- auto-prefixes quadlet filenames with the service name when syncing from services/<name>/quadlets/ → relevant …/containers/systemd/ directory on the host, so I can avoid naming collisions and I can keep the repo layout clean
+- uses hashicorp vault as a secret service, but SOPS in git can be used to bootstrap this secret service
+
+I would prefer this implementation to be modular with a single script to orchestrate execution of all the modular sub-scripts. Maintainability and readability is important.
+
+I would like as much of the configuration as possible, hosts, services, and network, to be templated and handled in a declarative manner, using envsubst (or similar) to replace placeholder values in templates - e.g. I should not need to duplicate config of systemd-networkd or CoreDNS, if the only difference is the bind address
+
+Can you include JSON Schemas where applicable
+
+I would prefer to have hosts and services defined separately with some mapping file to link them … so an update to this mapping file would deploy and/or undeploy the service(s) as indicated
+
+For the hosts, please include a “common” directory and a directory for each host - these should include:
+- host level config
+- package installation list
+- systemd-networkd
+- systemd-resolved
+- podman quadlets for networks
+- user configuration
+
+For the services, please include a directory for each service - these should include:
+- podman quadlet files
+- any .env files
+- any service specific configuration files
+
+For the network, please use Omada Controller API - I am running v5.15.24.19, if that matters
+
+As I am using podman and quadlets for containers, l’d like to have .volume, . image, and .build files wherever relevant and include any dependency configuration in the [Service] and [Install] sections on the .container file so that the homelab will successfully restart from a power outage
+
+Can you add a Makefile or pre-commit config to lint shell (shellcheck), YAML (yamllint), and run a dry-run in CI to catch template mistakes before they hit my hosts?
+
+Can you generate an INVENTORY.md automatically from mapping and other declared values to list all services, their hosts, ports, internal DNS, and public FQDN in a table, along with a CI check that updates INVENTORY.md and commits the update automatically if someone changes anything, so that it is always up-to-date
+
+Can you wire Renovatebot into this repo so it automatically opens PRs whenever pre-commit hook revs (or other pinned deps) have newer releases? And also add a regexManager rule for any future non-standard files I want to auto-bump,
+
+Can you also add a Make target to generate a host bootstrap ISO script (curl | bash style) that installs base packages, clones the repo, and enables git-sync@<host>.timer
+
+Can you provide a README.md for this git repo?
+
+Also provide how to apply implement this step by step

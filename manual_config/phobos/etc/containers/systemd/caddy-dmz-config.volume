@@ -1,0 +1,3 @@
+[Volume]
+Device=/srv/caddy/dmz/config
+Options=bind

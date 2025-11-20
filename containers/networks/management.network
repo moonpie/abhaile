@@ -1,7 +1,0 @@
-[Unit]
-Description=podman macvlan network for management VLAN
-Requires=netavark-dhcp-proxy.socket
-
-[Network]
-Driver=macvlan
-PodmanArgs=--interface-name enp0s31f6.1

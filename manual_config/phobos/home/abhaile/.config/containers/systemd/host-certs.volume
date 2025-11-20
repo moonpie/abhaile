@@ -1,0 +1,3 @@
+[Volume]
+Device=/etc/ssl/certs
+Options=bind

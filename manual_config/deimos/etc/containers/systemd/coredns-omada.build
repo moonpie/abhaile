@@ -1,0 +1,4 @@
+[Build]
+SetWorkingDirectory=/srv/build/coredns-omada
+File=/srv/build/coredns-omada/Containerfile
+ImageTag=localhost/coredns-omada:latest

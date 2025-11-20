@@ -1,0 +1,19 @@
+{
+	"sans": [
+		"*.abhaile.dedyn.io"
+	],
+	"issuer_data": {
+		"url": "https://acme-v02.api.letsencrypt.org/acme/cert/05e138fa296d9c5b0b5d62cedf3b7966a7bd",
+		"ca": "https://acme-v02.api.letsencrypt.org/directory",
+		"account": "https://acme-v02.api.letsencrypt.org/acme/acct/2785864696",
+		"renewal_info": {
+			"suggestedWindow": {
+				"start": "2026-01-06T21:10:09Z",
+				"end": "2026-01-08T16:20:58Z"
+			},
+			"_uniqueIdentifier": "rkie3IcdRKBv2qLlYHQEeMKcAIA.BeE4-iltnFsLXWLO3zt5Zqe9",
+			"_retryAfter": "2025-11-19T01:41:55.36668688Z",
+			"_selectedTime": "2026-01-08T01:07:20Z"
+		}
+	}
+}

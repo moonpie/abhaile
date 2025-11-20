@@ -1,0 +1,27 @@
+You are an experienced system administrator. I am configuring a home lab - abhaile - and I would like your assistance and expertise with the host and service configurations. Do not consider GitOps implementation as I will have other conversations with a DevOps engineer for these
+
+Attached to this message I will provide a summary in the form of a design specification. Refer to this for all network related design decisions, do not make assumptions.
+
+I want you to provide a complete and detailed end-to-end checklist for implementing everything related to the host and service configurations aspect of this design specification. Please provide the checklist in a manner that I can test each step/phase as it is completed.
+
+Here are some particular concerns I would like you to focus on:
+
+Can you draft me a CoreDNS config file for split horizon DNS that matches this setup?
+
+Can you draft me a Caddyfile for this setup to expose all web based services
+
+Can you provide a fail-safe recipe (kill-switch) so if the VPN drops, qBittorrent cannot fall back to ISP WAN?
+
+How should I configure wireguard on client devices?
+
+Can you draft a ready-to-use set of WireGuard client configs (user, admin, travel) with my VLANs and hostnames prefilled, so I can drop in keys and deploy immediately?
+
+With all the services we have described, and including vault as a secret store for tokens/passwords, what would a bootstrap post power outage look like?
+
+Can you sketch a systemd unit dependency tree (something like graphviz, mermaid, draw.io, etc.) showing the boot order of my key services? That way I can visualize exactly what waits on what after a power outage.
+
+As I am using podman and quadlets for containers, l’d like to have .volume, . image, and .build files wherever relevant and include any dependency configuration in the [Service] and [Install] sections on the .container file so that the homelab will successfully restart from a power outage
+
+Can you also provide any additional returned systemd unit configurations to implement the dependency tree
+
+Also provide how to apply these configurations step by step

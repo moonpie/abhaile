@@ -1,0 +1,3 @@
+[Volume]
+Device=/srv/authelia/redis/data
+Options=bind

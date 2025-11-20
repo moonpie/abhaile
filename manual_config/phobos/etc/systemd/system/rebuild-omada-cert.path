@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for renewed Omada TLS certificate from Caddy
+
+[Path]
+# Watch for changes in Caddy’s internal leaf cert
+PathChanged=/srv/caddy/internal/data/certificates/local/omada-controller.svc.abhaile.home.arpa/omada-controller.svc.abhaile.home.arpa.crt
+Unit=rebuild-omada-cert.service
+
+[Install]
+WantedBy=multi-user.target

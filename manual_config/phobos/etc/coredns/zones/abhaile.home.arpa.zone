@@ -1,0 +1,37 @@
+$ORIGIN abhaile.home.arpa.
+$TTL 300
+
+@   IN SOA ns1.abhaile.home.arpa. hostmaster.abhaile.home.arpa. (
+        2025111101 ; serial
+        7200       ; refresh
+        3600       ; retry
+        1209600    ; expire
+        3600 )     ; minimum
+    IN NS ns1.abhaile.home.arpa.
+    IN NS ns2.abhaile.home.arpa.
+
+; Authoritative DNS servers
+ns1 IN A 172.20.20.235
+ns2 IN A 172.20.20.236
+
+; Internal Caddy (HTTP entrypoint)
+caddy IN A 172.20.20.200
+
+; Internal Caddy endpoints
+ca              IN CNAME caddy.abhaile.home.arpa.
+test            IN CNAME caddy.abhaile.home.arpa.
+
+; ----- HTTP apps go via Caddy -----
+; These CNAMEs preserve distinct hostnames while all land on Caddy.
+; Caddy routes by Host header to *.svc.abhaile.home.arpa backends.
+
+authelia        IN CNAME caddy.abhaile.home.arpa.
+vault           IN CNAME caddy.abhaile.home.arpa.
+omada           IN CNAME caddy.abhaile.home.arpa.
+homeassistant   IN CNAME caddy.abhaile.home.arpa.
+z2m             IN CNAME caddy.abhaile.home.arpa.
+esphome         IN CNAME caddy.abhaile.home.arpa.
+go2rtc          IN CNAME caddy.abhaile.home.arpa.
+frigate         IN CNAME caddy.abhaile.home.arpa.
+
+; Non-HTTP/proto-specific names will be pointed directly at *.svc later.

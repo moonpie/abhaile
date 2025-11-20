@@ -1,0 +1,6 @@
+[Unit]
+Description=Watch ddclient.conf for changes
+[Path]
+PathChanged=/srv/vault/agent/out/ddclient.conf
+[Install]
+WantedBy=multi-user.target

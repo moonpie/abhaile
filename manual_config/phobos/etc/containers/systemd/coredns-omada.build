@@ -1,0 +1,5 @@
+[Build]
+SetWorkingDirectory=/srv/build/coredns-omada
+File=/srv/build/coredns-omada/Containerfile
+ImageTag=localhost/coredns-omada:latest
+PodmanArgs=--build-arg=COREDNS_VERSION=v1.13.1 --build-arg=COREDNS_OMADA_VERSION=v1.8.1

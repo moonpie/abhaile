@@ -1,0 +1,7 @@
+You are an experienced network engineer. I am configuring a home lab - abhaile - and I would like your assistance and expertise with the network design. Do not consider service configurations, nor GitOps implementation as I will have other conversations with a system administrator and a DevOps engineer for these
+
+Attached to this message I will provide a summary in the form of a design specification 
+
+I want you to provide a complete and detailed end-to-end checklist for implementing everything related to the network design aspect of this design specification. Please provide the checklist in a manner that I can test each step/phase as it is completed.
+
+In particular, please provide all the information required on the Omada Controller, considering all parameters available in Omada, in yaml formats: Networks, Wireless Networks, Switch Profiles, Gateway/Switch/EAP ACL Rules, Bonjour, Wireguard, etc.

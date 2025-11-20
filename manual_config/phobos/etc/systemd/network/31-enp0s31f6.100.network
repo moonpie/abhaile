@@ -1,0 +1,6 @@
+[Match]
+Name=enp0s31f6.100
+
+[Network]
+Address=172.20.100.10/24
+IPVLAN=ipvlan-l2.100

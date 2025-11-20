@@ -1,0 +1,19 @@
+[Unit]
+Description=Vault Agent (rootless, templates)
+After=default.target
+
+[Container]
+Image=vault.image
+Network=host
+Timezone=local
+Volume=/home/abhaile/.config/vault-agent/token:/agent/token:Z
+Volume=/srv/vault/agent/config.hcl:/agent/config.hcl:Z
+Volume=vault-agent-templates.volume:/agent/templates:Z
+Volume=vault-agent-run.volume:/agent/run:Z
+Volume=vault-agent-out.volume:/agent/out:Z
+Volume=host-certs.volume:/etc/ssl/certs:ro
+Entrypoint=/bin/vault
+Exec=agent -config=/agent/config.hcl
+
+[Install]
+WantedBy=default.target

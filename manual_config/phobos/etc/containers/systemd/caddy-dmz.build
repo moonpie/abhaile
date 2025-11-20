@@ -1,0 +1,5 @@
+[Build]
+SetWorkingDirectory=/srv/build/caddy-desec/
+File=/srv/build/caddy-desec/Containerfile
+ImageTag=localhost/caddy-desec:latest
+PodmanArgs=--build-arg=CADDY_VERSION=2.10.2 --build-arg=DESEC_COMMIT=3a2346e

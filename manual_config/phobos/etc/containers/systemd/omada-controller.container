@@ -1,0 +1,24 @@
+[Unit]
+Description=TP-Link Omada Controller
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+EnvironmentFile=/etc/omada-controller/.env
+Image=omada-controller.image
+Network=services.network
+PodmanArgs=--ip=172.20.20.220
+StopTimeout=60
+Timezone=local
+Ulimit=nofile=4096:8192
+Volume=omada-controller-cert.volume:/cert:ro
+Volume=omada-controller-data.volume:/opt/tplink/EAPController/data
+Volume=omada-controller-logs.volume:/opt/tplink/EAPController/logs
+Volume=host-certs.volume:/etc/ssl/certs:ro
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

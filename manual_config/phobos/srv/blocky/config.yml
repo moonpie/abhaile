@@ -1,0 +1,33 @@
+---
+upstreams:
+    groups:
+        default:
+            - 9.9.9.9
+            - 149.112.112.112
+            - 1.1.1.1
+            - 1.0.0.1
+
+blocking:
+    denylists:
+        ads:
+            - https://big.oisd.nl
+    clientGroupsBlock:
+        default:
+            - ads
+    blockType: zeroIp
+
+caching:
+    minTime: 5m
+    maxTime: 2h
+    prefetching: true
+
+prometheus:
+    enable: true
+    path: /metrics
+
+ports:
+    dns: 8053
+
+log:
+    level: info
+    format: text

@@ -1,0 +1,10 @@
+[Unit]
+Description=podman ipvlan-l2 network for DMZ VLAN
+
+[Network]
+Driver=ipvlan
+PodmanArgs=--interface-name enp0s31f6.100
+Subnet=172.20.100.0/24
+Gateway=172.20.100.1
+IPRange=172.20.100.200-172.20.100.254
+Options=mode=l2

@@ -1,0 +1,21 @@
+[Unit]
+Description=Caddy (Internal)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=caddy-internal.image
+Network=services.network
+PodmanArgs=--ip=172.20.20.200
+Timezone=local
+Volume=/srv/caddy/internal/Caddyfile:/etc/caddy/Caddyfile:Z
+Volume=caddy-internal-data.volume:/data:Z
+Volume=caddy-internal-config:/config:Z
+Volume=host-certs.volume:/etc/ssl/certs:ro
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

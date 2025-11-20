@@ -1,0 +1,5 @@
+[Unit]
+Description=Restart redis after config change
+[Service]
+Type=oneshot
+ExecStart=systemctl restart authelia-app-redis.service

@@ -1,4 +1,0 @@
-[Build]
-File=/home/moonpie/git/abhaile/containers/caddy/Containerfile
-ImageTag=localhost/caddy-desec
-PodmanArgs=--build-arg=CADDY_VERSION=2.9.1

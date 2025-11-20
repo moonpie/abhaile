@@ -1,0 +1,5 @@
+[Unit]
+Description=Restart Caddy (DMZ) after token changes
+[Service]
+Type=oneshot
+ExecStart=systemctl restart caddy-dmz.service

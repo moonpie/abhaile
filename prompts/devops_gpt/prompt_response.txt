@@ -1,0 +1,1511 @@
+Here’s a concrete, end-to-end GitOps plan for **abhaile** that you can actually implement and test step-by-step. I’ll break it into phases, each with:
+
+* **What you create**
+* **How to test it**
+* **Key snippets** (schemas, scripts, templates)
+
+Everything is aligned with your design spec  and stays fully declarative.
+
+---
+
+## Phase 0 – Git repo skeleton
+
+### 0.1 – Create base layout
+
+```text
+abhaile/
+├── config/
+│   ├── hosts/
+│   │   ├── common/
+│   │   │   ├── host-common.yaml
+│   │   │   ├── systemd-networkd/
+│   │   │   │   ├── 10-lan.network.tmpl
+│   │   │   │   └── 10-lan.netdev.tmpl
+│   │   │   ├── systemd-resolved/resolved.conf.tmpl
+│   │   │   ├── packages/common-packages.yaml
+│   │   │   └── users/common-users.yaml
+│   │   ├── phobos/
+│   │   │   ├── host.yaml
+│   │   │   ├── packages.yaml
+│   │   │   ├── systemd-networkd-overrides.yaml
+│   │   │   ├── systemd-resolved-overrides.yaml
+│   │   │   └── users.yaml
+│   │   └── deimos/
+│   │       ├── host.yaml
+│   │       ├── packages.yaml
+│   │       ├── systemd-networkd-overrides.yaml
+│   │       └── users.yaml
+│   ├── services/
+│   │   ├── caddy-internal/
+│   │   │   ├── service.yaml
+│   │   │   ├── quadlets/
+│   │   │   │   ├── caddy.container
+│   │   │   │   ├── caddy.volume
+│   │   │   │   └── caddy.image
+│   │   │   ├── env/
+│   │   │   │   └── caddy.env.tmpl
+│   │   │   └── config/
+│   │   │       └── Caddyfile.tmpl
+│   │   └── ... (one dir per service from design spec)
+│   ├── network/
+│   │   ├── omada-site.yaml
+│   │   └── omada-acls.yaml
+│   └── mapping/
+│       └── hosts-services.yaml
+├── schemas/
+│   ├── host-schema.json
+│   ├── service-schema.json
+│   ├── mapping-schema.json
+│   └── omada-schema.json
+├── tools/
+│   ├── orchestrate.py
+│   ├── validate.py
+│   ├── inventory_gen.py
+│   ├── caddy_build.py
+│   ├── coredns_build.py
+│   ├── omada_apply.py
+│   ├── hashing.py
+│   └── bash/
+│       ├── lib.sh
+│       ├── host_apply.sh
+│       ├── quadlet_apply.sh
+│       ├── caddy_apply.sh
+│       ├── coredns_apply.sh
+│       └── vault_unseal.sh
+├── systemd/
+│   ├── git-sync@.service
+│   ├── git-sync@.timer
+│   └── abhaile-vault-unseal.service
+├── .pre-commit-config.yaml
+├── renovate.json
+├── Makefile
+└── README.md
+```
+
+### Test
+
+* `git init`
+* `tree` → matches roughly above
+* Commit as baseline: `feat: repo skeleton`
+
+---
+
+## Phase 1 – Data model: hosts, services, mapping (with JSON Schema)
+
+### 1.1 – Host config + schema
+
+Example `config/hosts/phobos/host.yaml`:
+
+```yaml
+id: phobos
+hostname: phobos
+roles:
+  - infra
+  - monitoring
+vlans:
+  primary:
+    id: 20
+    address: 172.20.20.10/24
+    gateway: 172.20.20.1
+  shim:
+    id: 20
+    address: 172.20.20.20/24
+    gateway: 172.20.20.1
+  dmz:
+    id: 100
+    address: 172.20.100.10/24
+    gateway: 172.20.100.1
+services_vlan_cidr: 172.20.20.0/24
+service_ip_pool:
+  start: 172.20.20.200
+  end: 172.20.20.254
+ntp_servers:
+  - 172.20.20.237
+  - 172.20.20.238
+dns_servers:
+  - 172.20.20.235
+  - 172.20.20.236
+systemd_networkd_profile: lan-ipv4-only
+```
+
+Minimal `schemas/host-schema.json`:
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HostConfig",
+  "type": "object",
+  "required": ["id", "hostname", "roles", "vlans", "dns_servers", "ntp_servers"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "hostname": { "type": "string" },
+    "roles": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "vlans": {
+      "type": "object",
+      "properties": {
+        "primary": {
+          "type": "object",
+          "required": ["id", "address", "gateway"],
+          "properties": {
+            "id": { "type": "integer" },
+            "address": { "type": "string" },
+            "gateway": { "type": "string" }
+          }
+        },
+        "shim": {
+          "type": "object",
+          "required": ["id", "address", "gateway"],
+          "properties": {
+            "id": { "type": "integer" },
+            "address": { "type": "string" },
+            "gateway": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "services_vlan_cidr": { "type": "string" },
+    "service_ip_pool": {
+      "type": "object",
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "string" },
+        "end": { "type": "string" }
+      }
+    },
+    "ntp_servers": {
+      "type": "array",
+      "items": { "type": "string", "format": "ipv4" }
+    },
+    "dns_servers": {
+      "type": "array",
+      "items": { "type": "string", "format": "ipv4" }
+    },
+    "systemd_networkd_profile": { "type": "string" }
+  }
+}
+```
+
+### 1.2 – Service config + schema
+
+Example `config/services/coredns-filtered/service.yaml`:
+
+```yaml
+name: coredns-filtered
+type: host
+host_role: infra
+bind_ip: 172.20.20.235
+vlan: 20
+ports:
+  - 53/udp
+  - 53/tcp
+fqdn_internal: dns-filtered.abhaile.home.arpa
+fqdn_public: null
+quadlets:
+  rootful: true
+  files:
+    - coredns-filtered.container
+env_files:
+  - dns.env.tmpl
+config_templates:
+  - Corefile.tmpl
+dns_records:
+  a_records:
+    - name: dns-filtered.abhaile.home.arpa
+      ip: 172.20.20.235
+  cnames: []
+```
+
+Minimal `schemas/service-schema.json`:
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ServiceConfig",
+  "type": "object",
+  "required": ["name", "type", "vlan", "ports"],
+  "properties": {
+    "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "type": { "type": "string", "enum": ["host", "container", "pod"] },
+    "host_role": { "type": "string" },
+    "bind_ip": { "type": ["string", "null"] },
+    "vlan": { "type": "integer" },
+    "ports": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9]+/(tcp|udp)$" }
+    },
+    "fqdn_internal": { "type": ["string", "null"] },
+    "fqdn_public": { "type": ["string", "null"] },
+    "quadlets": {
+      "type": "object",
+      "properties": {
+        "rootful": { "type": "boolean" },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["rootful", "files"]
+    },
+    "env_files": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "config_templates": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}
+```
+
+### 1.3 – Host ↔ service mapping
+
+`config/mapping/hosts-services.yaml`:
+
+```yaml
+version: 1
+hosts:
+  phobos:
+    roles: [infra, monitoring, dmz]
+    services:
+      - caddy-internal
+      - caddy-dmz
+      - authelia
+      - vault
+      - vaultwarden
+      - blocky
+      - coredns-filtered
+      - chrony-a
+      - omada
+      - prometheus
+      - grafana
+      - ...
+  deimos:
+    roles: [media]
+    services:
+      - coredns-clean
+      - chrony-b
+      - jellyfin
+      - immich
+      - qbittorrent
+      - gluetun
+      - ...
+```
+
+`schemas/mapping-schema.json`:
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HostServiceMapping",
+  "type": "object",
+  "required": ["version", "hosts"],
+  "properties": {
+    "version": { "type": "integer" },
+    "hosts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["roles", "services"],
+        "properties": {
+          "roles": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "services": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+### Test
+
+* Write `tools/validate.py` to run jsonschema validation over all YAML.
+* Run `python tools/validate.py` → all configs valid.
+
+Example implementation (complete but minimal):
+
+```python
+#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+import yaml
+from jsonschema import validate, ValidationError
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_schema(name: str) -> dict:
+    with open(REPO_ROOT / "schemas" / name, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_yaml(path: Path) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def validate_hosts() -> list[str]:
+    schema = load_schema("host-schema.json")
+    errors = []
+    for path in (REPO_ROOT / "config" / "hosts").rglob("host.yaml"):
+        data = load_yaml(path)
+        try:
+            validate(data, schema)
+        except ValidationError as e:
+            errors.append(f"Host config {path}: {e.message}")
+    return errors
+
+
+def validate_services() -> list[str]:
+    schema = load_schema("service-schema.json")
+    errors = []
+    for path in (REPO_ROOT / "config" / "services").rglob("service.yaml"):
+        data = load_yaml(path)
+        try:
+            validate(data, schema)
+        except ValidationError as e:
+            errors.append(f"Service config {path}: {e.message}")
+    return errors
+
+
+def validate_mapping() -> list[str]:
+    schema = load_schema("mapping-schema.json")
+    path = REPO_ROOT / "config" / "mapping" / "hosts-services.yaml"
+    data = load_yaml(path)
+    try:
+        validate(data, schema)
+    except ValidationError as e:
+        return [f"Mapping {path}: {e.message}"]
+    return []
+
+
+def main() -> int:
+    all_errors: list[str] = []
+    all_errors += validate_hosts()
+    all_errors += validate_services()
+    all_errors += validate_mapping()
+
+    if all_errors:
+        print("Validation failed:")
+        for e in all_errors:
+            print(f"- {e}")
+        return 1
+
+    print("All configs valid ✔️")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+---
+
+## Phase 2 – Templating & rendering (envsubst-style, declarative)
+
+### 2.1 – Simple envsubst helper
+
+We’ll use `${VAR}` placeholders in templates and substitute from a dict built from host + service + global config.
+
+`tools/hashing.py`:
+
+```python
+#!/usr/bin/env python3
+import hashlib
+from pathlib import Path
+
+
+STATE_DIR = Path("/var/lib/abhaile/state")
+
+
+def hash_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def hash_file(path: Path) -> str:
+    return hash_bytes(path.read_bytes())
+
+
+def state_path(kind: str, key: str) -> Path:
+    safe = key.replace("/", "_")
+    return STATE_DIR / kind / f"{safe}.sha256"
+
+
+def has_changed(kind: str, key: str, new_hash: str) -> bool:
+    p = state_path(kind, key)
+    if not p.exists():
+        return True
+    old = p.read_text(encoding="utf-8").strip()
+    return old != new_hash
+
+
+def record_hash(kind: str, key: str, new_hash: str) -> None:
+    p = state_path(kind, key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(new_hash + "\n", encoding="utf-8")
+```
+
+`tools/orchestrate.py` (core rendering logic):
+
+```python
+#!/usr/bin/env python3
+import argparse
+import os
+from pathlib import Path
+from string import Template
+from typing import Dict, Any, List
+
+import yaml
+
+from hashing import hash_bytes, has_changed, record_hash
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RENDER_DIR = Path("/var/lib/abhaile/rendered")
+
+
+def load_yaml(path: Path) -> Any:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def build_context(host_id: str) -> Dict[str, Any]:
+    host_cfg = load_yaml(REPO_ROOT / "config" / "hosts" / host_id / "host.yaml")
+    mapping = load_yaml(REPO_ROOT / "config" / "mapping" / "hosts-services.yaml")
+    services = {}
+    for svc_name in mapping["hosts"][host_id]["services"]:
+        svc_path = REPO_ROOT / "config" / "services" / svc_name / "service.yaml"
+        services[svc_name] = load_yaml(svc_path)
+
+    ctx: Dict[str, Any] = {}
+    ctx["HOST_ID"] = host_cfg["id"]
+    ctx["HOSTNAME"] = host_cfg["hostname"]
+    ctx["ROLES"] = ",".join(host_cfg["roles"])
+    ctx["PRIMARY_IP"] = host_cfg["vlans"]["primary"]["address"].split("/")[0]
+    ctx["DNS_SERVERS"] = ",".join(host_cfg["dns_servers"])
+    ctx["NTP_SERVERS"] = ",".join(host_cfg["ntp_servers"])
+    # You can also flatten services into variables if needed.
+    ctx["SERVICES"] = services
+    return ctx
+
+
+def envsubst_string(template_str: str, context: Dict[str, Any]) -> str:
+    # Only substitute simple string keys from context
+    simple_ctx = {k: v for k, v in context.items() if isinstance(v, str)}
+    return Template(template_str).safe_substitute(simple_ctx)
+
+
+def render_template(src: Path, dst: Path, context: Dict[str, Any]) -> bool:
+    raw = src.read_text(encoding="utf-8")
+    rendered = envsubst_string(raw, context)
+    data = rendered.encode("utf-8")
+    h = hash_bytes(data)
+    key = str(dst.relative_to("/"))
+    if not has_changed("files", key, h):
+        return False
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_bytes(data)
+    record_hash("files", key, h)
+    return True
+
+
+def render_host(host_id: str) -> List[Path]:
+    ctx = build_context(host_id)
+    changed: List[Path] = []
+
+    # systemd-networkd
+    tmpl_dir = REPO_ROOT / "config" / "hosts" / "common" / "systemd-networkd"
+    for tmpl in tmpl_dir.glob("*.tmpl"):
+        dst_name = tmpl.name.replace(".tmpl", "")
+        dst = RENDER_DIR / host_id / "etc/systemd/network" / dst_name
+        if render_template(tmpl, dst, ctx):
+            changed.append(dst)
+
+    # resolved
+    res_tmpl = (
+        REPO_ROOT
+        / "config"
+        / "hosts"
+        / "common"
+        / "systemd-resolved"
+        / "resolved.conf.tmpl"
+    )
+    res_dst = RENDER_DIR / host_id / "etc/systemd/resolved.conf"
+    if render_template(res_tmpl, res_dst, ctx):
+        changed.append(res_dst)
+
+    # you can extend for user configs, etc.
+    return changed
+
+
+def render_services(host_id: str) -> List[Path]:
+    ctx = build_context(host_id)
+    mapping = load_yaml(REPO_ROOT / "config" / "mapping" / "hosts-services.yaml")
+    changed: List[Path] = []
+    for svc_name in mapping["hosts"][host_id]["services"]:
+        svc_dir = REPO_ROOT / "config" / "services" / svc_name
+        # env
+        env_dir = svc_dir / "env"
+        for tmpl in env_dir.glob("*.tmpl"):
+            dst_name = tmpl.name.replace(".tmpl", "")
+            dst = RENDER_DIR / host_id / "opt/abhaile/services" / svc_name / "env" / dst_name
+            if render_template(tmpl, dst, ctx):
+                changed.append(dst)
+        # config
+        cfg_dir = svc_dir / "config"
+        for tmpl in cfg_dir.glob("*.tmpl"):
+            dst_name = tmpl.name.replace(".tmpl", "")
+            dst = (
+                RENDER_DIR
+                / host_id
+                / "opt/abhaile/services"
+                / svc_name
+                / "config"
+                / dst_name
+            )
+            if render_template(tmpl, dst, ctx):
+                changed.append(dst)
+    return changed
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("phase", choices=["render", "host", "services", "all"])
+    parser.add_argument("--host", required=True)
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+
+    host_id = args.host
+
+    if args.phase in ("render", "all"):
+        changed_host = render_host(host_id)
+        changed_services = render_services(host_id)
+        print(f"Rendered host files: {len(changed_host)}")
+        print(f"Rendered service files: {len(changed_services)}")
+
+    if args.apply:
+        # Defer to bash apply scripts in later phases
+        os.system(f"tools/bash/host_apply.sh {host_id}")
+        os.system(f"tools/bash/quadlet_apply.sh {host_id}")
+        os.system(f"tools/bash/caddy_apply.sh {host_id}")
+        os.system(f"tools/bash/coredns_apply.sh {host_id}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+### Test
+
+* `sudo mkdir -p /var/lib/abhaile/rendered /var/lib/abhaile/state`
+* `python tools/orchestrate.py render --host phobos`
+* Check `sudo tree /var/lib/abhaile/rendered/phobos` – templates rendered with substituted values.
+
+---
+
+## Phase 3 – Host apply layer & targeted restarts
+
+### 3.1 – Host config apply (networkd, resolved, users, packages)
+
+`tools/bash/lib.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+render_root="/var/lib/abhaile/rendered"
+state_root="/var/lib/abhaile/state"
+
+log() {
+  echo "[$(date --iso-8601=seconds)] $*"
+}
+```
+
+`tools/bash/host_apply.sh` (minimal but functional):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+host="${1:?host id required}"
+
+host_root="${render_root}/${host}"
+
+apply_file() {
+  local src="$1"
+  local dst="$2"
+  local unit="$3"   # systemd unit to restart/reload or empty
+  local reload_cmd="${4:-}" # override reload command
+
+  if [[ ! -f "$src" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$(dirname "$dst")"
+  local changed=0
+
+  if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
+    changed=1
+    log "Updating $dst"
+    install -m 0644 "$src" "$dst"
+  fi
+
+  if [[ $changed -eq 1 && -n "$unit" ]]; then
+    if [[ -n "$reload_cmd" ]]; then
+      log "Reload command for $unit: $reload_cmd"
+      eval "$reload_cmd"
+    else
+      log "Restarting $unit"
+      systemctl restart "$unit"
+    fi
+  fi
+}
+
+main() {
+  # systemd-networkd
+  for f in "${host_root}/etc/systemd/network/"*; do
+    [[ -e "$f" ]] || continue
+    dst="/etc/systemd/network/$(basename "$f")"
+    apply_file "$f" "$dst" "systemd-networkd.service" "systemctl restart systemd-networkd.service"
+  done
+
+  # resolved
+  if [[ -f "${host_root}/etc/systemd/resolved.conf" ]]; then
+    apply_file "${host_root}/etc/systemd/resolved.conf" \
+      "/etc/systemd/resolved.conf" \
+      "systemd-resolved.service" \
+      "systemctl restart systemd-resolved.service"
+  fi
+
+  # you can extend here for users, sudoers, nftables, etc.
+}
+
+main "$@"
+```
+
+### 3.2 – Quadlets, auto-prefixing, and selective restarts
+
+You want:
+
+* copy from `services/<name>/quadlets/*.container/.image/.volume/.build` (rendered path)
+* into `/etc/containers/systemd/<service>-<srcname>`
+* restart only changed units
+* `daemon-reload` once
+
+`tools/bash/quadlet_apply.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+host="${1:?host id required}"
+host_root="${render_root}/${host}"
+
+quadlet_src_root="${host_root}/opt/abhaile/services"
+quadlet_dst_root="/etc/containers/systemd"
+
+main() {
+  local changed_units=()
+  local daemon_reload=0
+
+  while IFS= read -r -d '' f; do
+    # f looks like .../services/<svc>/quadlets/<file>.container
+    local svc
+    svc="$(echo "$f" | awk -F'/services/' '{print $2}' | cut -d'/' -f1)"
+    local basename
+    basename="$(basename "$f")"
+    local dst="${quadlet_dst_root}/${svc}-${basename}"
+
+    mkdir -p "$quadlet_dst_root"
+
+    local changed=0
+    if [[ ! -f "$dst" ]] || ! cmp -s "$f" "$dst"; then
+      log "Updating quadlet $dst"
+      install -m 0644 "$f" "$dst"
+      changed=1
+      daemon_reload=1
+    fi
+
+    if [[ $changed -eq 1 ]]; then
+      local unit="${svc}-${basename}"
+      # strip .container/.volume/.image/.build for systemd unit
+      unit="${unit%.*}"
+      changed_units+=("${unit}.service")
+    fi
+  done < <(find "${quadlet_src_root}" -type f -path "*/quadlets/*" -print0)
+
+  if [[ $daemon_reload -eq 1 ]]; then
+    log "Running systemctl daemon-reload"
+    systemctl daemon-reload
+  fi
+
+  # deduplicate units
+  mapfile -t uniq_units < <(printf '%s\n' "${changed_units[@]}" | sort -u)
+  for u in "${uniq_units[@]}"; do
+    # containers: prefer restart; networks/volumes: no restart
+    if [[ "$u" == *.service ]]; then
+      log "Restarting container unit $u"
+      systemctl restart "$u"
+    fi
+  done
+}
+
+main "$@"
+```
+
+### Test
+
+* Put one mock quadlet template under `config/services/testsvc/quadlets/test.container`
+* Render: `python tools/orchestrate.py render --host phobos`
+* `sudo bash tools/bash/quadlet_apply.sh phobos`
+* Check `/etc/containers/systemd/testsvc-test.container` exists and systemd unit restarted.
+
+---
+
+## Phase 4 – Dynamic Caddy & CoreDNS
+
+### 4.1 – Caddyfile build (from services + mapping)
+
+`tools/caddy_build.py` reads all `service.yaml` and builds **one** internal Caddyfile and one DMZ Caddyfile:
+
+Concept:
+
+* For every service with `fqdn_internal`, create site block:
+
+  * reverse_proxy to its `/32` IP
+  * apply Authelia middleware based on service metadata (you can add `auth: required|optional|none` to service config)
+* For DMZ, only for those with `fqdn_public`.
+
+Template snippet (Caddy 2):
+
+```caddy
+{$FQDN_INTERNAL} {
+    encode gzip
+    reverse_proxy {$UPSTREAM}
+    tls internal
+    @authed {
+        not path /authelia
+    }
+    forward_auth @authed {
+        uri https://authelia.abhaile.home.arpa/api/verify?rd=https://{$FQDN_INTERNAL}
+        copy_headers Remote-User Remote-Groups
+    }
+}
+```
+
+Your `caddy_build.py` would produce `RENDER_DIR/<host>/etc/caddy/Caddyfile` and then `caddy_apply.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+host="${1:?host id required}"
+src="/var/lib/abhaile/rendered/${host}/etc/caddy/Caddyfile"
+dst="/etc/caddy/Caddyfile"
+
+if [[ ! -f "$src" ]]; then
+  exit 0
+fi
+
+changed=0
+if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
+  log "Updating Caddyfile"
+  install -m 0644 "$src" "$dst"
+  changed=1
+fi
+
+if [[ $changed -eq 1 ]]; then
+  log "Reloading caddy"
+  caddy validate --config "$dst"
+  systemctl reload caddy.service || systemctl restart caddy.service
+fi
+```
+
+### 4.2 – CoreDNS zones from services
+
+* parse all service `dns_records` and `fqdn_internal`
+* generate:
+
+  * `Corefile` with zones `abhaile.home.arpa`, `svc.abhaile.home.arpa`, reverse zones `20.20.172.in-addr.arpa`, `99.20.172.in-addr.arpa`, `100.20.172.in-addr.arpa` 
+  * zone files with serials derived from Git commit or timestamp
+
+`coredns_apply.sh` mirrors Caddy logic: only reload on change, `systemctl reload coredns.service || restart`.
+
+### Test
+
+* Run `python tools/caddy_build.py --host phobos`
+* `python tools/coredns_build.py --host phobos`
+* `bash tools/bash/caddy_apply.sh phobos`
+* `bash tools/bash/coredns_apply.sh phobos`
+* `caddy validate` and `coredns -conf /etc/coredns/Corefile -dns.port=0` both succeed.
+
+---
+
+## Phase 5 – SOPS + Vault bootstrap
+
+### 5.1 – SOPS in Git
+
+* store initial secrets under `config/secrets/*.sops.yaml` using `age` or `gpg` keys.
+
+Example `config/secrets/vault-unseal.sops.yaml`:
+
+```yaml
+vault_unseal_keys:
+  - key1: ENC[AES256_GCM,data:...,type:str]
+  - key2: ENC[...]
+  - key3: ENC[...]
+sops:
+  kms: []
+  age:
+    - recipient: age1...
+  version: 3.8.0
+```
+
+This file is used only by `vault_unseal.sh` on phobos.
+
+### 5.2 – Vault unseal unit
+
+`systemd/abhaile-vault-unseal.service`:
+
+```ini
+[Unit]
+Description=Unseal Vault using SOPS file
+After=vault.service
+Requires=vault.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/abhaile/tools/bash/vault_unseal.sh
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`tools/bash/vault_unseal.sh` (simplified):
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+source "$(dirname "$0")/lib.sh"
+
+SOPS_FILE="/opt/abhaile/config/secrets/vault-unseal.sops.yaml"
+
+if ! systemctl is-active --quiet vault.service; then
+  log "Vault not active yet, exiting"
+  exit 0
+fi
+
+if ! command -v sops >/dev/null 2>&1; then
+  log "sops not installed"
+  exit 1
+fi
+
+json="$(sops -d --output-type json "$SOPS_FILE")"
+keys=( $(echo "$json" | jq -r '.vault_unseal_keys[].key1') )
+
+for k in "${keys[@]}"; do
+  curl -s --request POST \
+    --data "{\"key\":\"${k}\"}" \
+    http://127.0.0.1:8200/v1/sys/unseal >/dev/null
+done
+
+log "Unseal attempt done"
+```
+
+You can extend to check status and bail if already unsealed.
+
+### Test
+
+* With Vault running in dev or sealed mode, enable service:
+
+  * `sudo cp systemd/abhaile-vault-unseal.service /etc/systemd/system/`
+  * `sudo systemctl enable --now abhaile-vault-unseal.service`
+* Check `vault status` → `sealed: false`.
+
+---
+
+## Phase 6 – Omada API GitOps
+
+You’re on Omada v5.15.24.19 (important for endpoints/CSRF pattern). 
+
+### 6.1 – Network config model
+
+`config/network/omada-site.yaml`:
+
+```yaml
+controller:
+  url: https://omada.abhaile.home.arpa
+  username: ${OMADA_USER}
+  password: ${OMADA_PASS}
+  site: Default
+vlans:
+  - id: 20
+    name: Services
+    subnet: 172.20.20.0/24
+    gw: 172.20.20.1
+    dhcp: true
+  - id: 30
+    name: General
+    subnet: 172.20.30.0/24
+    gw: 172.20.30.1
+    dhcp: true
+  # ... all VLANs from spec
+ssids:
+  - name: an t-idirlion
+    vlan: 30
+    visible: true
+    band: dual
+  - name: an t-idirlion.gaming
+    vlan: 40
+    visible: false
+    band: 5g
+  # ... as per design spec
+acls:
+  # aligns with explicit allow/deny matrix
+```
+
+`schemas/omada-schema.json` ensures `vlans` and `ssids` match design.
+
+### 6.2 – `tools/omada_apply.py`
+
+* Logs in (session cookie + CSRF token)
+* Reads current VLANs, SSIDs, ACLs
+* Computes diff vs YAML
+* Outputs plan (dry-run) or applies (with `--apply`)
+
+Given the proprietary API shape, implement it when you’re ready; GitOps part is:
+
+* YAML is source of truth
+* Script is idempotent
+* CI step: `python tools/omada_apply.py --dry-run` to ensure no drift or at least show diff.
+
+### Test
+
+* Run with `--dry-run` and verify it shows expected planned changes but makes none.
+* Once comfortable, use `--apply` and check Omada UI.
+
+---
+
+## Phase 7 – INVENTORY.md generator (services, hosts, ports, FQDNs)
+
+### 7.1 – Inventory generator
+
+`tools/inventory_gen.py`:
+
+```python
+#!/usr/bin/env python3
+import subprocess
+from pathlib import Path
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def get_git_rev() -> str:
+    try:
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"], cwd=REPO_ROOT
+            )
+            .decode()
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+
+def load_yaml(path: Path):
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def build_inventory() -> str:
+    mapping = load_yaml(REPO_ROOT / "config" / "mapping" / "hosts-services.yaml")
+
+    header = (
+        "# INVENTORY\n\n"
+        f"Generated from config at commit `{get_git_rev()}`.\n\n"
+        "| Service | Host | VLAN | IP | Ports | Internal FQDN | Public FQDN | Notes |\n"
+        "|--------|------|------|----|-------|----------------|-------------|-------|\n"
+    )
+
+    rows = []
+    for host, info in mapping["hosts"].items():
+        for svc_name in info["services"]:
+            svc_cfg = load_yaml(REPO_ROOT / "config" / "services" / svc_name / "service.yaml")
+            ip = svc_cfg.get("bind_ip", "") or ""
+            vlan = svc_cfg.get("vlan", "")
+            ports = ", ".join(svc_cfg.get("ports", []))
+            fqdn_int = svc_cfg.get("fqdn_internal") or ""
+            fqdn_pub = svc_cfg.get("fqdn_public") or ""
+            notes = svc_cfg.get("notes", "")
+
+            rows.append(
+                f"| {svc_name} | {host} | {vlan} | {ip} | {ports} | {fqdn_int} | {fqdn_pub} | {notes} |"
+            )
+
+    return header + "\n".join(sorted(rows)) + "\n"
+
+
+def main() -> int:
+    inventory_md = build_inventory()
+    (REPO_ROOT / "INVENTORY.md").write_text(inventory_md, encoding="utf-8")
+    print("INVENTORY.md updated.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+### Test
+
+* `python tools/inventory_gen.py`
+* Open `INVENTORY.md` – verify table contents.
+
+---
+
+## Phase 8 – Makefile, pre-commit, CI, Renovate
+
+### 8.1 – Makefile
+
+`Makefile`:
+
+```make
+PYTHON := python3
+
+.PHONY: lint validate render inventory bootstrap-% ci
+
+lint:
+	pre-commit run --all-files
+
+validate:
+	$(PYTHON) tools/validate.py
+
+render:
+	$(PYTHON) tools/orchestrate.py render --host=phobos
+	$(PYTHON) tools/orchestrate.py render --host=deimos
+
+inventory:
+	$(PYTHON) tools/inventory_gen.py
+
+ci: lint validate render inventory
+
+bootstrap-%:
+	$(PYTHON) tools/bootstrap_gen.py --host $* --output dist/bootstrap-$*.sh
+	chmod +x dist/bootstrap-$*.sh
+```
+
+### 8.2 – pre-commit config
+
+`.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+
+  - repo: https://github.com/koalaman/shellcheck-precommit
+    rev: v0.10.0
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3
+
+  - repo: local
+    hooks:
+      - id: gitops-dry-run
+        name: GitOps dry run
+        entry: python3 tools/validate.py
+        language: system
+        pass_filenames: false
+```
+
+### 8.3 – GitHub Actions CI
+
+`.github/workflows/ci.yml` (concept):
+
+```yaml
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          pip install pyyaml jsonschema
+          pip install pre-commit
+      - name: Run CI make
+        run: make ci
+      - name: Auto-update INVENTORY.md
+        run: |
+          python tools/inventory_gen.py
+          if ! git diff --quiet INVENTORY.md; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add INVENTORY.md
+            git commit -m "ci: update INVENTORY"
+            git push
+          fi
+```
+
+This keeps `INVENTORY.md` always up-to-date.
+
+### 8.4 – Renovate
+
+`renovate.json`:
+
+```json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabled": true,
+  "extends": ["config:base"],
+  "rangeStrategy": "replace",
+  "packageRules": [
+    {
+      "matchManagers": ["pre-commit"],
+      "groupName": "pre-commit hooks"
+    }
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": ["^Makefile$", "^tools/.*\\.py$"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+)"
+      ],
+      "datasourceTemplate": "{{datasource}}"
+    }
+  ]
+}
+```
+
+Now you can mark any custom version string with:
+
+```make
+# renovate: datasource=pypi depName=pyyaml currentValue=6.0.1
+PYTHON_PYYAML_VERSION=6.0.1
+```
+
+and Renovate will auto-bump.
+
+---
+
+## Phase 9 – Host bootstrap script & git-sync timer
+
+### 9.1 – git-sync units
+
+`systemd/git-sync@.service`:
+
+```ini
+[Unit]
+Description=Git sync for abhaile (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/abhaile
+ExecStart=/usr/bin/git pull --rebase --autostash
+Nice=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`systemd/git-sync@.timer`:
+
+```ini
+[Unit]
+Description=Periodic git sync for abhaile (%i)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+```
+
+### 9.2 – Bootstrap generator
+
+`tools/bootstrap_gen.py`:
+
+```python
+#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+TPL = """#!/usr/bin/env bash
+set -euo pipefail
+
+HOST="{host}"
+REPO_URL="{repo_url}"
+
+apt-get update
+apt-get install -y git python3 python3-pip jq curl sops podman
+
+mkdir -p /opt
+if [[ ! -d /opt/abhaile ]]; then
+  git clone "$REPO_URL" /opt/abhaile
+fi
+
+cp /opt/abhaile/systemd/git-sync@.service /etc/systemd/system/
+cp /opt/abhaile/systemd/git-sync@.timer /etc/systemd/system/
+
+systemctl daemon-reload
+systemctl enable --now git-sync@${{HOST}}.timer
+
+# initial render + apply
+cd /opt/abhaile
+python3 tools/orchestrate.py render --host "$HOST" --apply
+"""
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--host", required=True)
+    ap.add_argument("--repo-url", required=False, default="git@github.com:you/abhaile.git")
+    ap.add_argument("--output", required=True)
+    args = ap.parse_args()
+
+    content = TPL.format(host=args.host, repo_url=args.repo_url)
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.output).write_text(content, encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+You already wired `Make bootstrap-%` target in the Makefile.
+
+### Test
+
+* `make bootstrap-phobos`
+* Copy script to a VM and run: `curl https://yourrepo/bootstrap-phobos.sh | sudo bash` (once you publish).
+* Confirm: repo cloned, git-sync timer enabled, first render+apply done.
+
+---
+
+## Phase 10 – README.md
+
+Suggested content outline:
+
+````markdown
+# abhaile GitOps
+
+Declarative home lab for **abhaile**, covering:
+
+- Hosts (phobos, deimos)
+- Services (Caddy, CoreDNS, Vault, Omada, etc.)
+- Network (Omada-controlled VLANs, SSIDs, ACLs)
+- GitOps orchestration, validation, and CI
+
+## Repository layout
+
+<explain config/, tools/, schemas/, systemd/ as above>
+
+## Configuration model
+
+- `config/hosts/*/host.yaml` – host roles, IPs, VLANs
+- `config/services/*/service.yaml` – service IPs, ports, FQDNs, quadlets
+- `config/mapping/hosts-services.yaml` – mapping hosts ↔ services
+- `config/network/omada-*.yaml` – Omada VLANs, SSIDs, ACLs
+
+All schemas live under `schemas/` and are validated in CI.
+
+## GitOps workflow
+
+1. Edit configs in `config/`.
+2. Run locally:
+   - `make lint`
+   - `make validate`
+   - `make render`
+   - `make inventory`
+3. Commit and push.
+4. GitHub Actions runs full CI and auto-updates `INVENTORY.md`.
+5. Hosts periodically run `git-sync@<host>.timer`.
+6. `tools/orchestrate.py` renders templates and `tools/bash/*` apply changes.
+7. Only changed units are restarted (checksum-based).
+
+## Secrets
+
+- Bootstrap secrets stored with **SOPS** under `config/secrets/`.
+- Vault unsealed via `abhaile-vault-unseal.service`.
+- Runtime secrets served from Vault and rendered via Vault Agent templates.
+
+## Quadlets & containers
+
+- Quadlet files per service under `config/services/<name>/quadlets/`.
+- On apply, copied to `/etc/containers/systemd/<service>-<filename>` to avoid collisions.
+- `.volume`, `.image`, `.build`, `.container` files fully define container graph.
+- `[Install]` sections ensure services come back after power outage.
+
+## Inventory
+
+- `INVENTORY.md` is auto-generated from declared config.
+- Lists: Service, Host, VLAN, IP, Ports, Internal FQDN, Public FQDN, Notes.
+
+## Bootstrap
+
+Generate per-host bootstrap script:
+
+```bash
+make bootstrap-phobos
+make bootstrap-deimos
+````
+
+Use in curl|bash style on a fresh Debian host.
+
+## CI & Renovate
+
+* Pre-commit hooks enforce shellcheck, yamllint, Black, JSON/YAML validity.
+* GitHub Actions runs `make ci` on every push/PR.
+* Renovate keeps pinned dependencies (pre-commit hooks, etc.) fresh.
+
+```
+
+---
+
+## Putting it into practice – step-by-step “do this now”
+
+Here’s the concise execution checklist you can literally follow:
+
+1. **Create repo & skeleton**
+   - Make directories as in Phase 0.
+   - Commit.
+
+2. **Define hosts/services/mapping**
+   - Write `host.yaml` for `phobos` and `deimos` using your spec :contentReference[oaicite:3]{index=3}  
+   - Create service dirs for at least: `caddy-internal`, `coredns-filtered`, `coredns-clean`.
+   - Create `config/mapping/hosts-services.yaml`.
+
+3. **Add JSON Schemas**
+   - Create `host-schema.json`, `service-schema.json`, `mapping-schema.json`, `omada-schema.json`.
+   - Implement `tools/validate.py`.
+   - Run `python tools/validate.py` until clean.
+
+4. **Add templating & render path**
+   - Create common host templates (networkd, resolved, etc.) using `${VAR}` placeholders.
+   - Implement `tools/hashing.py` and `tools/orchestrate.py` from Phase 2.
+   - `sudo mkdir -p /var/lib/abhaile/rendered /var/lib/abhaile/state`.
+   - `python tools/orchestrate.py render --host phobos` and inspect outputs.
+
+5. **Implement host apply**
+   - Create `tools/bash/lib.sh` and `host_apply.sh`.
+   - Run `sudo tools/bash/host_apply.sh phobos`.
+   - Validate networkd/resolved configs are correctly deployed and services restarted once.
+
+6. **Implement quadlet apply with auto-prefix**
+   - Add a simple container service with quadlets.
+   - Implement `tools/bash/quadlet_apply.sh`.
+   - Render + apply and verify:
+     - files end up in `/etc/containers/systemd/<service>-<name>.container`
+     - `systemctl status` shows units restarted only on change.
+
+7. **Wire Caddy/CoreDNS builders**
+   - Implement minimal `caddy_build.py`, `coredns_build.py`.
+   - Add `caddy_apply.sh`, `coredns_apply.sh` with reload-on-change.
+   - Render + apply and validate syntax.
+
+8. **Add SOPS + Vault bootstrap**
+   - Initialize SOPS, encrypt `config/secrets/vault-unseal.sops.yaml`.
+   - Add `vault_unseal.sh` and `abhaile-vault-unseal.service`.
+   - Enable service on phobos and confirm Vault unseals itself on boot.
+
+9. **Add Omada YAML + stub API script**
+   - Capture current VLAN/SSID/ACL layout in `config/network/omada-site.yaml` so it matches your design.
+   - Build `omada_apply.py` at least for dry-run diffing.
+   - Add CI step to run `--dry-run`.
+
+10. **Add INVENTORY.md automation**
+    - Implement `inventory_gen.py`.
+    - Run manually and commit initial `INVENTORY.md`.
+    - Add CI step to regenerate and auto-commit when it changes.
+
+11. **Add Makefile, pre-commit, CI**
+    - Drop in Makefile and `.pre-commit-config.yaml`.
+    - Run `pre-commit install`.
+    - Add `.github/workflows/ci.yml` and tweak as needed.
+
+12. **Add Renovate**
+    - Add `renovate.json`.
+    - Enable Renovate on your repository.
+
+13. **Add bootstrap generator & git-sync units**
+    - Implement git-sync `service` + `timer`.
+    - Implement `bootstrap_gen.py`.
+    - `make bootstrap-phobos` / `bootstrap-deimos`.
+    - Use generated script on a test host (or VM) and confirm:
+      - base packages installed
+      - repo cloned
+      - git-sync timer enabled
+      - `orchestrate.py` run with `--apply`.
+
+14. **Polish README.md**
+    - Document repo layout and operational flow.
+    - Add “How to add a new service” section:
+      - create service dir + service.yaml
+      - add to mapping
+      - add templates
+      - run `make ci` locally
+      - open PR.
+
+If you’d like, next step we can zoom into **one full service** (e.g. internal Caddy or CoreDNS filtered) and I can draft its **full quadlets + config templates + service.yaml** wired into this GitOps flow so you have an end-to-end concrete example. 🔨🤖🔧
+```

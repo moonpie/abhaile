@@ -1,6 +1,0 @@
-[NetDev]
-Name=enp0s31f6.40
-Kind=vlan
-
-[VLAN]
-Id=40

@@ -1,0 +1,11 @@
+[Match]
+Name=enp0s31f6
+
+[Network]
+Address=172.20.20.10/24
+Gateway=172.20.20.1
+DNS=172.20.20.235 172.20.20.236
+Domains=abhaile.home.arpa
+UseDomains=yes
+VLAN=enp0s31f6.100
+IPVLAN=ipvlan-l2
