@@ -1,0 +1,23 @@
+[Unit]
+Description=HashiCorp Vault (Raft)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+EnvironmentFile=/srv/vault/vault.env
+Image={{ image }}
+Network={{ services[service_name].vlan }}.network
+PodmanArgs=--ip={{ services[service_name].address | strip_cidr }}
+Timezone=local
+{% for v in volume_lines   %}
+{{ v }}
+{% endfor %}
+Entrypoint=/bin/vault
+Exec=server -config=/vault/config/local.json
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

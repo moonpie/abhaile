@@ -1,0 +1,90 @@
+{
+	admin off
+	storage file_system {
+		root /data
+	}
+}
+
+(common_headers) {
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+	}
+}
+
+(tls_internal) {
+	tls internal
+}
+
+(authelia_forward_auth) {
+	forward_auth http://authelia.svc.abhaile.home.arpa:9091 {
+		uri /api/verify?rd=https://authelia.abhaile.home.arpa/
+		copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+	}
+}
+
+# ---------- CA download site ----------
+# After Caddy starts the first time, it will create its root at:
+#   /data/pki/authorities/local/root.crt
+ca.abhaile.home.arpa {
+	import common_headers
+	import tls_internal
+
+	root * /data/pki/authorities/local
+
+	# Provide a friendly filename
+	@rootcrt path /root.crt
+	handle @rootcrt {
+		try_files {path} /root.crt
+		file_server
+	}
+
+	# Also expose a stable alias path
+	handle /abhaile-ca.crt {
+		rewrite * /root.crt
+		file_server
+	}
+	file_server
+}
+
+test.abhaile.home.arpa {
+	import tls_internal
+	import common_headers
+
+	respond "internal caddy ok" 200
+}
+
+
+# ---------- Service Ingress Blocks ----------
+
+vault.abhaile.home.arpa {
+	import common_headers
+	import tls_internal
+	import authelia_forward_auth
+
+	reverse_proxy http://vault.svc.abhaile.home.arpa:8200
+}
+
+authelia.abhaile.home.arpa {
+	import tls_internal
+	import common_headers
+
+	reverse_proxy http://authelia.svc.abhaile.home.arpa:9091
+}
+
+omada.abhaile.home.arpa {
+	import tls_internal
+
+	reverse_proxy https://omada-controller.svc.abhaile.home.arpa:8043 {
+		transport http {
+			tls_server_name omada-controller.svc.abhaile.home.arpa
+		}
+	}
+}
+
+omada-controller.svc.abhaile.home.arpa {
+	import tls_internal
+	respond 204
+}

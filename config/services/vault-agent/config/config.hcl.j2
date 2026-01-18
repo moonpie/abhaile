@@ -1,0 +1,29 @@
+exit_after_auth = false
+pid_file = "/agent/run/agent.pid"
+
+vault {
+  address = "http://{{ config.vault_addr | strip_cidr }}:8200"
+}
+
+auto_auth {
+  method "token_file" {
+    config = {
+      token_file_path = "/agent/token"
+    }
+  }
+  sink "file" {
+    config = {
+      path = "/agent/run/vault-agent-token"
+      mode = 0600
+    }
+  }
+}
+
+# --- Service-collected templates ---
+{% for t in vault_agent_templates %}
+template {
+  source      = "{{ t.source }}"
+  destination = "{{ t.dest }}"
+  perms       = "{{ t.perms }}"
+}
+{% endfor %}

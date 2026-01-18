@@ -1,0 +1,25 @@
+[Unit]
+Description=Redis (sessions)
+Requires=abhaile-secrets-ready.service
+After=abhaile-secrets-ready.service
+
+[Container]
+Pod=authelia-app.pod
+Image=authelia-app-redis.image
+Timezone=local
+Volume=authelia-app-redis-data.volume:/data:rw
+Volume=host-certs.volume:/etc/ssl/certs:ro
+Volume=/srv/authelia/redis/config/redis.conf:/usr/local/etc/redis/redis.conf:rw
+Exec=redis-server /usr/local/etc/redis/redis.conf
+HealthCmd=["CMD-SHELL","redis-cli -a $$(awk '/requirepass/ {print $2}' /usr/local/etc/redis/redis.conf) -h 127.0.0.1 -p 6379 PING | grep -q PONG"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+CPUQuota=100%
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

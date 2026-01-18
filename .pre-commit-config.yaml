@@ -1,0 +1,117 @@
+repos:
+  # ===== Formatting & Basics =====
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim Trailing Whitespace
+      - id: end-of-file-fixer
+        name: Fix End of Files
+      - id: check-yaml
+        name: Check YAML Syntax
+      - id: check-json
+        name: Check JSON Syntax
+      - id: mixed-line-ending
+        name: Mixed Line Endings
+      - id: check-merge-conflict
+        name: Check Merge Conflicts
+  # ===== YAML Lint =====
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        name: Yamllint
+  # Python-based Markdown formatter (no Node.js required)
+  # ===== Markdown Formatting =====
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 1.0.0
+    hooks:
+      - id: mdformat
+        name: Format Markdown (mdformat)
+        files: \.md$
+        # additional_dependencies:
+        #   - mdformat-gfm
+        #   - mdformat-frontmatter
+        #   - mdformat-footnote
+  # Python-based Markdown linter (PyMarkdown)
+  # ===== Markdown Lint =====
+  - repo: https://github.com/jackdewinter/pymarkdown
+    rev: v0.9.34
+    hooks:
+      - id: pymarkdown
+        name: PyMarkdown Lint
+        args: ["-d", "md013", "scan", "."]
+        files: \.md$
+        # additional_dependencies:
+        #   - pymarkdownlnt
+  # ===== Schema Validation =====
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.36.0
+    hooks:
+      - id: check-jsonschema
+        name: Validate Mapping.yaml Against Schema
+        files: ^config/mapping\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/mapping.schema.json"]
+      - id: check-jsonschema
+        name: Validate Network.yaml Against Schema
+        files: ^config/network\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/network.schema.json"]
+      - id: check-jsonschema
+        name: Validate Service.yaml Files Against Schema
+        files: ^config/services/.*/service\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/service.schema.json"]
+  # ===== Python Lint/Format =====
+  - repo: https://github.com/charliermarsh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      - id: ruff
+        name: Ruff (Python Linter/Fix)
+        args: [--fix]
+  - repo: https://github.com/psf/black
+    rev: 25.12.0
+    hooks:
+      - id: black
+        name: Black (Python Formatter)
+  # ===== Templates =====
+  - repo: https://github.com/aristanetworks/j2lint.git
+    rev: v1.2.0
+    hooks:
+      - id: j2lint
+        name: Jinja2 Lint
+        files: ".*\\.j2$"
+  # ===== Shell =====
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        name: Shellcheck (Shell Lint)
+        files: ^(tools/|config/|systemd/).*\.(sh|bash)$
+        args: ["--severity=warning", "--exclude=SC1091"]
+  # ===== Secrets =====
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+        name: Gitleaks (Detect Hardcoded Secrets)
+        entry: gitleaks git --pre-commit --redact --staged --verbose
+        language: golang
+        pass_filenames: false
+
+  # ===== Local Security Pattern Checks =====
+  - repo: local
+    hooks:
+      - id: security-pattern-checks
+        name: Security Pattern Checks (local)
+        language: system
+        pass_filenames: false
+        always_run: true
+        entry: tools/pre-commit/security_checks.sh
+      - id: validate-bootstrap-paths
+        name: Validate Bootstrap Paths
+        language: system
+        pass_filenames: false
+        files: (tools/paths\.ini|tools/bootstrap/bootstrap\.sh)
+        entry: tools/pre-commit/validate_bootstrap_paths.sh

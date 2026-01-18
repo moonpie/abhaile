@@ -1,0 +1,34 @@
+---
+# Common software requirements for all hosts
+# Flat lists keep merging rules simple; additional steps live under downloads/builds/commands.
+
+packages:
+  - podman
+  - crun
+  - vim
+  - git
+  - vlan
+  - curl
+  - systemd-resolved
+  - lm-sensors
+  - sudo
+  - unattended-upgrades
+  - iperf
+  - iperf3
+  - chrony
+  - unzip
+  - age
+  - jq
+
+
+downloads:
+  - sops
+
+builds: []
+
+commands:
+  - unattended-upgrades
+  - kernel-modules
+  - systemd-networkd
+  - systemd-resolved
+  - netavark-dhcp-proxy

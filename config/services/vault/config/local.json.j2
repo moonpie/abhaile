@@ -1,0 +1,17 @@
+{
+  "ui": true,
+  "disable_mlock": true,
+  "listener": {
+    "tcp": {
+      "address": "{{ config.listener_address | strip_cidr }}:8200",
+      "tls_disable": 1
+    }
+  },
+  "storage": {
+    "raft": {
+      "path": "/vault/data"
+    }
+  },
+  "api_addr": "https://{{ config.api_addr | strip_cidr }}:8200",
+  "cluster_addr": "http://{{ config.cluster_addr | strip_cidr }}:8201"
+}

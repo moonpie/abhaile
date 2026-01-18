@@ -1,0 +1,11 @@
+# Generated sudoers configuration
+# This file is managed by the orchestrator - do not edit manually
+# Place in /etc/sudoers.d/abhaile with mode 0440
+
+# Defaults for all users
+Defaults use_pty
+Defaults logfile=/var/log/sudo.log
+
+# abhaile
+abhaile  ALL=(ALL) NOPASSWD:ALL
+# Abhaile system account - unrestricted access

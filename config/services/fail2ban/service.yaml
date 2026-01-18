@@ -1,0 +1,4 @@
+name: fail2ban
+type: host
+mode: ''
+network: host

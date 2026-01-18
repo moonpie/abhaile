@@ -1,0 +1,6 @@
+authelia.abhaile.home.arpa {
+	import tls_internal
+	import common_headers
+
+	reverse_proxy http://authelia.svc.abhaile.home.arpa:9091
+}

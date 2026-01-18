@@ -1,0 +1,24 @@
+users:
+  abhaile:
+    uid: 1001
+    primary_group: abhaile
+    home: /home/abhaile
+    shell: /bin/bash
+    description: Abhaile service account
+    ssh_authorized_keys:
+    - []
+    additional_groups:
+    - sudo
+    - apex
+groups:
+  abhaile:
+    gid: 1001
+  apex:
+    gid: 1002
+  sudo:
+    gid: 27
+sudoers:
+- name: abhaile
+  rules:
+  - abhaile  ALL=(ALL) NOPASSWD:ALL
+  - '# Abhaile system account - unrestricted access'

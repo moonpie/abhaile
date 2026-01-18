@@ -1,0 +1,24 @@
+name: caddy-internal
+type: container
+mode: rootful
+network: ipvlan-l2
+ingress:
+  internal:
+    - base: caddy-internal/config/Caddyfile
+      destination: /srv/caddy/internal/Caddyfile
+container:
+  named_volumes:
+    - name: config
+      host: /srv/caddy/internal/config
+      mount: /config
+    - name: data
+      host: /srv/caddy/internal/data
+      mount: /data
+    - name: host-certs
+      host: /etc/ssl/certs
+      mount: /etc/ssl/certs
+      mode: ro
+      shared: true
+  mounted_files:
+    - host: /srv/caddy/internal/Caddyfile
+      mount: /etc/caddy/Caddyfile

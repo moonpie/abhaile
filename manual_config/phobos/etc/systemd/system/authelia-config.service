@@ -1,5 +1,0 @@
-[Unit]
-Description=Restart Authelia after configuration change
-[Service]
-Type=oneshot
-ExecStart=systemctl restart authelia-app-authelia.service

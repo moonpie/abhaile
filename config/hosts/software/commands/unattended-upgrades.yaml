@@ -1,0 +1,6 @@
+---
+name: "Enable unattended upgrades"
+description: "Configure Debian to automatically apply security updates"
+commands:
+  - 'echo "unattended-upgrades unattended-upgrades/enable_auto_updates boolean true" | sudo debconf-set-selections'
+  - 'sudo dpkg-reconfigure -f noninteractive unattended-upgrades'

@@ -1,0 +1,15 @@
+---
+# Phobos-specific software additions
+
+packages:
+  - ddclient
+
+downloads: []
+
+builds:
+  - gasket-dkms
+
+commands:
+  - ddclient
+  - coral-tpu-modules
+  - coral-tpu-udev

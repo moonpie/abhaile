@@ -1,0 +1,23 @@
+[Unit]
+Description=TP-Link Omada Controller
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+EnvironmentFile=/etc/omada-controller/omada-controller.env
+Image={{ image }}
+Network={{ services[service_name].vlan }}.network
+PodmanArgs=--ip={{ services[service_name].address | strip_cidr }}
+StopTimeout=60
+Timezone=local
+Ulimit=nofile=4096:8192
+{% for v in volume_lines   %}
+{{ v }}
+{% endfor %}
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,59 @@
+{
+	admin off
+	storage file_system {
+		root /data
+	}
+}
+
+(common_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+	}
+}
+
+(dns01_desec) {
+	tls {
+		dns desec {
+			token {env.DESEC_TOKEN}
+		}
+		# Use deSEC's nameservers during ACME DNS-01 checks
+		resolvers ns1.desec.io ns2.desec.org
+		propagation_delay 180s
+		propagation_timeout 600s
+	}
+}
+
+# --- DMZ Authelia SSO Snippet ---
+# Uses central Authelia at auth.abhaile.dedyn.io (shared cookie scope)
+# Usage: import auth_dmz
+#(auth_dmz) {
+#	forward_auth https://auth.abhaile.dedyn.io {
+#		uri /api/verify?rd=https://auth.abhaile.dedyn.io/
+#		copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+#	}
+#}
+
+:80 {
+#	bind 172.20.100.200
+	redir https://{host}{uri} 308
+}
+
+# Test host: proves DNS-01 + TLS + routing
+test.abhaile.dedyn.io {
+#	bind 172.20.100.200
+	import common_headers
+	import dns01_desec
+	respond "dmz caddy ok" 200
+}
+
+# --- Default wildcard posture (closed-by-default) ---
+*.abhaile.dedyn.io {
+#	bind 172.20.100.200
+	import common_headers
+	import dns01_desec
+	respond "Not Found" 404
+}

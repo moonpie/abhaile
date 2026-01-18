@@ -1,0 +1,23 @@
+# Bind to specific IP
+bindaddress {{ config.bind_ip }}
+
+# External sources
+pool pool.ntp.org iburst
+pool time.google.com iburst
+
+# Local LAN allowance
+allow 172.20.0.0/16
+
+# Local clock fallback
+local stratum {{ config.stratum }}
+
+# Peer with chrony-a
+peer {{ config.peer_ip }} iburst
+
+# Step on large initial offset
+makestep 1.0 3
+rtcsync
+
+# Logging
+logdir /var/log/chrony
+log measurements statistics tracking

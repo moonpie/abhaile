@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch CoreDNS zone files for changes
+Documentation=https://coredns.io
+
+[Path]
+PathModified=/etc/coredns/zones/
+Unit=coredns-zones.service
+
+[Install]
+WantedBy=multi-user.target

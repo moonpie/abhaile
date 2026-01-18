@@ -1,0 +1,4 @@
+name: netbox
+type: pod
+mode: rootful
+network: ipvlan-l2

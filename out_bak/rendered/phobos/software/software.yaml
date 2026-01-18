@@ -1,0 +1,31 @@
+packages:
+- podman
+- crun
+- vim
+- git
+- vlan
+- curl
+- systemd-resolved
+- lm-sensors
+- sudo
+- unattended-upgrades
+- iperf
+- iperf3
+- chrony
+- unzip
+- age
+- jq
+- ddclient
+downloads:
+- sops
+builds:
+- gasket-dkms
+commands:
+- unattended-upgrades
+- kernel-modules
+- systemd-networkd
+- systemd-resolved
+- netavark-dhcp-proxy
+- ddclient
+- coral-tpu-modules
+- coral-tpu-udev

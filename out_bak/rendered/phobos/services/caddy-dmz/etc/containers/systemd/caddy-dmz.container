@@ -1,0 +1,23 @@
+[Unit]
+Description=Caddy (DMZ)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+DNS=172.20.20.236
+EnvironmentFile=/etc/caddy/dns.env
+Image=caddy-dmz.build
+Network=dmz.network
+PodmanArgs=--ip=172.20.100.200
+Timezone=local
+Volume=caddy-dmz-config.volume:/config:rw
+Volume=caddy-dmz-data.volume:/data:rw
+Volume=host-certs.volume:/etc/ssl/certs:ro
+Volume=/srv/caddy/dmz/Caddyfile:/etc/caddy/Caddyfile:rw
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

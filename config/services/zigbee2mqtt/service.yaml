@@ -1,0 +1,4 @@
+name: zigbee2mqtt
+type: container
+mode: rootful
+network: ipvlan-l2

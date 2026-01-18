@@ -1,0 +1,27 @@
+$ORIGIN abhaile.home.arpa.
+$TTL 300
+
+@   IN SOA ns1.abhaile.home.arpa. hostmaster.abhaile.home.arpa. (
+        2026011200
+        7200       ; refresh
+        3600       ; retry
+        1209600    ; expire
+        3600 )     ; minimum
+    IN NS ns1.abhaile.home.arpa.
+    IN NS ns2.abhaile.home.arpa.
+
+
+    phobos    IN CNAME phobos.svc.abhaile.home.arpa.
+    deimos    IN CNAME deimos.svc.abhaile.home.arpa.
+    ntp-a    IN CNAME chrony-a.svc.abhaile.home.arpa.
+    ns1    IN CNAME coredns-filtered.svc.abhaile.home.arpa.
+    blocky    IN CNAME blocky.svc.abhaile.home.arpa.
+    caddy    IN CNAME caddy-internal.svc.abhaile.home.arpa.
+    ca    IN CNAME caddy.abhaile.home.arpa.
+    test    IN CNAME caddy.abhaile.home.arpa.
+    vault    IN CNAME caddy.abhaile.home.arpa.
+    authelia    IN CNAME caddy.abhaile.home.arpa.
+    login    IN CNAME authelia.abhaile.home.arpa.
+    omada    IN CNAME caddy.abhaile.home.arpa.
+    ntp-b    IN CNAME chrony-b.svc.abhaile.home.arpa.
+    ns2    IN CNAME coredns-clean.svc.abhaile.home.arpa.

@@ -1,0 +1,4 @@
+name: promtail
+type: host
+mode: ''
+network: host

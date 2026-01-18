@@ -1,5 +1,0 @@
-As a technical writer and document editor, please review this design spec for clarity, structure, flow and unnecessary duplications.
-
-Can you edit and return a revised version of the document with your review comments addressed
-
-Feel free to restructure the document, as long as the de-duplicated content is maintained

@@ -1,0 +1,9 @@
+omada.abhaile.home.arpa {
+	import tls_internal
+
+	reverse_proxy https://omada-controller.svc.abhaile.home.arpa:8043 {
+		transport http {
+			tls_server_name omada-controller.svc.abhaile.home.arpa
+		}
+	}
+}

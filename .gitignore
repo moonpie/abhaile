@@ -1,0 +1,33 @@
+# Python cache and coverage
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+.coverage.*
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build and render artifacts
+out/
+tmp/
+
+# Secrets - only commit encrypted .sops.yaml files
+secrets/*.env
+!secrets/*.sops.env
+secrets/*.yaml
+!secrets/*.sops.yaml
+!secrets/*.example
+!secrets/README.md
+
+# IDE/editor junk
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

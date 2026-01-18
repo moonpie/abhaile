@@ -1,0 +1,16 @@
+{% set interface_name = namespace(value='') %}
+{% for iface_name, iface_def in hosts[host_name].interfaces.items() if not interface_name.value %}
+{%     if iface_def.vlan == vlan_name and not iface_name.startswith('ipvlan-') %}
+{%         set interface_name.value = iface_name %}
+{%     endif %}
+{% endfor %}
+[Unit]
+Description=podman ipvlan-l2 network for {{ vlan_name | capitalize }} VLAN
+
+[Network]
+Driver=ipvlan
+PodmanArgs=--interface-name {{ interface_name.value }}
+Subnet={{ vlans[vlan_name].cidr }}
+Gateway={{ vlans[vlan_name].gateway }}
+IPRange={{ vlans[vlan_name].ipvlanl2_range }}
+Options=mode=l2

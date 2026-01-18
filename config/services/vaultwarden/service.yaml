@@ -1,0 +1,4 @@
+name: vaultwarden
+type: container
+mode: rootful
+network: ipvlan-l2

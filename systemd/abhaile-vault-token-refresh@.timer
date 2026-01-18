@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic Vault-Agent AppRole token refresh for %i
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=12h
+RandomizedDelaySec=600
+Persistent=true
+Unit=abhaile-vault-token-refresh@%i.service
+
+[Install]
+WantedBy=timers.target

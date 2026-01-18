@@ -1,0 +1,24 @@
+$ORIGIN 20.20.172.in-addr.arpa.
+$TTL 300
+
+@   IN SOA ns1.abhaile.home.arpa. hostmaster.abhaile.home.arpa. (
+        2026011200
+        7200       ; refresh
+        3600       ; retry
+        1209600    ; expire
+        3600 )     ; minimum
+    IN NS ns1.abhaile.home.arpa.
+    IN NS ns2.abhaile.home.arpa.
+
+
+    10    IN PTR phobos.abhaile.home.arpa.
+    11    IN PTR deimos.abhaile.home.arpa.
+    237    IN PTR chrony-a.svc.abhaile.home.arpa.
+    235    IN PTR coredns-filtered.svc.abhaile.home.arpa.
+    234    IN PTR blocky.svc.abhaile.home.arpa.
+    200    IN PTR caddy-internal.svc.abhaile.home.arpa.
+    204    IN PTR vault.svc.abhaile.home.arpa.
+    201    IN PTR authelia.svc.abhaile.home.arpa.
+    220    IN PTR omada-controller.svc.abhaile.home.arpa.
+    238    IN PTR chrony-b.svc.abhaile.home.arpa.
+    236    IN PTR coredns-clean.svc.abhaile.home.arpa.

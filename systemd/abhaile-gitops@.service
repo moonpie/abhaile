@@ -1,0 +1,17 @@
+[Unit]
+Description=Abhaile GitOps runner for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=abhaile
+Group=abhaile
+WorkingDirectory=/opt/abhaile
+EnvironmentFile=/etc/abhaile/gitops/.env
+ExecStartPre=/usr/bin/rm -f /var/lib/abhaile/rendered/.apply_ready
+ExecStart=/opt/abhaile/tools/gitops/gitops_runner.sh %i
+ExecStartPost=/usr/bin/touch /var/lib/abhaile/rendered/.apply_ready
+
+[Install]
+WantedBy=multi-user.target

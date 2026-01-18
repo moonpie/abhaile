@@ -1,0 +1,11 @@
+[Match]
+Name=enp0s31f6
+
+[Network]
+Address={{ hosts.phobos.interfaces['enp0s31f6'].address }}
+Gateway={{ vlans.services.gateway }}
+DNS={{ services['coredns-filtered'].address }} {{ services['coredns-clean'].address }}
+Domains=abhaile.home.arpa
+UseDomains=yes
+VLAN=enp0s31f6.100
+IPVLAN=ipvlan-l2

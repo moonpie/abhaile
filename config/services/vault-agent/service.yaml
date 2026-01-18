@@ -1,0 +1,43 @@
+name: vault-agent
+type: container
+mode: rootless
+rootless_user: abhaile
+network: host
+config:
+  - source:
+      template: vault-agent/config/config.hcl.j2
+      variables:
+        vault_addr: "%%services.vault.address%%"
+    destination: /srv/vault/agent/config.hcl
+  - source: vault-agent/systemd/abhaile-secrets-ready.service
+    destination: /etc/systemd/system/abhaile-secrets-ready.service
+  - source: vault-agent/systemd/abhaile-secrets-ready.path
+    destination: /etc/systemd/system/abhaile-secrets-ready.path
+
+vault_agent:
+  templates:
+    - source: vault-agent/templates/ready.ctmpl
+      out: ".ready"
+      perms: "0640"
+
+container:
+  named_volumes:
+    - name: templates
+      host: /srv/vault/agent/templates
+      mount: /agent/templates
+    - name: run
+      host: /srv/vault/agent/run
+      mount: /agent/run
+    - name: out
+      host: /srv/vault/agent/out
+      mount: /agent/out
+    - name: host-certs
+      host: /etc/ssl/certs
+      mount: /etc/ssl/certs
+      mode: ro
+      shared: true
+  mounted_files:
+    - host: /home/abhaile/.config/vault-agent/token
+      mount: /agent/token
+    - host: /srv/vault/agent/config.hcl
+      mount: /agent/config.hcl

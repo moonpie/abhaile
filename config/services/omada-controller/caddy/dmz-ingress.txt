@@ -1,0 +1,11 @@
+omada.abhaile.dedyn.io {
+#	bind 172.20.100.200
+	import dns01_desec
+
+	reverse_proxy https://omada.abhaile.home.arpa {
+		transport http {
+			tls_server_name omada.abhaile.home.arpa
+		}
+		header_up Host {upstream_hostport}
+	}
+}

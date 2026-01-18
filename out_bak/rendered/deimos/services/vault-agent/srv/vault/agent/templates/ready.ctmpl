@@ -1,0 +1,1 @@
+ready={{ with secret "secret/data/health" }}ok{{ end }}

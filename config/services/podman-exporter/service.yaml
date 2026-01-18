@@ -1,0 +1,4 @@
+name: podman-exporter
+type: host
+mode: ''
+network: host

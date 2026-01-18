@@ -1,0 +1,20 @@
+[Unit]
+Description=Caddy (Internal)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image={{ image }}
+Network={{ services[service_name].vlan }}.network
+PodmanArgs=--ip={{ services[service_name].address | strip_cidr }}
+Timezone=local
+{% for v in volume_lines   %}
+{{ v }}
+{% endfor %}
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

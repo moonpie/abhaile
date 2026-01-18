@@ -1,0 +1,21 @@
+[Unit]
+Description=Vault Agent (rootless, templates)
+After=network-online.target abhaile-vault-unseal.service
+Wants=network-online.target abhaile-vault-unseal.service
+
+[Container]
+Image={{ image }}
+Network=host
+Timezone=local
+{% for v in volume_lines   %}
+{{ v }}
+{% endfor %}
+Entrypoint=/bin/vault
+Exec=agent -config=/agent/config.hcl
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

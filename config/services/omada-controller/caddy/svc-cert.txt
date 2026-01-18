@@ -1,0 +1,4 @@
+omada-controller.svc.abhaile.home.arpa {
+	import tls_internal
+	respond 204
+}

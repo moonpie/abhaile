@@ -1,0 +1,30 @@
+name: vault
+type: container
+mode: rootful
+network: ipvlan-l2
+ingress:
+  internal:
+    - block: vault/caddy/internal-ingress.txt
+config:
+  - source:
+      template: vault/config/local.json.j2
+      variables:
+        listener_address: "%%services.vault.address%%"
+        cluster_addr: "%%services.vault.address%%"
+        api_addr: "%%services.vault.address%%"
+    destination: /srv/vault/config/local.json
+  - source: vault/config/vault.env
+    destination: /srv/vault/vault.env
+container:
+  named_volumes:
+    - name: config
+      host: /srv/vault/config
+      mount: /vault/config
+    - name: data
+      host: /srv/vault/data
+      mount: /vault/data
+    - name: host-certs
+      host: /etc/ssl/certs
+      mount: /etc/ssl/certs
+      mode: ro
+      shared: true

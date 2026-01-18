@@ -1,0 +1,19 @@
+[Unit]
+Description=Blocky DNS Filter
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=blocky.image
+Network=services.network
+PodmanArgs=--ip=172.20.20.234
+Timezone=local
+Volume=host-certs.volume:/etc/ssl/certs:ro
+Volume=/srv/blocky/config.yml:/app/config.yml:ro
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

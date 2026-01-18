@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --strict-markers"
+markers = [
+    "unit: Unit tests (fast, no I/O)",
+    "integration: Integration tests (subprocess, file I/O)",
+    "e2e: End-to-end tests (full workflows)",
+    "performance: Performance and latency tests",
+    "slow: Slow-running tests (>5s)",
+]

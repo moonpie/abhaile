@@ -1,0 +1,8 @@
+---
+# Deimos-specific user configuration
+# Supplementary groups for abhaile user (extends common base config)
+
+users:
+  abhaile:
+    additional_groups:
+      - sudo

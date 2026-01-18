@@ -1,0 +1,11 @@
+[Unit]
+Description=Authelia + Redis Pod (shared netns)
+After=network-online.target
+Wants=network-online.target
+
+[Pod]
+Network=services.network
+IP=172.20.20.201
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,24 @@
+[Unit]
+Description=Vault Agent (rootless, templates)
+After=network-online.target abhaile-vault-unseal.service
+Wants=network-online.target abhaile-vault-unseal.service
+
+[Container]
+Image=vault-agent.image
+Network=host
+Timezone=local
+Volume=vault-agent-templates.volume:/agent/templates:rw
+Volume=vault-agent-run.volume:/agent/run:rw
+Volume=vault-agent-out.volume:/agent/out:rw
+Volume=host-certs.volume:/etc/ssl/certs:ro
+Volume=/home/abhaile/.config/vault-agent/token:/agent/token:rw
+Volume=/srv/vault/agent/config.hcl:/agent/config.hcl:rw
+Entrypoint=/bin/vault
+Exec=agent -config=/agent/config.hcl
+
+[Service]
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target

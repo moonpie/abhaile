@@ -1,0 +1,16 @@
+abhaile:
+  - phobos:
+      - ddclient
+      - chrony-a
+      - coredns-filtered
+      - blocky
+      - caddy-internal
+      - caddy-dmz
+      - vault
+      - vault-agent
+      - authelia
+      - omada-controller
+  - deimos:
+      - chrony-b
+      - coredns-clean
+      - vault-agent

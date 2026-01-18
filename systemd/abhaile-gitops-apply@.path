@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for .apply_ready flag and trigger apply
+
+[Path]
+PathExists=/var/lib/abhaile/rendered/.apply_ready
+Unit=abhaile-gitops-apply@%i.service
+
+[Install]
+WantedBy=paths.target

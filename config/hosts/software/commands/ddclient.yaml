@@ -1,0 +1,6 @@
+---
+name: "Enable ddclient"
+description: "Ensure ddclient is enabled and running so dynamic DNS updates occur"
+commands:
+  - 'sudo systemctl enable ddclient.service'
+  - 'sudo systemctl start ddclient.service'

@@ -1,0 +1,20 @@
+name: coredns-omada
+
+config:
+  - source: coredns-omada/build/Containerfile
+    destination: /srv/build/coredns-omada/Containerfile
+  - source: coredns-omada/quadlets/build.build
+    destination: /etc/containers/systemd/coredns-omada.build
+  - source: coredns-omada/systemd/install.service
+    destination: /etc/systemd/system/coredns-omada-install.service
+  - source: coredns-omada/systemd/service.service
+    destination: /etc/systemd/system/coredns.service
+  - source: coredns-omada/systemd/coredns-omada-env.service
+    destination: /etc/systemd/system/coredns-omada-env.service
+  - source: coredns-omada/systemd/coredns-omada-env.path
+    destination: /etc/systemd/system/coredns-omada-env.path
+vault_agent:
+  templates:
+    - source: "coredns-omada/templates/coredns-omada.env.ctmpl"
+      out: "coredns-omada.env"
+      perms: "0640"

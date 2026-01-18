@@ -1,0 +1,4 @@
+name: home-assistant
+type: container
+mode: rootful
+network: ipvlan-l2

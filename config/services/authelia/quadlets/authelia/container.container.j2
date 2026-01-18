@@ -1,0 +1,24 @@
+[Unit]
+Description=Authelia (SSO)
+After=abhaile-secrets-ready.service authelia-app-redis.service
+Requires=abhaile-secrets-ready.service authelia-app-redis.service
+
+[Container]
+Pod={{ pod }}
+Image={{ image }}
+Timezone=local
+{% for v in volume_lines   %}
+{{ v }}
+{% endfor %}
+HealthCmd=["CMD-SHELL","wget -qO- http://127.0.0.1:9091/api/health | grep -q OK"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+
+[Service]
+Restart=on-failure
+CPUQuota=100%
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

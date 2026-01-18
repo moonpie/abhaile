@@ -1,0 +1,4 @@
+name: jellyfin
+type: container
+mode: rootful
+network: ipvlan-l2

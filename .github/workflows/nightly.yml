@@ -1,0 +1,82 @@
+name: Nightly Checks
+
+on:
+  schedule:
+    - cron: "0 3 * * *"  # 03:00 UTC nightly
+  workflow_dispatch:
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Trivy CLI
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg lsb-release
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo gpg --dearmor -o /usr/share/keyrings/trivy.gpg
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb stable main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
+      - name: Scan container images referenced by quadlets
+        run: |
+          set -euo pipefail
+          echo "Scanning container images from quadlet manifests..."
+          maps=$(grep -rh "^Image=" config/services/*/quadlets/*.image || true)
+          if [ -z "$maps" ]; then
+            echo "No quadlet image maps found; skipping image scan."
+            exit 0
+          fi
+          echo "$maps" | cut -d'=' -f2 | sort -u | while read -r image; do
+            [ -z "$image" ] && continue
+            echo "Pulling $image..."
+            docker pull "$image" || true
+            echo "Scanning $image with Trivy (HIGH,CRITICAL)..."
+            trivy image --severity HIGH,CRITICAL --no-progress "$image" || true
+          done
+
+      - name: Generate inventory
+        run: |
+          python tools/inventory/generate_inventory.py
+
+      - name: Full test suite (includes slow)
+        env:
+          SKIP_DESEC: '1'
+        run: |
+          pytest -q
+
+      - name: Upload inventory artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: inventory
+          path: INVENTORY.md
+          retention-days: 30
+
+      - name: E2E smoke (optional)
+        if: ${{ secrets.E2E_SMOKE == '1' }}
+        env:
+          E2E_SMOKE: '1'
+          SKIP_DESEC: '1'
+        run: |
+          echo "Running optional E2E smoke tests..."
+          pytest tests/e2e/ -q
+
+      - name: Live deSEC integration tests (optional)
+        if: ${{ secrets.DESEC_LIVE == '1' && secrets.DESEC_TOKEN != '' }}
+        env:
+          DESEC_TOKEN: ${{ secrets.DESEC_TOKEN }}
+        run: |
+          echo "Running live deSEC integration tests..."
+          pytest tests/integration/test_dns_cli.py -q

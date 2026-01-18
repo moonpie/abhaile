@@ -1,4 +1,0 @@
-[Unit]
-Description=Vault Ready (unsealed)
-Requires=vault.service abhaile-vault-unseal.service
-After=vault.service abhaile-vault-unseal.service

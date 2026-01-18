@@ -1,0 +1,146 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Abhaile Service Configuration",
+  "description": "Service metadata including type, network mode, templates, and container settings",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["host", "container", "pod"]
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["service-32", "ipvlan-l2", "rootful", "rootless", ""]
+    },
+    "network": {
+      "type": "string"
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "internal": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "block": {
+                    "type": "string"
+                  }
+                },
+                "required": ["block"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "base": {
+                    "type": "string"
+                  },
+                  "destination": {
+                    "type": "string"
+                  }
+                },
+                "required": ["base", "destination"]
+              }
+            ]
+          }
+        },
+        "dmz": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "block": {
+                    "type": "string"
+                  }
+                },
+                "required": ["block"]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "base": {
+                    "type": "string"
+                  },
+                  "destination": {
+                    "type": "string"
+                  }
+                },
+                "required": ["base", "destination"]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "config": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "template": {
+                    "type": "string"
+                  },
+                  "variables": {
+                    "type": "object"
+                  }
+                },
+                "required": ["template"]
+              }
+            ]
+          },
+          "destination": {
+            "type": "string"
+          }
+        },
+        "required": ["source", "destination"]
+      }
+    },
+    "container": {
+      "type": "object",
+      "properties": {
+        "named_volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "mount": {
+                "type": "string"
+              }
+            },
+            "required": ["name", "host", "mount"]
+          }
+        },
+        "anonymous_volumes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "required": ["name"],
+  "additionalProperties": true
+}

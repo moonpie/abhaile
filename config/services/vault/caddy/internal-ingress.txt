@@ -1,0 +1,7 @@
+vault.abhaile.home.arpa {
+	import common_headers
+	import tls_internal
+	import authelia_forward_auth
+
+	reverse_proxy http://vault.svc.abhaile.home.arpa:8200
+}
