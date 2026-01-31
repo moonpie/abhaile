@@ -1,145 +1,98 @@
 # Abhaile
 
-Abhaile is a GitOps-managed home lab for two Debian hosts (`phobos`, `deimos`): network configuration, host services, and containerized apps. The repo renders systemd-networkd configs, Podman quadlets, DNS zones, and Vault templates, then applies them via automated systemd timers.
+Abhaile is a GitOps-managed homelab for two Debian hosts (phobos and deimos). The repo defines the desired state for host networking, system services, and containerized apps, then renders host-specific artifacts and applies them in a controlled, repeatable way.
 
-## Architecture Overview
+## What It Manages
 
-Abhaile implements **declarative infrastructure as code** for a home lab with:
+- Host networking via systemd-networkd, including VLANs and service addressing
+- Podman-based services (quadlets) with deterministic network identities
+- DNS zones and records for internal and external resolution
+- Secrets templates and runtime wiring (bootstrap vs runtime)
 
-- **Two Debian hosts** (`phobos`, `deimos`) running systemd + Podman
-- **GitOps automation** via systemd timers (unprivileged render phase, privileged apply phase)
-- **Deterministic networking** with per-service `/32` addresses via ipvlan-l2
-- **Split-horizon DNS** (filtered and clean CoreDNS instances)
-- **Secrets management** via SOPS (bootstrap) and Vault (runtime)
-- **Omada network fabric** with VLAN segmentation and default-deny ACLs
+## Source of Truth
 
-### How It Works
+All intent lives in `config/`:
 
-```mermaid
-graph TD
-    A[config/ YAML<br/>Source of Truth] --> B[cli.py<br/>Generate Configs]
-    B --> C[out/rendered/<br/>Host Configs]
-    B --> D[out/state/<br/>Drift Tracking]
-    C --> E[apply.sh<br/>Validate + Deploy]
-    E --> F[/etc/systemd/network/<br/>Live Host State]
-    E --> G[Reload Services<br/>systemd-networkd, Podman]
+- `config/mapping.yaml` assigns services to hosts
+- `config/network.yaml` defines VLANs, addresses, and DNS
+- `config/services/<service>/service.yaml` defines per-service behavior
 
-    H[GitOps Timer<br/>Every 5 minutes] --> B
-    B --> I[.apply_ready flag]
-    I --> J[GitOps Apply Path<br/>Privileged]
-    J --> E
-```
+## High-Level Flow
 
-**Key principles:**
+1. Render: generate host-specific configs and templates from `config/`.
+1. Apply: validate, stage, and apply changes with drift detection.
 
-1. **Mapping-driven:** `config/mapping.yaml` determines which services run on which hosts
-1. **Always renders all hosts:** Full context needed for Caddy ingress, DNS zones, deSEC plans
-1. **Atomic deployment:** Validate → stage → backup → apply → verify
-1. **Drift detection:** SHA256 state tracking across 6 config categories
-1. **Privilege boundary:** Unprivileged render (abhaile user) + privileged apply (root)
+## Reconciliation
 
-## Quick Start
+Abhaile follows a reconciliation pattern: the desired state lives in git, the current state is read and compared for drift, and apply actions are idempotent. This keeps hosts converging toward the declared intent without relying on manual changes.
 
-**Bring up a new host:**
+## Render Pipeline Sections
 
-```bash
-# Automated enrollment (requires Age key and deploy key)
-curl -fsSL https://raw.githubusercontent.com/moonpie/abhaile/main/tools/bootstrap/bootstrap.sh | \
-  sudo bash -s -- <host>
-```
+Render should be structured into clear functions:
 
-See [docs/QUICKSTART.md](docs/QUICKSTART.md) for detailed walkthrough.
+- Host networking (systemd-networkd, VLANs, ipvlan-l2)
+- Host packaging and base system settings
+- Host users and access controls
+- Service quadlets for containers (& pods) (rootful & rootless)
+- Service-specific configs (DNS, ingress, secrets, app configs)
 
-**Render configurations locally:**
+## Render Stage Interfaces
 
-```bash
-make install       # Setup venv and dependencies
-make render        # Render all hosts
-make generate-inventory  # Render + generate inventory
-```
+- Networking: inputs `config/network.yaml`, outputs networkd units/drop-ins
+- Packaging: inputs host/software config, outputs package/command directives
+- Users: inputs host/users config, outputs user/group and SSH config
+- Quadlets: inputs per-service config, outputs network/volume/image/build/container/pod units
+- Service configs: inputs per-service config and network data, outputs DNS, ingress, and templates
 
-**Run tests and validation:**
+## Expected Artifacts
 
-```bash
-make test          # Run pytest suite
-make lint          # Run pre-commit hooks
-```
+Render should produce, per host:
 
-## Documentation
+- systemd-networkd units and drop-ins (interfaces, VLANs, ipvlan-l2)
+- Host packaging and base system configuration (packages, kernel modules, sysctl, etc.)
+- Host users and access configuration (accounts, groups, sudo, SSH)
+- Podman quadlets (ass applicable)
+  - networks
+  - volumes
+  - images
+  - build
+  - containers
+  - pods
+- Service-specific configuration artifacts (DNS zones/records, ingress, secrets, per-service configs)
+- Systemd units/timers for GitOps sync and service reloads (if applicable)
 
-Start here:
+Apply should:
 
-- **[docs/QUICKSTART.md](docs/QUICKSTART.md)** – Get started in 3 steps (install, render, apply)
-- **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** – System design, ADR index, technical decisions
-- **[docs/NETWORK.md](docs/NETWORK.md)** – VLANs, ACLs, DNS, VPN, topology
-- **[docs/OPERATIONS.md](docs/OPERATIONS.md)** – Deployment, drift management, backups, security
-- **[docs/CREDENTIALS.md](docs/CREDENTIALS.md)** – Secrets management (SOPS + Vault)
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** – Rendering logic, testing, path resolution
-- **[docs/REFERENCE.md](docs/REFERENCE.md)** – Generated artifacts, script index, paths
+- Validate rendered output and config inputs
+- Stage changes atomically
+- Update state metadata for drift detection
+- Reload or restart impacted services
 
-Source of truth lives in `config/`; render/apply pipeline in `tools/`.
+## Design Principles
 
-See [docs/README.md](docs/README.md) for complete documentation index.
+- Unprivileged render phase; privileged apply phase
+- Atomic apply with validation and rollback safety
+- Deterministic `/32` service addressing (ipvlan-l2)
+- Split-horizon DNS for internal vs external resolution
+- Secrets boundary between bootstrap (encrypted) and runtime (templated)
+- Reconciliation pattern: desired state in git, drift analysis, idempotent apply
 
-## Project Structure
+## Non-Goals
 
-```text
-abhaile/
-├── config/                    # Source of truth
-│   ├── mapping.yaml          # Host-to-service assignments
-│   ├── network.yaml          # VLANs, hosts, service addressing
-│   └── services/<svc>/       # Per-service config + templates
-├── docs/                      # Authoritative documentation
-│   ├── QUICKSTART.md         # Get started guide
-│   ├── ARCHITECTURE.md       # System design + ADR index
-│   ├── NETWORK.md            # Complete network reference
-│   ├── OPERATIONS.md         # Day-to-day operations
-│   └── ADR/                  # Architecture decision records
-├── tools/                     # Automation scripts
-│   ├── render/               # Configuration renderer
-│   ├── apply/                # Deployment orchestrator
-│   ├── bootstrap/            # Host enrollment
-│   └── inventory/            # Documentation generator
-├── out/                       # Generated artifacts (dev)
-│   ├── rendered/             # Host configs
-│   └── state/                # Drift tracking
-└── tests/                     # Unit + integration tests
-```
+- No manual edits to rendered output
+- No ad-hoc changes on hosts outside the GitOps flow
+- No secrets committed to the repo
 
-## Common Tasks
+## Repository Layout
 
-**Update service configuration:**
+- `config/` - authoritative intent
+- `docs/` - documentation and runbooks
+- `docs/adr/` - architecture decision records for major changes
+- `tools/` - renderer and apply pipeline
+- `out/` - generated artifacts and state (not source of truth)
 
-```bash
-vim config/services/caddy-internal/service.yaml
-make render
-sudo ./tools/apply/apply.sh --apply phobos
-```
+Abhaile keeps the configuration declarative and the deployment steps explicit, so changes remain auditable and reversible.
 
-**Add new service:**
+## Bootstrap
 
-```bash
-mkdir -p config/services/myservice
-vim config/services/myservice/service.yaml
-vim config/mapping.yaml    # Add to host
-vim config/network.yaml    # Add address/VLAN if needed
-make render
-sudo ./tools/apply/apply.sh --apply phobos
-```
-
-**Check for drift:**
-
-```bash
-./tools/apply/apply.sh phobos
-```
-
-**Generate inventory:**
-
-```bash
-make generate-inventory
-cat INVENTORY.md
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, commit conventions, and development standards.
+Hosts are initially enrolled via a curl-bash style bootstrap script that installs prerequisites, pulls the repo, and registers the GitOps flow on the host.

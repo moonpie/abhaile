@@ -1,8 +1,0 @@
-[Unit]
-Description=Watch Redis config from Vault Agent
-
-[Path]
-PathChanged=/srv/vault/agent/out/authelia-redis.conf
-
-[Install]
-WantedBy=multi-user.target

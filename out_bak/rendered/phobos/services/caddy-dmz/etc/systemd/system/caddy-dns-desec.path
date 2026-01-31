@@ -1,8 +1,0 @@
-[Unit]
-Description=Watch Caddy DMZ's DESEC Token (rendered) for changes
-
-[Path]
-PathChanged=/srv/vault/agent/out/caddy-dns-desec.env
-
-[Install]
-WantedBy=multi-user.target

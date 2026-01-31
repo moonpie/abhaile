@@ -1,6 +1,0 @@
-[Unit]
-Description=Watch CoreDNS Omada env for changes
-[Path]
-PathChanged=/srv/vault/agent/out/coredns-omada.env
-[Install]
-WantedBy=multi-user.target

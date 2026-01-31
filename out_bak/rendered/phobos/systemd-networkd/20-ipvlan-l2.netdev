@@ -1,6 +1,0 @@
-[NetDev]
-Name=ipvlan-l2
-Kind=ipvlan
-
-[IPVLAN]
-Mode=L2

@@ -1,3 +1,0 @@
-[Volume]
-Device=/srv/authelia/authelia/data
-Options=bind

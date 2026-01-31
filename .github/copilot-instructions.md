@@ -1,134 +1,53 @@
-# AI Coding Agent Instructions for Abhaile
+# Copilot Instructions
 
-These instructions help AI agents work productively in this repo by summarizing the architecture, workflows, and project-specific conventions.
+You are working in the Abhaile GitOps repo. The authoritative state lives in `config/`, and the goal is to render/apply host-specific artifacts for Debian hosts (phobos, deimos).
 
-## Big Picture
+## Big picture
 
-GitOps for 2-host homelab (`phobos`, `deimos`): render systemd-networkd + Podman quadlets from YAML, deploy with drift detection.
+- Render is unprivileged and reads only from `config/`; apply is privileged and enforces safety gates.
+- Targets run systemd-networkd and Podman quadlets, with deterministic /32 ipvlan-l2 service addressing and split-horizon DNS.
+- Treat rendered output under `out/` as disposable; never edit generated artifacts directly.
 
-**Key concepts:**
+## Source of truth & structure
 
-- **Config:** `config/{mapping,network}.yaml` + per-service metadata define what runs where
-- **Render:** `tools/render/cli.py` processes all hosts → `out/rendered/` (full context required for Caddy/DNS/deSEC)
-- **Deploy:** `tools/apply/apply.sh` validates, drift-checks, stages, applies atomically
-- **Secrets:** SOPS (bootstrap) → Vault (runtime)
-- **Network:** ipvlan-l2 on Omada VLAN fabric; service /32s on VLAN 20, DMZ on VLAN 100
+- Host/service placement: `config/mapping.yaml` (e.g., phobos runs ddclient/chrony-a/caddy-\*).
+- Network/DNS intent: `config/network.yaml` (VLANs, hosts, service /32s, DNS zones/records). Uses template placeholders like `%%services.caddy-dmz.address | strip_cidr%%`.
+- Service definitions: `config/services/<service>/service.yaml` (type: pod/container, mode: rootful/rootless, network, configs, ingress, vault-agent templates).
+- Host overlays: `config/hosts/{common,phobos,deimos}/` (software/users/systemd/systemd-networkd/systemd-resolved).
+- Shared templates: `config/_templates/**` for host/service rendering.
 
-**When prompts conflict with `docs/`, prefer the docs.**
+### Service patterns (examples)
 
-## Documentation Roadmap
+- `config/services/authelia/service.yaml` shows a pod with multiple containers, named volumes, ingress blocks, and vault-agent templates (`*.ctmpl`).
+- Service directories often include config/, quadlets/, systemd/, templates/, and caddy ingress fragments.
 
-Read these first when working on specific areas:
+## Render/apply contract (must-haves)
 
-- **[README.md](../README.md)** - Architecture overview with system diagram
-- **[docs/QUICKSTART.md](../docs/QUICKSTART.md)** - Bootstrap workflows and first deployment
-- **[docs/DEVELOPMENT.md](../docs/DEVELOPMENT.md)** - Rendering patterns, testing, validation
-- **[docs/OPERATIONS.md](../docs/OPERATIONS.md)** - Deploy workflows, drift detection, DR procedures
-- **[docs/NETWORK.md](../docs/NETWORK.md)** - VLANs, DNS, ACLs, VPN configuration
-- **[docs/CREDENTIALS.md](../docs/CREDENTIALS.md)** - Secrets management (SOPS → Vault)
+- Render reads only from `config/` and emits per-host artifacts to `out/rendered/<host>/`.
+- Drift/state metadata lives in `out/state/<host>/` for apply/diff.
+- Render outputs include systemd-networkd, quadlets, DNS, runtime templates, and service configs.
+- Apply validates inputs, stages atomically, updates state, and reloads only changed units.
 
-## Key Directories
+## Coding Preferences
 
-- **`config/`** - Source of truth: `mapping.yaml`, `network.yaml`, per-service metadata
-- **`config/_templates/`** - Shared Jinja2 templates (drop-ins, quadlets)
-- **`config/hosts/<host>/`** - Host-specific network templates
-- **`tools/render/`** - Python rendering orchestrator + domain builders
-- **`tools/apply/`** - Bash deploy script + validation libraries
-- **`out/rendered/`** - Generated configs (dev output)
-- **`out/state/`** - Drift tracking state files
-- **`docs/`** - Consolidated documentation suite
+- Use Python for rendering/transforms; use shell only for host-level apply orchestration.
+- Keep dependencies minimal and pinned; document any new dependency.
+- Validate config inputs early with clear errors (schema checks preferred).
+- Prefer small, composable scripts over monolithic ones.
 
-## Architecture Patterns
+## Testing and Validation
 
-**Network modes:**
+- Prefer schema validation for config inputs.
+- Ensure apply supports a safe dry-run mode.
 
-- `service-32`: Host-based /32 addresses → `service-addr.conf.j2` drop-ins
-- `ipvlan-l2`: Container services → `service-route.conf.j2` + Podman network quadlets per VLAN
+### Workflows
 
-**Rendering:**
+- `make install` creates the venv and installs `requirements.txt` + pre-commit.
+- `make lint` runs pre-commit hooks across the repo.
 
-- Always processes **all hosts** from `mapping.yaml` (full context required for Caddy/DNS/deSEC)
-- Jinja2 uses `StrictUndefined`; missing context keys fail fast
-- Drop-in filenames use last octet for stable ordering: `NNN-<service>.conf`
-- Dynamic builds: CoreDNS zones, Vault-Agent templates, Caddy ingress (planned)
+## Guardrails
 
-**Key constraints:**
-
-- IPv6 disabled; VLAN scheme `172.20.<VLAN>.0/24`
-- Service /32s on VLAN 20, DMZ on VLAN 100
-- Physical NIC `enp0s31f6`, ipvlan devices `ipvlan-l2[.<vlan>]`
-
-See [ARCHITECTURE.md](../docs/ARCHITECTURE.md) and [NETWORK.md](../docs/NETWORK.md) for full details.
-
-## Developer Workflows
-
-**Quick commands:**
-
-```bash
-# Render all hosts (required for Caddy/DNS/deSEC context)
-python3 tools/render/cli.py
-
-# Validate only
-python3 tools/render/cli.py --validate-only
-
-# Dry-run deploy
-./tools/apply/apply.sh phobos
-
-# Apply changes (requires sudo)
-sudo ./tools/apply/apply.sh --apply phobos
-
-# Skip re-render if fresh (safety checks enforced)
-./tools/apply/apply.sh --skip-render --apply phobos
-```
-
-**For detailed workflows:**
-
-- Bootstrap: [QUICKSTART.md](../docs/QUICKSTART.md)
-- Deploy/drift: [OPERATIONS.md](../docs/OPERATIONS.md)
-- Rendering internals: [DEVELOPMENT.md](../docs/DEVELOPMENT.md)
-
-## Key Conventions
-
-- **Mapping-driven:** `config/mapping.yaml` is source of truth for service placement; render always processes all hosts
-- **Fail fast:** Missing `service.yaml` or undefined Jinja2 variables are fatal errors
-- **Skip-render safety:** `--skip-render` enforces config freshness checks before applying
-- **File types:** `*.netdev` copied verbatim; `*.network.j2` and `*.conf.j2` rendered
-- **Testing:** Use `SKIP_DESEC=1` for tests; mock external APIs (deSEC, Vault) unless testing live integration
-
-## External Integrations
-
-- **Podman:** Quadlets define container networks; systemd manages lifecycle
-- **Vault:** Agent templates collected from services; SOPS-encrypted bootstrap secrets in `secrets/`
-- **Omada:** Network fabric managed separately; see [NETWORK.md](../docs/NETWORK.md) for VLAN/ACL design
-- **Monitoring:** Prometheus/Grafana/Loki services defined under `config/services/`
-
-## Testing
-
-**Structure:** `tests/{unit,integration,performance,e2e}/`
-
-**Key patterns:**
-
-- Unit: Mocked, fast (\<1s each), test domain logic
-- Integration: End-to-end workflows with subprocess/file I/O
-- Mock externals: `SKIP_DESEC=1` for deSEC, mock Vault unless testing live
-
-**CI:** `.github/workflows/{ci,nightly}.yml`
-
-See [DEVELOPMENT.md](../docs/DEVELOPMENT.md#testing) for philosophy, fixtures, and conventions.
-
-## Template Structure
-
-- Drop-ins: `config/_templates/hosts/{service-addr,service-route}.conf.j2`
-- Host-specific: `config/hosts/<host>/systemd-networkd/*.{network.j2,netdev}`
-- Quadlets: `config/_templates/services/quadlets/network.network.j2`
-- Service configs: `config/services/<svc>/{service.yaml,templates/}`
-
-## Contributing
-
-1. Update config YAML or templates in `config/`
-1. Render and verify: `python3 tools/render/cli.py`
-1. Dry-run: `./tools/apply/apply.sh <host>`
-1. Inspect `out/rendered/` and `out/state/`
-1. Apply if correct: `sudo ./tools/apply/apply.sh --apply <host>`
-
-**Extend builders in `tools/render/lib/` for new patterns; keep validations consistent.**
+- Prefer changes in `config/` over hard-coded script edits.
+- Do not commit secrets; use templates and vault-agent outputs.
+- Keep render deterministic and idempotent; apply is safe by default (dry-run unless explicit).
+- If behavior is unclear, ask for clarification before making assumptions.

@@ -1,3 +1,0 @@
-[Volume]
-Device=/srv/vault/agent/out
-Options=bind

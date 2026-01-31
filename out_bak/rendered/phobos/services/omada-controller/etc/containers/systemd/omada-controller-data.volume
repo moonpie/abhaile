@@ -1,3 +1,0 @@
-[Volume]
-Device=/srv/omada-controller/data
-Options=bind

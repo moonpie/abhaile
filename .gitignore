@@ -3,9 +3,6 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache/
-.coverage
-.coverage.*
 
 # Virtual environments
 .venv/
@@ -15,14 +12,7 @@ env/
 # Build and render artifacts
 out/
 tmp/
-
-# Secrets - only commit encrypted .sops.yaml files
-secrets/*.env
-!secrets/*.sops.env
-secrets/*.yaml
-!secrets/*.sops.yaml
-!secrets/*.example
-!secrets/README.md
+.old_docs/
 
 # IDE/editor junk
 .vscode/

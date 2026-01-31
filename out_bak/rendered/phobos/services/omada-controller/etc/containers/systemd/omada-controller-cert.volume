@@ -1,3 +1,0 @@
-[Volume]
-Device=/srv/omada-controller/cert
-Options=bind

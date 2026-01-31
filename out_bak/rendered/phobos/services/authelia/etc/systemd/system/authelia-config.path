@@ -1,8 +1,0 @@
-[Unit]
-Description=Watch Authelia configuration (rendered) for changes
-
-[Path]
-PathChanged=/srv/vault/agent/out/authelia.configuration.yml
-
-[Install]
-WantedBy=multi-user.target

@@ -1,9 +1,0 @@
-bind 127.0.0.1
-port 6379
-protected-mode yes
-timeout 0
-tcp-keepalive 300
-daemonize no
-supervised no
-appendonly no
-requirepass {{ with secret "secret/data/abhaile/redis" -}}{{ .Data.data.password }}{{- end }}

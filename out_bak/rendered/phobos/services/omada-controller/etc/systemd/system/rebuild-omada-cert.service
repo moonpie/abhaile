@@ -1,7 +1,0 @@
-[Unit]
-Description=Rebuild Omada TLS full chain and restart Omada Controller
-After=caddy-internal.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/abhaile/tools/bash/rebuild-omada-cert.sh

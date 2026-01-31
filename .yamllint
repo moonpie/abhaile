@@ -9,5 +9,3 @@ rules:
   trailing-spaces: enable
   indentation:
     indent-sequences: consistent
-ignore: |
-  secrets/vault-unseal.sops.yaml

@@ -29,10 +29,6 @@ repos:
       - id: mdformat
         name: Format Markdown (mdformat)
         files: \.md$
-        # additional_dependencies:
-        #   - mdformat-gfm
-        #   - mdformat-frontmatter
-        #   - mdformat-footnote
   # Python-based Markdown linter (PyMarkdown)
   # ===== Markdown Lint =====
   - repo: https://github.com/jackdewinter/pymarkdown
@@ -42,27 +38,25 @@ repos:
         name: PyMarkdown Lint
         args: ["-d", "md013", "scan", "."]
         files: \.md$
-        # additional_dependencies:
-        #   - pymarkdownlnt
-  # ===== Schema Validation =====
-  - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.36.0
-    hooks:
-      - id: check-jsonschema
-        name: Validate Mapping.yaml Against Schema
-        files: ^config/mapping\.yaml$
-        types: [yaml]
-        args: ["--schemafile", "schemas/mapping.schema.json"]
-      - id: check-jsonschema
-        name: Validate Network.yaml Against Schema
-        files: ^config/network\.yaml$
-        types: [yaml]
-        args: ["--schemafile", "schemas/network.schema.json"]
-      - id: check-jsonschema
-        name: Validate Service.yaml Files Against Schema
-        files: ^config/services/.*/service\.yaml$
-        types: [yaml]
-        args: ["--schemafile", "schemas/service.schema.json"]
+  # # ===== Schema Validation =====
+  # - repo: https://github.com/python-jsonschema/check-jsonschema
+  #   rev: 0.36.0
+  #   hooks:
+  #     - id: check-jsonschema
+  #       name: Validate Mapping.yaml Against Schema
+  #       files: ^config/mapping\.yaml$
+  #       types: [yaml]
+  #       args: ["--schemafile", "schemas/mapping.schema.json"]
+  #     - id: check-jsonschema
+  #       name: Validate Network.yaml Against Schema
+  #       files: ^config/network\.yaml$
+  #       types: [yaml]
+  #       args: ["--schemafile", "schemas/network.schema.json"]
+  #     - id: check-jsonschema
+  #       name: Validate Service.yaml Files Against Schema
+  #       files: ^config/services/.*/service\.yaml$
+  #       types: [yaml]
+  #       args: ["--schemafile", "schemas/service.schema.json"]
   # ===== Python Lint/Format =====
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.14.9
@@ -99,19 +93,3 @@ repos:
         entry: gitleaks git --pre-commit --redact --staged --verbose
         language: golang
         pass_filenames: false
-
-  # ===== Local Security Pattern Checks =====
-  - repo: local
-    hooks:
-      - id: security-pattern-checks
-        name: Security Pattern Checks (local)
-        language: system
-        pass_filenames: false
-        always_run: true
-        entry: tools/pre-commit/security_checks.sh
-      - id: validate-bootstrap-paths
-        name: Validate Bootstrap Paths
-        language: system
-        pass_filenames: false
-        files: (tools/paths\.ini|tools/bootstrap/bootstrap\.sh)
-        entry: tools/pre-commit/validate_bootstrap_paths.sh

@@ -1,5 +1,0 @@
-[Unit]
-Description=Restart CoreDNS after Omada env update
-[Service]
-Type=oneshot
-ExecStart=/bin/systemctl restart coredns.service
