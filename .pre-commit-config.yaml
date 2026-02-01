@@ -38,25 +38,25 @@ repos:
         name: PyMarkdown Lint
         args: ["-d", "md013", "scan", "."]
         files: \.md$
-  # # ===== Schema Validation =====
-  # - repo: https://github.com/python-jsonschema/check-jsonschema
-  #   rev: 0.36.0
-  #   hooks:
-  #     - id: check-jsonschema
-  #       name: Validate Mapping.yaml Against Schema
-  #       files: ^config/mapping\.yaml$
-  #       types: [yaml]
-  #       args: ["--schemafile", "schemas/mapping.schema.json"]
-  #     - id: check-jsonschema
-  #       name: Validate Network.yaml Against Schema
-  #       files: ^config/network\.yaml$
-  #       types: [yaml]
-  #       args: ["--schemafile", "schemas/network.schema.json"]
-  #     - id: check-jsonschema
-  #       name: Validate Service.yaml Files Against Schema
-  #       files: ^config/services/.*/service\.yaml$
-  #       types: [yaml]
-  #       args: ["--schemafile", "schemas/service.schema.json"]
+  # ===== Schema Validation =====
+  - repo: https://github.com/python-jsonschema/check-jsonschema
+    rev: 0.36.0
+    hooks:
+      - id: check-jsonschema
+        name: Validate Mapping.yaml Against Schema
+        files: ^config/mapping\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/mapping.schema.json"]
+      - id: check-jsonschema
+        name: Validate Network.yaml Against Schema
+        files: ^config/network\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/network.schema.json"]
+      - id: check-jsonschema
+        name: Validate Service.yaml Files Against Schema
+        files: ^config/services/.*/service\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/service.schema.json"]
   # ===== Python Lint/Format =====
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.14.9

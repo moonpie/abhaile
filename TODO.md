@@ -8,6 +8,30 @@
    Scope: Task execution prompts and agent behavior.
    Confirmed by: user
 
+1. Decision: Use `scripts/` directory instead of `tools/` for render/apply pipeline.
+   Date: 2026-01-31
+   Rationale: Aligns with common convention; `scripts/` is clearer for operational tooling.
+   Scope: Repository layout and documentation.
+   Confirmed by: task requirements (Foundations phase)
+
+1. Decision: Render scope is single-host or `--all` (no partial host lists).
+   Date: 2026-01-31
+   Rationale: Simplifies render logic and state tracking; multi-host validation is only for pre-commit checks.
+   Scope: Render CLI and workstation/CI workflows.
+   Confirmed by: user
+
+1. Decision: Apply is always single-host; workstation/CI uses `--dry-run` mode for drift analysis.
+   Date: 2026-01-31
+   Rationale: Simplifies apply atomicity and safety gates; no need for multi-host apply orchestration.
+   Scope: Apply CLI and workstation/CI workflows.
+   Confirmed by: user
+
+1. Decision: Define config schema using JSON Schema (draft-07) with `check-jsonschema` pre-commit hooks.
+   Date: 2026-02-01
+   Rationale: Pre-commit validation of mapping/network/service YAML files catches structural errors early; JSON Schema is well-supported and allows template placeholders.
+   Scope: Config validation (mapping.schema.json, network.schema.json, service.schema.json in schemas/).
+   Confirmed by: user (via Foundations/Define config schema task)
+
 ## Routine Prompts
 
 ### Session Preface
@@ -20,16 +44,13 @@ Suggest alternatives when you see them, but ask for confirmation before deviatin
 Log any decisions in the Decision Log at the top of TODO.md if they’re not ADR-worthy.
 ```
 
-### Confirm understanding
+### Confirm understanding and plane before edits
 
 ```text
 Restate the task in your own words, list the files you will read/write, and call out any assumptions or ambiguities before you start.
-```
+Do not proceed if there are any ambiguities - let me clarify them first
+If everything is clear - please provide a short plan (3–6 steps) before making changes.
 
-### Plan before edits
-
-```text
-Provide a short plan (3–6 steps) before making changes.
 ```
 
 ### Proceed
@@ -91,14 +112,13 @@ the Decision Log if a decision was made.
 
 ### Phase: Foundations
 
-**Status:** Not started
+**Status:** Complete
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Define repo layout | Establish folder structure for `render/`, `docs/`, `docs/adr/`, and `scripts/`. | Layout documented in `README.md` and directories created. | None |
-| Define environment paths | Specify workstation/CI vs host paths for rendered output, state, and live targets; define detection logic. | Paths documented in `README.md` and ADR; detection rules defined. | Define repo layout |
-| Define config schema | Write a lightweight schema or validation rules for `config/` (mapping, network, hosts, services). | Schema rules documented; validator stub exists. | Define repo layout |
-| Record key ADRs | Document decisions on render/apply contract, state tracking, and secrets. | ADRs created in `docs/adr/`. | Define repo layout |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [x] | Define repo layout | Establish folder structure for `render/`, `docs/`, `docs/adr/`, and `scripts/`. | Layout documented in `README.md` and directories created. | None |
+| [x] | Define environment paths | Specify workstation/CI vs host paths for rendered output, state, and live targets; define detection logic. | Paths documented in `README.md` and ADRs; hash-based drift model defined. | Define repo layout |
+| [x] | Define config schema | Write a lightweight schema or validation rules for `config/` (mapping, network, hosts, services). | Schema rules documented; validator stub exists. | Define repo layout |
 
 #### Session Prompt (Define repo layout)
 
@@ -121,44 +141,35 @@ the Decision Log if a decision was made.
 #### Session Prompt (Define config schema)
 
 - Phase/Task: Foundations / Define config schema.
-- Required inputs: `TODO.md`, `config/mapping.yaml`, `config/network.yaml`, `config/hosts/**`, `config/services/**`.
-- Outputs to produce: `docs/schema.md` with rules and required fields; stub validator in `scripts/validate` that checks presence and basic structure.
-- Acceptance: schema doc covers mapping/network/hosts/services; validator exits non-zero on missing required keys.
+- Required inputs: `TODO.md`, `config/mapping.yaml`, `config/network.yaml`, `config/services/*/service.yaml`.
+- Outputs to produce: schema files in `schemas/`; schema validation handled by `check-jsonschema` hooks in pre-commit.
+- Acceptance: schema covers mapping/network/service yaml files.
 - Constraints: schema matches existing `config/` shape; no network access; no secrets.
-- Dependencies: Define repo layout.
-
-#### Session Prompt (Record key ADRs)
-
-- Phase/Task: Foundations / Record key ADRs.
-- Required inputs: `TODO.md`, `README.md`.
-- Outputs to produce: ADRs in `docs/adr/` for render/apply contract, drift/state model, secrets policy.
-- Acceptance: ADRs state decisions, alternatives, and consequences; numbered files in `docs/adr/`.
-- Constraints: align with `README.md`; no secrets.
 - Dependencies: Define repo layout.
 
 ### Phase: Render Pipeline
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `out/rendered/<host>/`. | Running the tool renders a host tree with a manifest in `out/state/<host>/manifest.json`. | Define config schema |
-| Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `out/rendered/<host>/etc/systemd/network/` and resolved files present. | Renderer CLI |
-| DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `coredns-common`. | Zone files and serial metadata rendered deterministically under `out/rendered/<host>/`. | Renderer CLI |
-| Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/users.yaml`. | User/group/sudoers files generated under `out/rendered/<host>/` with deterministic ordering. | Renderer CLI |
-| Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` across host/common. | Per-host package manifest and command plan rendered under `out/rendered/<host>/`. | Renderer CLI |
-| Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `out/rendered/<host>/` per mapped service. | Renderer CLI |
-| Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `out/rendered/<host>/` per mapped service. | Renderer CLI |
-| Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `out/rendered/<host>/`. | Renderer CLI |
-| Ingress renderer | Aggregate ingress blocks into per-host Caddy fragments. | Host ingress files rendered under `out/rendered/<host>/` from service ingress definitions. | Service configs renderer |
-| Manifest writer | Produce `out/state/<host>/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `<output>/rendered/` (default: `/var/lib/abhaile/rendered/` on hosts). | Running the tool renders a host tree with a manifest in `<output>/state/manifest.json`. | Define config schema |
+| [ ] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/etc/systemd/network/` and resolved files present. | Renderer CLI |
+| [ ] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `coredns-common`. | Zone files and serial metadata rendered deterministically under `<output>/rendered/`. | Renderer CLI |
+| [ ] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/users.yaml`. | User/group/sudoers files generated under `<output>/rendered/` with deterministic ordering. | Renderer CLI |
+| [ ] | Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` across host/common. | Per-host package manifest and command plan rendered under `<output>/rendered/`. | Renderer CLI |
+| [ ] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/` per mapped service. | Renderer CLI |
+| [ ] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/` per mapped service. | Renderer CLI |
+| [ ] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/`. | Renderer CLI |
+| [ ] | Ingress renderer | Aggregate ingress blocks into per-host Caddy fragments. | Host ingress files rendered under `<output>/rendered/` from service ingress definitions. | Service configs renderer |
+| [ ] | Manifest writer | Produce `<output>/state/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
 
 #### Session Prompt (Renderer CLI)
 
 - Phase/Task: Render Pipeline / Renderer CLI.
 - Required inputs: `TODO.md`, `README.md`, `config/` tree, `docs/adr/` if present.
-- Outputs to produce: `scripts/render`; base output tree under `out/rendered/<host>/` and `out/state/<host>/` for hosts in `config/mapping.yaml`.
-- Acceptance: `scripts/render --host <host>` creates `out/rendered/<host>/` and exits non-zero on render errors.
+- Outputs to produce: `scripts/render`; output tree under `<output>/rendered/` and `<output>/state/` (see ADR 0001 for path defaults and overrides).
+- Acceptance: `scripts/render --host <host>` creates `<output>/rendered/` and `<output>/state/manifest.json`; exits non-zero on render errors.
 - Constraints: unprivileged render only; `config/` is the only input source; no secrets materialized.
 - Dependencies: Define config schema.
 
@@ -166,7 +177,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Networking renderer.
 - Required inputs: `config/network.yaml`, `config/hosts/**`, `config/_templates/hosts/**`.
-- Outputs to produce: `out/rendered/<host>/etc/systemd/network/*.network` and `.netdev`; `out/rendered/<host>/etc/systemd/resolved.conf`.
+- Outputs to produce: `<output>/rendered/etc/systemd/network/*.network` and `.netdev`; `<output>/rendered/etc/systemd/resolved.conf`.
 - Acceptance: generated files are deterministic and include VLANs, ipvlan-l2, and host interfaces.
 - Constraints: templates fail fast on missing network data.
 - Dependencies: Renderer CLI.
@@ -175,7 +186,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / DNS renderer.
 - Required inputs: `config/network.yaml`, `config/services/**`, `config/_templates/services/**`.
-- Outputs to produce: `out/rendered/<host>/etc/coredns/zones/*`; `out/state/<host>/dns-serials.json`.
+- Outputs to produce: `<output>/rendered/etc/coredns/zones/*`; `<output>/state/dns-serials.json`.
 - Acceptance: zones render deterministically with stable serials and correct records.
 - Constraints: no secrets; zone rendering is pure function of `config/network.yaml`.
 - Dependencies: Renderer CLI.
@@ -184,7 +195,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Users renderer.
 - Required inputs: `config/hosts/**/users.yaml`, `config/hosts/common/users.yaml`.
-- Outputs to produce: `out/rendered/<host>/etc/abhaile/users.d/users.json`; `out/rendered/<host>/etc/sudoers.d/abhaile`.
+- Outputs to produce: `<output>/rendered/etc/abhaile/users.d/users.json`; `<output>/rendered/etc/sudoers.d/abhaile`.
 - Acceptance: user/group/sudo data is deterministic and sorted; no duplicates.
 - Constraints: no secrets; read-only from `config/`.
 - Dependencies: Renderer CLI.
@@ -193,7 +204,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Packaging renderer.
 - Required inputs: `config/hosts/**`, `config/hosts/common/**`.
-- Outputs to produce: `out/rendered/<host>/var/lib/abhaile/package-manifest.json`; `out/rendered/<host>/var/lib/abhaile/command-plan.json`.
+- Outputs to produce: `<output>/rendered/var/lib/abhaile/package-manifest.json`; `<output>/rendered/var/lib/abhaile/command-plan.json`.
 - Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host.
 - Constraints: deterministic ordering; no network access.
 - Dependencies: Renderer CLI.
@@ -202,7 +213,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Quadlets renderer (containers).
 - Required inputs: `config/services/**`, `config/_templates/services/quadlets/**`, `config/mapping.yaml`.
-- Outputs to produce: `out/rendered/<host>/etc/containers/systemd/*.container`, `.image`, `.network`, `.volume`, `.build`.
+- Outputs to produce: `<output>/rendered/etc/containers/systemd/*.container`, `.image`, `.network`, `.volume`, `.build`.
 - Acceptance: quadlets generated for all mapped container services; files are deterministic.
 - Constraints: no secrets; rootful/rootless modes follow service config.
 - Dependencies: Renderer CLI.
@@ -211,7 +222,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Quadlets renderer (pods).
 - Required inputs: `config/services/**`, `config/_templates/services/quadlets/**`, `config/mapping.yaml`.
-- Outputs to produce: `out/rendered/<host>/etc/containers/systemd/*.pod` and related `.container` units.
+- Outputs to produce: `<output>/rendered/etc/containers/systemd/*.pod` and related `.container` units.
 - Acceptance: pod quadlets generated for all mapped pod services; dependencies are explicit.
 - Constraints: no secrets; pod definitions derived from service config.
 - Dependencies: Renderer CLI.
@@ -220,7 +231,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Service configs renderer.
 - Required inputs: `config/services/**`, `config/_templates/services/**`, `config/network.yaml`.
-- Outputs to produce: `out/rendered/<host>/etc/abhaile/services/<service>/...` with configs and rendered templates.
+- Outputs to produce: `<output>/rendered/etc/abhaile/services/<service>/...` with configs and rendered templates.
 - Acceptance: all configs referenced by service.yaml are rendered; template errors fail the render.
 - Constraints: templates must not materialize secrets.
 - Dependencies: Renderer CLI.
@@ -229,7 +240,7 @@ the Decision Log if a decision was made.
 
 - Phase/Task: Render Pipeline / Ingress renderer.
 - Required inputs: `config/services/**`, `config/network.yaml`.
-- Outputs to produce: `out/rendered/<host>/etc/caddy/ingress.d/*.caddy`.
+- Outputs to produce: `<output>/rendered/etc/caddy/ingress.d/*.caddy`.
 - Acceptance: host ingress fragments are aggregated and deterministic.
 - Constraints: no secrets; only mapped services included.
 - Dependencies: Service configs renderer.
@@ -237,8 +248,8 @@ the Decision Log if a decision was made.
 #### Session Prompt (Manifest writer)
 
 - Phase/Task: Render Pipeline / Manifest writer.
-- Required inputs: `out/rendered/<host>/`.
-- Outputs to produce: `out/state/<host>/manifest.json` with a stable schema.
+- Required inputs: `<output>/rendered/`.
+- Outputs to produce: `<output>/state/manifest.json` with a stable schema.
 - Acceptance: manifest lists every rendered file with fields: `target_path`, `rel_path`, `sha256`, `size`, `mode`, `uid`, `gid`, `kind`, `source`, `rendered_at`.
 - Constraints: deterministic ordering; no secrets in manifest.
 - Dependencies: Renderer CLI.
@@ -247,27 +258,27 @@ the Decision Log if a decision was made.
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Apply CLI | Implement `scripts/apply` to sync `out/rendered/<host>/` to the host via SSH/SFTP/rsync. | Dry-run and apply modes functional for a host. | Manifest writer |
-| Drift detection | Compare render manifest with host state and report differences. | Apply prints drift summary before changes. | Apply CLI |
-| Safe systemd reload | Only reload/restart units and quadlets when artifacts changed. | Changed services restart; unchanged services stay running. | Apply CLI |
-| Host safety gate | Enforce hostname and SSH host key checks before apply. | Apply aborts on mismatch. | Apply CLI |
-| Rollback strategy | Document and implement minimal rollback (last-applied snapshot). | Previous manifest can be restored safely. | Apply CLI |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | Apply CLI | Implement `scripts/apply` to sync `<output>/rendered/` to the host via SSH/SFTP/rsync. | Dry-run and apply modes functional for a host. | Manifest writer |
+| [ ] | Drift detection | Compare render manifest with host state and report differences. | Apply prints drift summary before changes. | Apply CLI |
+| [ ] | Safe systemd reload | Only reload/restart units and quadlets when artifacts changed. | Changed services restart; unchanged services stay running. | Apply CLI |
+| [ ] | Host safety gate | Enforce hostname and SSH host key checks before apply. | Apply aborts on mismatch. | Apply CLI |
+| [ ] | Rollback strategy | Document and implement minimal rollback (last-applied snapshot). | Previous manifest can be restored safely. | Apply CLI |
 
 #### Session Prompt (Apply CLI)
 
 - Phase/Task: Apply Pipeline / Apply CLI.
-- Required inputs: `TODO.md`, `README.md`, `out/rendered/<host>/`, `out/state/<host>/manifest.json`.
-- Outputs to produce: `scripts/apply`; document host state file path in `README.md` (e.g., `/var/lib/abhaile/state.json`).
-- Acceptance: dry-run mode shows planned changes; apply mode syncs `out/rendered/<host>/` to host.
+- Required inputs: `TODO.md`, `README.md`, `<output>/rendered/`, `<output>/state/manifest.json`.
+- Outputs to produce: `scripts/apply`; document host state file path in `README.md` (e.g., `/var/lib/abhaile/state/manifest.json`).
+- Acceptance: dry-run mode shows planned changes; apply mode syncs `<output>/rendered/` to host.
 - Constraints: apply runs with sudo on target; no secrets written; render/apply boundary enforced.
 - Dependencies: Manifest writer.
 
 #### Session Prompt (Drift detection)
 
 - Phase/Task: Apply Pipeline / Drift detection.
-- Required inputs: `out/state/<host>/manifest.json`, host state file (last-applied).
+- Required inputs: `<output>/state/manifest.json`, host state file (last-applied).
 - Outputs to produce: drift summary output in `scripts/apply` (or `scripts/diff` if already exists).
 - Acceptance: drift summary compares `target_path` + `sha256` and reports added/changed/removed files.
 - Constraints: read-only by default; destructive actions require explicit confirmation.
@@ -276,7 +287,7 @@ the Decision Log if a decision was made.
 #### Session Prompt (Safe systemd reload)
 
 - Phase/Task: Apply Pipeline / Safe systemd reload.
-- Required inputs: `out/state/<host>/manifest.json`, drift summary.
+- Required inputs: `<output>/state/manifest.json`, drift summary.
 - Outputs to produce: reload/restart logic inside `scripts/apply`.
 - Acceptance: only changed units/quadlets are restarted; unchanged services remain running.
 - Constraints: minimize disruption; log each restarted unit.
@@ -294,7 +305,7 @@ the Decision Log if a decision was made.
 #### Session Prompt (Rollback strategy)
 
 - Phase/Task: Apply Pipeline / Rollback strategy.
-- Required inputs: host state file, `out/state/<host>/manifest.json`.
+- Required inputs: host state file, `<output>/state/manifest.json`.
 - Outputs to produce: snapshot/rollback logic; document usage in `README.md`.
 - Acceptance: previous manifest and artifacts can be restored safely on host.
 - Constraints: rollback is explicit; no automatic destructive changes.
@@ -304,11 +315,11 @@ the Decision Log if a decision was made.
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Secrets policy | Document that secrets live outside the repo; templates only in `config/`. | Policy documented in `README.md` and ADR. | Record key ADRs |
-| Vault agent integration | Ensure rendered outputs include vault-agent templates and required services. | Vault-agent files render with correct perms. | Service configs renderer |
-| External key material | Define bootstrap/runtime locations for keys (e.g., `/etc/abhaile/keys`). | Paths documented; apply does not install secrets. | Secrets policy |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | Secrets policy | Document that secrets live outside the repo; templates only in `config/`. | Policy documented in `README.md` and ADR. | Record key ADRs |
+| [ ] | Vault agent integration | Ensure rendered outputs include vault-agent templates and required services. | Vault-agent files render with correct perms. | Service configs renderer |
+| [ ] | External key material | Define bootstrap/runtime locations for keys (e.g., `/etc/abhaile/keys`). | Paths documented; apply does not install secrets. | Secrets policy |
 
 #### Session Prompt (Secrets policy)
 
@@ -322,8 +333,8 @@ the Decision Log if a decision was made.
 #### Session Prompt (Vault agent integration)
 
 - Phase/Task: Secrets / Vault agent integration.
-- Required inputs: `config/services/**` (vault-agent templates), `out/rendered/<host>/` if present.
-- Outputs to produce: render-stage updates to include vault-agent templates under `out/rendered/<host>/etc/abhaile/services/vault-agent/`.
+- Required inputs: `config/services/**` (vault-agent templates), `<output>/rendered/` if present.
+- Outputs to produce: render-stage updates to include vault-agent templates under `<output>/rendered/etc/abhaile/services/vault-agent/`.
 - Acceptance: vault-agent templates render with correct permissions metadata in manifest.
 - Constraints: no secret material rendered.
 - Dependencies: Service configs renderer.
@@ -341,11 +352,11 @@ the Decision Log if a decision was made.
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Config validation | Implement validation for IP uniqueness, VLAN sanity, and mapping integrity. | Validation fails on invalid config and passes on current. | Define config schema |
-| Render determinism | Add tests or checks for stable render output hashes. | Re-render yields identical manifests. | Manifest writer |
-| Linting hooks | Add a basic lint/check workflow for YAML and templates. | Lint script runs locally without network access. | Define repo layout |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | Config validation | Implement validation for IP uniqueness, VLAN sanity, and mapping integrity. | Validation fails on invalid config and passes on current. | Define config schema |
+| [ ] | Render determinism | Add tests or checks for stable render output hashes. | Re-render yields identical manifests. | Manifest writer |
+| [ ] | Linting hooks | Add a basic lint/check workflow for YAML and templates. | Lint script runs locally without network access. | Define repo layout |
 
 #### Session Prompt (Config validation)
 
@@ -359,7 +370,7 @@ the Decision Log if a decision was made.
 #### Session Prompt (Render determinism)
 
 - Phase/Task: Validation and Testing / Render determinism.
-- Required inputs: `scripts/render`, `out/rendered/<host>/`, `out/state/<host>/manifest.json`.
+- Required inputs: `scripts/render`, `<output>/rendered/`, `<output>/state/manifest.json`.
 - Outputs to produce: determinism check script or mode in `scripts/validate`.
 - Acceptance: rerun render produces identical manifest hashes for unchanged inputs.
 - Constraints: offline; no network access.
@@ -378,11 +389,11 @@ the Decision Log if a decision was made.
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Make targets | Add `make render`, `make apply`, `make validate`. | Targets call scripts and return non-zero on failure. | Renderer CLI |
-| Host inventory view | Provide a command to list services per host from `config/mapping.yaml`. | Output shows host -> services mapping. | Renderer CLI |
-| Diff tool | Provide `scripts/diff` to compare render vs host state. | Diff reports file-level differences. | Drift detection |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | Make targets | Add `make render`, `make apply`, `make validate`. | Targets call scripts and return non-zero on failure. | Renderer CLI |
+| [ ] | Host inventory view | Provide a command to list services per host from `config/mapping.yaml`. | Output shows host -> services mapping. | Renderer CLI |
+| [ ] | Diff tool | Provide `scripts/diff` to compare render vs host state. | Diff reports file-level differences. | Drift detection |
 
 #### Session Prompt (Make targets)
 
@@ -405,7 +416,7 @@ the Decision Log if a decision was made.
 #### Session Prompt (Diff tool)
 
 - Phase/Task: Ops Tooling / Diff tool.
-- Required inputs: `out/state/<host>/manifest.json`, host state file, `scripts/apply`.
+- Required inputs: `<output>/state/manifest.json`, host state file, `scripts/apply`.
 - Outputs to produce: `scripts/diff` that compares rendered manifest with host state.
 - Acceptance: diff shows added/changed/removed files with paths and hashes.
 - Constraints: read-only; no secrets.
@@ -415,11 +426,11 @@ the Decision Log if a decision was made.
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| README refresh | Document render/apply workflow, bootstrap, and safety checks. | `README.md` updated with workflow and examples. | Render/Apply Contract |
-| Architecture docs | Create `docs/architecture.md` describing pipeline stages. | Document created and referenced from README. | Define repo layout |
-| ADR updates | Write ADRs for renderer language, drift strategy, secrets, and bootstrap. | ADRs created in `docs/adr/`. | Record key ADRs |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | README refresh | Document render/apply workflow, bootstrap, and safety checks. | `README.md` updated with workflow and examples. | Render/Apply Contract |
+| [ ] | Architecture docs | Create `docs/architecture.md` describing pipeline stages. | Document created and referenced from README. | Define repo layout |
+| [ ] | ADR updates | Write ADRs for renderer language, drift strategy, secrets, and bootstrap. | ADRs created in `docs/adr/`. | Record key ADRs |
 
 #### Session Prompt (README refresh)
 
@@ -452,11 +463,11 @@ the Decision Log if a decision was made.
 
 **Status:** Not started
 
-| Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- |
-| Curl-bash bootstrap | Provide a `scripts/bootstrap.sh` that installs prerequisites and enrolls host. | `curl \<url\> \| bash` workflow documented and safe. | Apply CLI |
-| Host enrollment flow | Define steps for host naming, SSH key install, and first apply. | Process documented and tested on a clean host. | Curl-bash bootstrap |
-| One-time token handling | Require a bootstrap token or SSH key passed via env or prompt. | Bootstrap refuses to run without explicit token. | Curl-bash bootstrap |
+| Status | Task | Description | Completion Criteria | Dependencies |
+| --- | --- | --- | --- | --- |
+| [ ] | Curl-bash bootstrap | Provide a `scripts/bootstrap.sh` that installs prerequisites and enrolls host. | `curl \<url\> \| bash` workflow documented and safe. | Apply CLI |
+| [ ] | Host enrollment flow | Define steps for host naming, SSH key install, and first apply. | Process documented and tested on a clean host. | Curl-bash bootstrap |
+| [ ] | One-time token handling | Require a bootstrap token or SSH key passed via env or prompt. | Bootstrap refuses to run without explicit token. | Curl-bash bootstrap |
 
 #### Session Prompt (Curl-bash bootstrap)
 

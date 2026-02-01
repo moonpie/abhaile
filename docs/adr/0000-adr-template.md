@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed | Accepted | Deprecated | Superseded
+YYYY-MM-DD: Proposed | Accepted | Deprecated | Superseded
 
 ## Context
 

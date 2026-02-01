@@ -1,0 +1,261 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Abhaile Network Schema",
+  "description": "Schema for config/network.yaml - defines VLANs, DNS zones/records, and host networking",
+  "type": "object",
+  "properties": {
+    "vlans": {
+      "type": "object",
+      "description": "VLAN definitions",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4094,
+            "description": "VLAN ID"
+          },
+          "cidr": {
+            "type": "string",
+            "pattern": "^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)\\/(3[0-2]|[12]?\\d)$",
+            "description": "CIDR notation for the VLAN (e.g., 172.20.20.0/24)"
+          },
+          "gateway": {
+            "type": "string",
+            "pattern": "^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)$",
+            "description": "Gateway IP address"
+          },
+          "ipvlanl2_range": {
+            "type": "string",
+            "pattern": "^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)-((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)$",
+            "description": "IP range for ipvlan-l2 addresses (e.g., 172.20.20.200-172.20.20.254)"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "dns": {
+      "type": "object",
+      "description": "DNS configuration",
+      "properties": {
+        "zones": {
+          "type": "array",
+          "description": "DNS zones",
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^.+\\.$",
+                "description": "Zone name (e.g., svc.abhaile.home.arpa.)"
+              },
+              "provider": {
+                "type": "string",
+                "description": "DNS provider (e.g., coredns-common, desec.io)"
+              },
+              "serial": {
+                "type": "object",
+                "description": "SOA serial tracking",
+                "properties": {
+                  "date": {
+                    "oneOf": [
+                      {"type": "string", "pattern": "^\\d{8}$"},
+                      {"type": "integer"}
+                    ],
+                    "description": "Date in YYYYMMDD format"
+                  },
+                  "counter": {
+                    "oneOf": [
+                      {"type": "string", "pattern": "^\\d{2}$"},
+                      {"type": "integer"}
+                    ],
+                    "description": "Counter in 00-99 format"
+                  },
+                  "content_hash": {
+                    "type": "string",
+                    "description": "SHA hash of zone content"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "records": {
+                "type": "array",
+                "description": "DNS records in this zone",
+                "items": {
+                  "type": "object",
+                  "required": ["type", "name"],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": ["a", "aaaa", "cname", "ptr", "txt", "mx", "srv"],
+                      "description": "Record type (a, cname, ptr, etc.)"
+                    },
+                    "name": {
+                      "type": "string",
+                      "description": "Record name/hostname"
+                    },
+                    "rdata": {
+                      "type": "string",
+                      "description": "Record data (IP, CNAME target, etc., may contain template placeholders)"
+                    },
+                    "ptr": {
+                      "type": "boolean",
+                      "description": "Whether to create reverse PTR record"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "hosts": {
+      "type": "object",
+      "description": "Host-specific network configuration",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "physical_device": {
+            "type": "string",
+            "description": "Primary physical network interface (e.g., enp0s31f6)"
+          },
+          "interfaces": {
+            "type": "object",
+            "description": "Network interface definitions",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "pattern": "^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)\\/(3[0-2]|[12]?\\d)$",
+                  "description": "IP address with CIDR notation (e.g., 172.20.20.10/24)"
+                },
+                "vlan": {
+                  "type": "string",
+                  "description": "VLAN name this interface belongs to"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "dns": {
+            "type": "array",
+            "description": "DNS zone records for this host",
+            "items": {
+              "type": "object",
+              "required": ["zone"],
+              "properties": {
+                "zone": {
+                  "type": "string",
+                  "pattern": "^.+\\.$",
+                  "description": "Zone name"
+                },
+                "records": {
+                  "type": "array",
+                  "description": "Records in this zone",
+                  "items": {
+                    "type": "object",
+                    "required": ["type", "name"],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["a", "aaaa", "cname", "ptr", "txt", "mx", "srv"],
+                        "description": "Record type (a, cname, ptr, etc.)"
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Record name"
+                      },
+                      "rdata": {
+                        "type": "string",
+                        "description": "Record data (may contain template placeholders like %%hosts.phobos.interfaces.enp0s31f6.address | strip_cidr%%)"
+                      },
+                      "ptr": {
+                        "type": "boolean",
+                        "description": "Whether to create reverse PTR record"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["physical_device", "interfaces"],
+        "additionalProperties": false
+      }
+    },
+    "services": {
+      "type": "object",
+      "description": "Service network configuration and DNS records",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)\\/(3[0-2]|[12]?\\d)$",
+            "description": "Service IP address with CIDR notation (e.g., 172.20.20.201/32)"
+          },
+          "vlan": {
+            "type": "string",
+            "description": "VLAN name this service belongs to"
+          },
+          "dns": {
+            "type": "array",
+            "description": "DNS zone records for this service",
+            "items": {
+              "type": "object",
+              "required": ["zone"],
+              "properties": {
+                "zone": {
+                  "type": "string",
+                  "pattern": "^.+\\.$",
+                  "description": "Zone name"
+                },
+                "records": {
+                  "type": "array",
+                  "description": "Records in this zone",
+                  "items": {
+                    "type": "object",
+                    "required": ["type", "name"],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": ["a", "aaaa", "cname", "ptr", "txt", "mx", "srv"],
+                        "description": "Record type (a, cname, ptr, etc.)"
+                      },
+                      "name": {
+                        "type": "string",
+                        "description": "Record name"
+                      },
+                      "rdata": {
+                        "type": "string",
+                        "description": "Record data (may contain template placeholders)"
+                      },
+                      "ptr": {
+                        "type": "boolean",
+                        "description": "Whether to create reverse PTR record"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

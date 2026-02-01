@@ -85,13 +85,63 @@ Apply should:
 
 ## Repository Layout
 
-- `config/` - authoritative intent
+- `config/` - authoritative intent (source of truth)
+  - `mapping.yaml` - service-to-host assignments
+  - `network.yaml` - VLANs, addresses, DNS zones/records
+  - `hosts/` - host-specific overlays (common, phobos, deimos)
+  - `services/` - per-service definitions and templates
+  - `_templates/` - shared templates for rendering
 - `docs/` - documentation and runbooks
-- `docs/adr/` - architecture decision records for major changes
-- `tools/` - renderer and apply pipeline
-- `out/` - generated artifacts and state (not source of truth)
+  - `adr/` - architecture decision records for major changes
+- `scripts/` - render and apply pipeline scripts
+- `out/` - generated artifacts and state (disposable, not source of truth; see Environment Paths section for structure)
+  - `rendered/` - ephemeral desired-state artifacts (overwritten on each render)
+  - `state/` - persistent metadata (manifests, commit tracking)
+- `policies/` - Vault policies for secret management
+
+**Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 
 Abhaile keeps the configuration declarative and the deployment steps explicit, so changes remain auditable and reversible.
+
+## Environment Paths
+
+Abhaile is host-first in production and supports flexible paths for workstation/CI.
+
+### Host Default
+
+- **Output root:** `/var/lib/abhaile/`
+- **Rendered output:** `/var/lib/abhaile/rendered/`
+- **State:** `/var/lib/abhaile/state/`
+- **Live target root:** `/`
+
+### Workstation/CI Override
+
+Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
+
+**Single-host render:**
+
+- `./out/rendered/<host>/`
+- `./out/state/<host>/`
+
+**Multi-host render (`--all`):**
+
+- `./out/<host>/rendered/`
+- `./out/<host>/state/`
+
+The `<host>` subdirectory avoids collisions when rendering multiple hosts into one output tree.
+
+## Drift Detection and State Model
+
+Apply uses hash-based drift detection to compare desired state (manifest) against live system:
+
+1. **Render** produces desired-state artifacts in `<output>/rendered/` and writes a manifest to `<output>/state/manifest.json`
+1. **Manifest** contains SHA256 hashes, sizes, permissions, and ownership for each file
+1. **Apply** compares manifest hashes against live filesystem to detect changes
+1. **Sync** copies changed/added files from `rendered/` to `/` and updates manifest
+
+This allows render to overwrite `rendered/` safely; the manifest in `state/` is the durable record.
+
+See [ADR 0001](docs/adr/0001-output-root-and-environment-paths.md) and [ADR 0002](docs/adr/0002-hash-based-drift-detection-and-state-model.md) for design details.
 
 ## Bootstrap
 
