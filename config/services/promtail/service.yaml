@@ -1,4 +1,4 @@
 name: promtail
-type: host
-mode: ''
-network: host
+systemd:
+  network: host
+composition: {}

@@ -1,0 +1,25 @@
+name: deimos
+physical_device: enp0s31f6
+composition:
+  include:
+    - common
+  config:
+    - source:
+        template: deimos/systemd-networkd/10-enp0s31f6.network.j2
+        variables: {}
+      destination: /etc/systemd/network/10-enp0s31f6.network
+    - source: deimos/systemd-networkd/20-ipvlan-l2.netdev
+      destination: /etc/systemd/network/20-ipvlan-l2.netdev
+    - source:
+        template: deimos/systemd-networkd/21-ipvlan-l2.network.j2
+        variables: {}
+      destination: /etc/systemd/network/21-ipvlan-l2.network
+    - destination: /etc/systemd/network/21-ipvlan-l2.network.d
+  software: {}
+  user_management:
+    users:
+      abhaile:
+        additional_groups:
+          - sudo
+    groups: {}
+    sudoers: []

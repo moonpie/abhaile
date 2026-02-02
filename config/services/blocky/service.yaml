@@ -1,18 +1,19 @@
 name: blocky
-type: container
-mode: rootful
-network: ipvlan-l2
-config:
-  - source: blocky/config/config.yml
-    destination: /srv/blocky/config.yml
-container:
-  named_volumes:
-    - name: host-certs
-      host: /etc/ssl/certs
-      mount: /etc/ssl/certs
-      mode: ro
-      shared: true
-  mounted_files:
-    - host: /srv/blocky/config.yml
-      mount: /app/config.yml
-      mode: ro
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  config:
+    - source: blocky/config/config.yml
+      destination: /srv/blocky/config.yml
+  container:
+    named_volumes:
+      - name: host-certs
+        host: /etc/ssl/certs
+        mount: /etc/ssl/certs
+        mode: ro
+        shared: true
+    mounted_files:
+      - host: /srv/blocky/config.yml
+        mount: /app/config.yml
+        mode: ro

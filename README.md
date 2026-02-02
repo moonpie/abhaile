@@ -15,6 +15,7 @@ All intent lives in `config/`:
 
 - `config/mapping.yaml` assigns services to hosts
 - `config/network.yaml` defines VLANs, addresses, and DNS
+- `config/hosts/<host>/host.yaml` defines host composition (config, software, users)
 - `config/services/<service>/service.yaml` defines per-service behavior
 
 ## High-Level Flow
@@ -39,19 +40,17 @@ Render should be structured into clear functions:
 ## Render Stage Interfaces
 
 - Networking: inputs `config/network.yaml`, outputs networkd units/drop-ins
-- Packaging: inputs host/software config, outputs package/command directives
-- Users: inputs host/users config, outputs user/group and SSH config
+- Packaging: inputs host `host.yaml` composition.software config, outputs package/command directives
+- Users: inputs host `host.yaml` composition.user_management config, outputs user/group and SSH config
 - Quadlets: inputs per-service config, outputs network/volume/image/build/container/pod units
 - Service configs: inputs per-service config and network data, outputs DNS, ingress, and templates
 
 ## Expected Artifacts
 
-Render should produce, per host:
-
 - systemd-networkd units and drop-ins (interfaces, VLANs, ipvlan-l2)
 - Host packaging and base system configuration (packages, kernel modules, sysctl, etc.)
 - Host users and access configuration (accounts, groups, sudo, SSH)
-- Podman quadlets (ass applicable)
+- Podman quadlets (as applicable)
   - networks
   - volumes
   - images
@@ -88,7 +87,7 @@ Apply should:
 - `config/` - authoritative intent (source of truth)
   - `mapping.yaml` - service-to-host assignments
   - `network.yaml` - VLANs, addresses, DNS zones/records
-  - `hosts/` - host-specific overlays (common, phobos, deimos)
+  - `hosts/` - host-specific overlays (common, phobos, deimos) with host.yaml
   - `services/` - per-service definitions and templates
   - `_templates/` - shared templates for rendering
 - `docs/` - documentation and runbooks
@@ -107,6 +106,8 @@ Abhaile keeps the configuration declarative and the deployment steps explicit, s
 
 Abhaile is host-first in production and supports flexible paths for workstation/CI.
 
+All tooling reads path configuration from scripts/paths.ini (required).
+
 ### Host Default
 
 - **Output root:** `/var/lib/abhaile/`
@@ -120,8 +121,8 @@ Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
 
 **Single-host render:**
 
-- `./out/rendered/<host>/`
-- `./out/state/<host>/`
+- `./out/rendered/`
+- `./out/state/`
 
 **Multi-host render (`--all`):**
 

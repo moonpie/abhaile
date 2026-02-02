@@ -1,0 +1,32 @@
+[Resolve]
+# DNS servers for abhaile homelab
+# Primary: CoreDNS filtered
+# Secondary: CoreDNS clean
+DNS={{ network.services['coredns-filtered'].address | strip_cidr }} {{ network.services['coredns-clean'].address | strip_cidr }}
+
+# Use systemd-resolved stub resolver
+# Creates /run/systemd/resolve/stub-resolv.conf with 127.0.0.53
+# Symlink /etc/resolv.conf -> /run/systemd/resolve/stub-resolv.conf
+DNSStubListener=yes
+
+# Search domains
+Domains=~abhaile.home.arpa ~svc.abhaile.home.arpa
+
+# DNSSEC validation (strict, since we control DNS infrastructure)
+DNSSEC=yes
+
+# Disable LLMNR and mDNS (unused in this network)
+LLMNR=no
+MulticastDNS=no
+
+# DNS-over-TLS: disabled (internal DNS, no TLS support needed)
+DNSOverTLS=no
+
+# Allow single-label name resolution (e.g., 'phobos' -> 'phobos.abhaile.home.arpa')
+ResolveUnicastSingleLabel=yes
+
+# Cache DNS responses
+Cache=yes
+
+# Use /etc/hosts for local overrides
+ReadEtcHosts=yes

@@ -1,5 +1,5 @@
 # Bind to specific IP
-bindaddress {{ config.bind_ip }}
+bindaddress {{ service.config.bind_ip }}
 
 # External sources
 pool pool.ntp.org iburst
@@ -9,10 +9,10 @@ pool time.google.com iburst
 allow 172.20.0.0/16
 
 # Local clock fallback
-local stratum {{ config.stratum }}
+local stratum {{ service.config.stratum }}
 
 # Peer with chrony-a
-peer {{ config.peer_ip }} iburst
+peer {{ service.config.peer_ip }} iburst
 
 # Step on large initial offset
 makestep 1.0 3

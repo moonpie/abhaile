@@ -1,0 +1,202 @@
+#!/usr/bin/env python3
+"""Render host-specific artifacts from config/."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add lib/python to path so we can import our modules
+sys.path.insert(0, str(Path(__file__).parent / "lib" / "python"))
+
+from utils.errors import RenderError
+from utils.paths import get_repo_root, load_paths, resolve_output_root
+from utils.config import read_yaml, read_json
+from validation.schema import validate_schema
+from validation.network import validate_network_sanity, validate_host_physical_device
+from validation.services import (
+    parse_mapping,
+    ensure_service_definitions,
+    validate_service_names,
+)
+from renderers.manifest import build_manifest, write_manifest
+from renderers.host import render_host_config
+from renderers.networkd import (
+    render_networkd_config,
+    render_networkd_dropins,
+)
+
+
+def load_and_validate(
+    repo_root: Path,
+    paths: dict[str, str],
+) -> tuple[dict[str, list[str]], dict, dict, list[Path]]:
+    """Load and validate all configuration files.
+
+    Args:
+        repo_root: Repository root.
+        paths: Path configuration.
+
+    Returns:
+        Tuple of (host_services, mapping, network, service_paths).
+
+    Raises:
+        RenderError: If validation fails.
+    """
+    config_root = repo_root / paths["config_root"]
+    schemas_root = repo_root / paths["schemas_root"]
+    hosts_root = config_root / paths["hosts_subdir"]
+
+    mapping_path = config_root / "mapping.yaml"
+    network_path = config_root / "network.yaml"
+
+    mapping_schema = read_json(schemas_root / "mapping.schema.json")
+    network_schema = read_json(schemas_root / "network.schema.json")
+    service_schema = read_json(schemas_root / "service.schema.json")
+    host_schema = read_json(schemas_root / "host.schema.json")
+
+    mapping = read_yaml(mapping_path)
+    network = read_yaml(network_path)
+
+    validate_schema(mapping, mapping_schema, str(mapping_path), schemas_root / "mapping.schema.json")
+    validate_schema(network, network_schema, str(network_path), schemas_root / "network.schema.json")
+
+    validate_network_sanity(network)
+    validate_service_names(config_root)
+
+    # Validate host.yaml files for all hosts in mapping
+    host_services = parse_mapping(mapping)
+    for host in host_services.keys():
+        host_yaml_path = hosts_root / host / "host.yaml"
+        if host_yaml_path.exists():
+            host_data = read_yaml(host_yaml_path)
+            validate_schema(host_data, host_schema, str(host_yaml_path), schemas_root / "host.schema.json")
+            validate_host_physical_device(host, host_data, network)
+
+    service_paths: list[Path] = []
+    for service in sorted({svc for services in host_services.values() for svc in services}):
+        service_paths.extend(ensure_service_definitions(config_root, [service]))
+
+    for service_path in service_paths:
+        service_data = read_yaml(service_path)
+        validate_schema(service_data, service_schema, str(service_path), schemas_root / "service.schema.json")
+
+    return host_services, mapping, network, service_paths
+
+
+def render_host(
+    host: str,
+    output_override: Path | None,
+    paths: dict[str, str],
+    all_mode: bool,
+    repo_root: Path,
+    network: dict,
+    host_services: dict[str, list[str]],
+) -> Path:
+    """Render a single host.
+
+    Args:
+        host: Host name.
+        output_override: Optional output root override.
+        paths: Path configuration.
+        all_mode: True if rendering all hosts.
+        repo_root: Repository root path.
+        network: Network configuration from network.yaml.
+
+    Returns:
+        Path to manifest.json.
+    """
+    output_root = resolve_output_root(host, output_override, paths, all_mode)
+    rendered_dir = output_root / paths["rendered_dir_name"]
+    state_dir = output_root / paths["state_dir_name"]
+
+    rendered_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    config_root = repo_root / paths["config_root"]
+    hosts_root = config_root / paths["hosts_subdir"]
+
+    # Load host configs
+    common_config = read_yaml(hosts_root / "common" / "host.yaml")
+    host_config = read_yaml(hosts_root / host / "host.yaml")
+
+    # Render host configuration files (systemd units, resolved, etc.)
+    render_host_config(
+        host, host_config, common_config, network, config_root, rendered_dir
+    )
+
+    # Render systemd-networkd configuration files
+    render_networkd_config(
+        host, host_config, common_config, network, config_root, rendered_dir
+    )
+
+    # Render systemd-networkd service drop-ins
+    render_networkd_dropins(
+        host,
+        host_services.get(host, []),
+        network,
+        config_root,
+        rendered_dir / "etc/systemd/network",
+    )
+
+    target_root = Path(paths["target_root"])
+    manifest = build_manifest(rendered_dir, target_root)
+
+    manifest_path = state_dir / "manifest.json"
+    write_manifest(manifest, manifest_path)
+
+    return manifest_path
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Render Abhaile desired state")
+    parser.add_argument("--host", help="Host to render (e.g., phobos)")
+    parser.add_argument("--all", action="store_true", help="Render all hosts")
+    parser.add_argument("--output", help="Output root override (workstation/CI)")
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Main entry point."""
+    args = parse_args()
+    if args.all and args.host:
+        raise RenderError("Use either --host or --all, not both")
+    if not args.all and not args.host:
+        raise RenderError("--host is required unless --all is specified")
+
+    repo_root = get_repo_root(Path(__file__))
+    paths = load_paths(repo_root)
+
+    output_override = Path(args.output).resolve() if args.output else None
+
+    host_services, _, network, _ = load_and_validate(repo_root, paths)
+
+    if args.all:
+        hosts = sorted(host_services.keys())
+    else:
+        if args.host not in host_services:
+            raise RenderError(f"Unknown host '{args.host}' in mapping.yaml")
+        hosts = [args.host]
+
+    for host in hosts:
+        render_host(
+            host,
+            output_override,
+            paths,
+            args.all,
+            repo_root,
+            network,
+            host_services,
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except RenderError as exc:
+        print(f"render: {exc}", file=sys.stderr)
+        sys.exit(1)

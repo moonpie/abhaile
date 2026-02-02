@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Abhaile Host Schema",
+  "description": "Schema for config/hosts/<host>/host.yaml",
+  "type": "object",
+  "required": ["name", "composition"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Host identifier (e.g., phobos, deimos, common)"
+    },
+    "physical_device": {
+      "type": "string",
+      "description": "Primary physical network device name"
+    },
+    "composition": {
+      "type": "object",
+      "required": ["software", "user_management"],
+      "properties": {
+        "include": {
+          "type": "array",
+          "description": "Include composition from other hosts (e.g., [common])",
+          "items": {"type": "string"}
+        },
+        "config": {
+          "type": "array",
+          "description": "Configuration files to deploy (static, templated, or directories)",
+          "items": {"$ref": "common.schema.json#/definitions/configEntry"}
+        },
+        "software": {"$ref": "#/definitions/software"},
+        "user_management": {"$ref": "#/definitions/userManagement"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "software": {
+      "type": "object",
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "downloads": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "builds": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "commands": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "userManagement": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/definitions/user"}
+        },
+        "groups": {
+          "type": "object",
+          "additionalProperties": {"$ref": "#/definitions/group"}
+        },
+        "sudoers": {
+          "type": "array",
+          "items": {"$ref": "#/definitions/sudoer"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "user": {
+      "type": "object",
+      "properties": {
+        "uid": {"type": "integer"},
+        "primary_group": {"type": "string"},
+        "additional_groups": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "home": {"type": "string"},
+        "shell": {"type": "string"},
+        "description": {"type": "string"},
+        "ssh_authorized_keys": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "required": ["gid"],
+      "properties": {
+        "gid": {"type": "integer"}
+      },
+      "additionalProperties": false
+    },
+    "sudoer": {
+      "type": "object",
+      "required": ["name", "rules"],
+      "properties": {
+        "name": {"type": "string"},
+        "rules": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

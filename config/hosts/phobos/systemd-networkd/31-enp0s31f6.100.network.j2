@@ -2,5 +2,5 @@
 Name=enp0s31f6.100
 
 [Network]
-Address={{ hosts.phobos.interfaces['enp0s31f6.100'].address }}
+Address={{ network.hosts[host_name].interfaces['enp0s31f6.100'].address }}
 IPVLAN=ipvlan-l2.100

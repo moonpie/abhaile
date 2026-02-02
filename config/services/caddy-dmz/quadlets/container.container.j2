@@ -4,11 +4,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-DNS={{ services['coredns-clean'].address | strip_cidr }}
+DNS={{ network.services['coredns-clean'].address | strip_cidr }}
 EnvironmentFile=/etc/caddy/dns.env
 Image={{ build }}
-Network={{ services[service_name].vlan }}.network
-PodmanArgs=--ip={{ services[service_name].address | strip_cidr }}
+Network={{ network.services[service_name].vlan }}.network
+PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
 Timezone=local
 {% for v in volume_lines   %}
 {{ v }}

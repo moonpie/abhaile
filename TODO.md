@@ -2,6 +2,18 @@
 
 ## Decision Log
 
+1. Decision: Resolve systemd-networkd drop-in interface names by parsing the base file's [Match] Name=, and allow any \*.d drop-in directory (not just .network.d).
+   Date: 2026-02-02
+   Rationale: Avoids fragile filename parsing and supports all systemd-networkd drop-in types; ensures base file exists and provides authoritative interface name.
+   Scope: Networking renderer drop-in selection and validation logic.
+   Confirmed by: user
+
+1. Decision: Centralize tooling paths in scripts/paths.ini for consistent path resolution.
+   Date: 2026-02-01
+   Rationale: Single source of truth for defaults across scripts in any language.
+   Scope: scripts and tooling path resolution.
+   Confirmed by: user
+
 1. Decision: Suggestions and alternatives are allowed, but must be confirmed before deviating from the task prompt.
    Date: 2025-03-08
    Rationale: Encourage improvements while keeping scope controlled.
@@ -32,9 +44,17 @@
    Scope: Config validation (mapping.schema.json, network.schema.json, service.schema.json in schemas/).
    Confirmed by: user (via Foundations/Define config schema task)
 
+1. Decision: Adopt explicit host.yaml files with schema validation for host configuration.
+   Date: 2026-02-01
+   Rationale: Centralizes host-specific configuration in a single declarative file (matching service.yaml pattern); enables schema validation via pre-commit; improves discoverability and reduces cognitive load vs. scattered implicit directory structure. Composition uses additive inheritance via `include: common` with no deletion capability.
+   Scope: Host configuration structure (config/hosts/\<host>/host.yaml and host.schema.json).
+   Confirmed by: user (via implementation review)
+
 ## Routine Prompts
 
 ### Session Preface
+
+#### Pre-prompt
 
 ```text
 You are my coding buddy for this repo. Follow .github/copilot-instructions.md.
@@ -44,13 +64,12 @@ Suggest alternatives when you see them, but ask for confirmation before deviatin
 Log any decisions in the Decision Log at the top of TODO.md if they’re not ADR-worthy.
 ```
 
-### Confirm understanding and plane before edits
+#### Post-prompt
 
 ```text
 Restate the task in your own words, list the files you will read/write, and call out any assumptions or ambiguities before you start.
 Do not proceed if there are any ambiguities - let me clarify them first
 If everything is clear - please provide a short plan (3–6 steps) before making changes.
-
 ```
 
 ### Proceed
@@ -59,11 +78,10 @@ If everything is clear - please provide a short plan (3–6 steps) before making
 Proceed with the plan. Ask for confirmation if you need to deviate.
 ```
 
-### Wrap-up
+### Session Wrap-up
 
 ```text
-Summarize what changed, list files modified, note any follow-ups, and update
-the Decision Log if a decision was made.
+Summarize what changed, list files modified, note any follow-ups, and update the Decision Log if a decision was made.
 ```
 
 ## Render/Apply Contract (Derived From config/)
@@ -72,7 +90,7 @@ the Decision Log if a decision was made.
 
 - `config/mapping.yaml` defines which services render per host.
 - `config/network.yaml` defines VLANs, IPs, DNS zones, and records.
-- `config/hosts/**` defines host software, users, systemd-networkd templates, and common config.
+- `config/hosts/**/host.yaml` defines host software, users, systemd-networkd templates, and common config.
 - `config/services/**` defines service metadata, quadlets, systemd units, configs, and vault-agent templates.
 - `config/_templates/**` defines shared Jinja-style templates for network, quadlets, and host/service files.
 
@@ -149,20 +167,20 @@ the Decision Log if a decision was made.
 
 ### Phase: Render Pipeline
 
-**Status:** Not started
+**Status:** In progress
 
 | Status | Task | Description | Completion Criteria | Dependencies |
 | --- | --- | --- | --- | --- |
-| [ ] | Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `<output>/rendered/` (default: `/var/lib/abhaile/rendered/` on hosts). | Running the tool renders a host tree with a manifest in `<output>/state/manifest.json`. | Define config schema |
-| [ ] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/etc/systemd/network/` and resolved files present. | Renderer CLI |
-| [ ] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `coredns-common`. | Zone files and serial metadata rendered deterministically under `<output>/rendered/`. | Renderer CLI |
-| [ ] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/users.yaml`. | User/group/sudoers files generated under `<output>/rendered/` with deterministic ordering. | Renderer CLI |
-| [ ] | Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` across host/common. | Per-host package manifest and command plan rendered under `<output>/rendered/`. | Renderer CLI |
+| [x] | Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `<output>/rendered/` (default: `/var/lib/abhaile/rendered/` on hosts). | Running the tool renders a host tree with a manifest in `<output>/state/manifest.json`. | Define config schema |
+| [x] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/etc/systemd/network/` and resolved files present. | Renderer CLI |
+| [ ] | Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` from `config/hosts/**/host.yaml` (composition.software) across host/common. | Per-host package manifest and command plan rendered under `<output>/rendered/`. | Renderer CLI |
+| [ ] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/host.yaml` (user_management). | User/group/sudoers files generated under `<output>/rendered/` with deterministic ordering. | Renderer CLI |
+| [ ] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/`. | Renderer CLI |
 | [ ] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/` per mapped service. | Renderer CLI |
 | [ ] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/` per mapped service. | Renderer CLI |
-| [ ] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/`. | Renderer CLI |
 | [ ] | Ingress renderer | Aggregate ingress blocks into per-host Caddy fragments. | Host ingress files rendered under `<output>/rendered/` from service ingress definitions. | Service configs renderer |
-| [ ] | Manifest writer | Produce `<output>/state/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
+| [ ] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `coredns-common`. | Zone files and serial metadata rendered deterministically under `<output>/rendered/`. | Renderer CLI |
+| [-] | Manifest writer | Produce `<output>/state/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
 
 #### Session Prompt (Renderer CLI)
 
@@ -182,31 +200,31 @@ the Decision Log if a decision was made.
 - Constraints: templates fail fast on missing network data.
 - Dependencies: Renderer CLI.
 
-#### Session Prompt (DNS renderer)
+#### Session Prompt (Packaging renderer)
 
-- Phase/Task: Render Pipeline / DNS renderer.
-- Required inputs: `config/network.yaml`, `config/services/**`, `config/_templates/services/**`.
-- Outputs to produce: `<output>/rendered/etc/coredns/zones/*`; `<output>/state/dns-serials.json`.
-- Acceptance: zones render deterministically with stable serials and correct records.
-- Constraints: no secrets; zone rendering is pure function of `config/network.yaml`.
+- Phase/Task: Render Pipeline / Packaging renderer.
+- Required inputs: `config/hosts/**/host.yaml` (composition.software), `config/hosts/common/host.yaml`.
+- Outputs to produce: `<output>/rendered/var/lib/abhaile/package-manifest.json`; `<output>/rendered/var/lib/abhaile/command-plan.json`.
+- Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host.
+- Constraints: deterministic ordering; no network access.
 - Dependencies: Renderer CLI.
 
 #### Session Prompt (Users renderer)
 
 - Phase/Task: Render Pipeline / Users renderer.
-- Required inputs: `config/hosts/**/users.yaml`, `config/hosts/common/users.yaml`.
+- Required inputs: `config/hosts/**/host.yaml` (user_management), `config/hosts/common/host.yaml`.
 - Outputs to produce: `<output>/rendered/etc/abhaile/users.d/users.json`; `<output>/rendered/etc/sudoers.d/abhaile`.
 - Acceptance: user/group/sudo data is deterministic and sorted; no duplicates.
 - Constraints: no secrets; read-only from `config/`.
 - Dependencies: Renderer CLI.
 
-#### Session Prompt (Packaging renderer)
+#### Session Prompt (Service configs renderer)
 
-- Phase/Task: Render Pipeline / Packaging renderer.
-- Required inputs: `config/hosts/**`, `config/hosts/common/**`.
-- Outputs to produce: `<output>/rendered/var/lib/abhaile/package-manifest.json`; `<output>/rendered/var/lib/abhaile/command-plan.json`.
-- Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host.
-- Constraints: deterministic ordering; no network access.
+- Phase/Task: Render Pipeline / Service configs renderer.
+- Required inputs: `config/services/**`, `config/_templates/services/**`, `config/network.yaml`.
+- Outputs to produce: `<output>/rendered/etc/abhaile/services/<service>/...` with configs and rendered templates.
+- Acceptance: all configs referenced by service.yaml are rendered; template errors fail the render.
+- Constraints: templates must not materialize secrets.
 - Dependencies: Renderer CLI.
 
 #### Session Prompt (Quadlets renderer - containers)
@@ -227,15 +245,6 @@ the Decision Log if a decision was made.
 - Constraints: no secrets; pod definitions derived from service config.
 - Dependencies: Renderer CLI.
 
-#### Session Prompt (Service configs renderer)
-
-- Phase/Task: Render Pipeline / Service configs renderer.
-- Required inputs: `config/services/**`, `config/_templates/services/**`, `config/network.yaml`.
-- Outputs to produce: `<output>/rendered/etc/abhaile/services/<service>/...` with configs and rendered templates.
-- Acceptance: all configs referenced by service.yaml are rendered; template errors fail the render.
-- Constraints: templates must not materialize secrets.
-- Dependencies: Renderer CLI.
-
 #### Session Prompt (Ingress renderer)
 
 - Phase/Task: Render Pipeline / Ingress renderer.
@@ -244,6 +253,15 @@ the Decision Log if a decision was made.
 - Acceptance: host ingress fragments are aggregated and deterministic.
 - Constraints: no secrets; only mapped services included.
 - Dependencies: Service configs renderer.
+
+#### Session Prompt (DNS renderer)
+
+- Phase/Task: Render Pipeline / DNS renderer.
+- Required inputs: `config/network.yaml`, `config/services/**`, `config/_templates/services/**`.
+- Outputs to produce: `<output>/rendered/etc/coredns/zones/*`; `<output>/state/dns-serials.json`.
+- Acceptance: zones render deterministically with stable serials and correct records.
+- Constraints: no secrets; zone rendering is pure function of `config/network.yaml`.
+- Dependencies: Renderer CLI.
 
 #### Session Prompt (Manifest writer)
 
@@ -350,13 +368,14 @@ the Decision Log if a decision was made.
 
 ### Phase: Validation and Testing
 
-**Status:** Not started
+**Status:** In progress
 
 | Status | Task | Description | Completion Criteria | Dependencies |
 | --- | --- | --- | --- | --- |
-| [ ] | Config validation | Implement validation for IP uniqueness, VLAN sanity, and mapping integrity. | Validation fails on invalid config and passes on current. | Define config schema |
-| [ ] | Render determinism | Add tests or checks for stable render output hashes. | Re-render yields identical manifests. | Manifest writer |
-| [ ] | Linting hooks | Add a basic lint/check workflow for YAML and templates. | Lint script runs locally without network access. | Define repo layout |
+| [x] | Config validation | Implement validation for IP uniqueness, VLAN sanity, and mapping integrity. | Validation fails on invalid config and passes on current. | Define config schema |
+| [-] | Render determinism | Add tests or checks for stable render output hashes. | Re-render yields identical manifests. | Manifest writer |
+| [-] | Unit and integration test suite | Comprehensive pytest suite covering utils, validation, renderers, and end-to-end flow. | 32 tests (25 unit + 7 integration) all passing; docs/TESTING.md. | Manifest writer |
+| [-] | Linting hooks | Add a basic lint/check workflow for YAML and templates. | Lint script runs locally without network access. | Define repo layout |
 
 #### Session Prompt (Config validation)
 

@@ -2,9 +2,9 @@
 Name=enp0s31f6
 
 [Network]
-Address={{ hosts.deimos.interfaces['enp0s31f6'].address }}
-Gateway={{ vlans.services.gateway }}
-DNS={{ services['coredns-filtered'].address }} {{ services['coredns-clean'].address }}
+Address={{ network.hosts[host_name].interfaces['enp0s31f6'].address }}
+Gateway={{ network.vlans.services.gateway }}
+DNS={{ network.services['coredns-filtered'].address }} {{ network.services['coredns-clean'].address }}
 Domains=abhaile.home.arpa
 UseDomains=yes
 IPVLAN=ipvlan-l2

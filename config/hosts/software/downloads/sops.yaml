@@ -1,8 +1,0 @@
----
-name: "Install latest SOPS binary"
-description: "Download the newest SOPS release from GitHub and install it into /usr/local/bin"
-commands:
-  - 'SOPS_VER=$(curl -s https://api.github.com/repos/getsops/sops/releases/latest | jq -r .tag_name)'
-  - 'echo "Installing SOPS ${SOPS_VER}"'
-  - 'sudo curl -Lo /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/${SOPS_VER}/sops-${SOPS_VER}.linux.amd64"'
-  - 'sudo chmod 0755 /usr/local/bin/sops'

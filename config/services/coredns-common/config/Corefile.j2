@@ -1,11 +1,11 @@
 # CoreDNS Configuration
-# Bind Address: {{ config.bind_ip }}
-# Forward To: {{ config.forward_to }}
+# Bind Address: {{ service.config.bind_ip }}
+# Forward To: {{ service.config.forward_to }}
 
-{% for zone in dns.zones_common %}
+{% for zone in network.dns.zones if zone.provider == 'coredns-common' %}
 # ----- Authoritative: {{ zone.name.rstrip('.') }} -----
 {{ zone.name.rstrip('.') }}:53 {
-    bind {{ config.bind_ip }}
+    bind {{ service.config.bind_ip }}
 
     log
     errors
@@ -15,7 +15,7 @@
     # Omada dynamic client/device/DHCP records
     # Uses direct IP to avoid DNS bootstrap/circular deps.
     omada {
-        controller_url https://{{ config.omada_ip }}:8043
+        controller_url https://{{ service.config.omada_ip }}:8043
         site .*
         username ${OMADA_USERNAME}
         password ${OMADA_PASSWORD}
@@ -29,7 +29,7 @@
 {% endfor %}
 # ----- Default recursive resolver -----
 .:53 {
-    bind {{ config.bind_ip }}
+    bind {{ service.config.bind_ip }}
 
     log
     errors
@@ -39,12 +39,12 @@
     # - TXT/SOA/other types fall through to upstream.
     template IN A abhaile.dedyn.io {
         match ^(.*\.)?abhaile\.dedyn\.io\.$
-        answer "{{ '{{ ' }}.Name{{ ' }}' }} 60 IN A {{ config.dmz_caddy_ip }}"
+        answer "{{ '{{ ' }}.Name{{ ' }}' }} 60 IN A {{ service.config.dmz_caddy_ip }}"
         fallthrough
     }
 
     # Forward everything else
-    forward . {{ config.forward_to }} {
+    forward . {{ service.config.forward_to }} {
         force_tcp
     }
 

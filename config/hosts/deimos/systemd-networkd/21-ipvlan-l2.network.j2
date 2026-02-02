@@ -2,4 +2,4 @@
 Name=ipvlan-l2
 
 [Network]
-Address={{ hosts.deimos.interfaces['ipvlan-l2'].address }}
+Address={{ network.hosts[host_name].interfaces['ipvlan-l2'].address }}

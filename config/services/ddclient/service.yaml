@@ -1,14 +1,14 @@
 name: ddclient
-type: host
-mode: ''
-network: host
-config:
-  - source: ddclient/systemd/ddclient-conf.service
-    destination: /etc/systemd/system/ddclient-conf.service
-  - source: ddclient/systemd/ddclient-conf.path
-    destination: /etc/systemd/system/ddclient-conf.path
-vault_agent:
-  templates:
-    - source: "ddclient/templates/ddclient.conf.ctmpl"
-      out: "ddclient.conf"
-      perms: "0640"
+systemd:
+  network: host
+composition:
+  config:
+    - source: ddclient/systemd/ddclient-conf.service
+      destination: /etc/systemd/system/ddclient-conf.service
+    - source: ddclient/systemd/ddclient-conf.path
+      destination: /etc/systemd/system/ddclient-conf.path
+  vault_agent:
+    templates:
+      - source: ddclient/templates/ddclient.conf.ctmpl
+        out: ddclient.conf
+        perms: '0640'

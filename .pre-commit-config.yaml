@@ -1,5 +1,4 @@
 repos:
-  # ===== Formatting & Basics =====
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -15,32 +14,24 @@ repos:
         name: Mixed Line Endings
       - id: check-merge-conflict
         name: Check Merge Conflicts
-  # ===== YAML Lint =====
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.37.1
+  - repo: https://github.com/google/yamlfmt
+    rev: v0.21.0
     hooks:
-      - id: yamllint
-        name: Yamllint
-  # Python-based Markdown formatter (no Node.js required)
-  # ===== Markdown Formatting =====
+      - id: yamlfmt
+        name: Format YAML (yamlfmt)
   - repo: https://github.com/executablebooks/mdformat
     rev: 1.0.0
     hooks:
       - id: mdformat
         name: Format Markdown (mdformat)
         files: \.md$
-  # Python-based Markdown linter (PyMarkdown)
-  # ===== Markdown Lint =====
-  - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.34
+  - repo: https://github.com/psf/black
+    rev: 26.1.0
     hooks:
-      - id: pymarkdown
-        name: PyMarkdown Lint
-        args: ["-d", "md013", "scan", "."]
-        files: \.md$
-  # ===== Schema Validation =====
+      - id: black
+        name: Format Python (black)
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.36.0
+    rev: 0.36.1
     hooks:
       - id: check-jsonschema
         name: Validate Mapping.yaml Against Schema
@@ -53,43 +44,50 @@ repos:
         types: [yaml]
         args: ["--schemafile", "schemas/network.schema.json"]
       - id: check-jsonschema
+        name: Validate Host.yaml Files Against Schema
+        files: ^config/hosts/.*/host\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/host.schema.json"]
+      - id: check-jsonschema
         name: Validate Service.yaml Files Against Schema
         files: ^config/services/.*/service\.yaml$
         types: [yaml]
         args: ["--schemafile", "schemas/service.schema.json"]
-  # ===== Python Lint/Format =====
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        name: Lint YAML (yamllint)
+  - repo: https://github.com/jackdewinter/pymarkdown
+    rev: v0.9.35
+    hooks:
+      - id: pymarkdown
+        name: Lint Markdown (pymarkdown)
+        args: ["-d", "md013", "scan", "."]
+        files: \.md$
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.14.9
+    rev: v0.14.14
     hooks:
       - id: ruff
-        name: Ruff (Python Linter/Fix)
-        args: [--fix]
-  - repo: https://github.com/psf/black
-    rev: 25.12.0
-    hooks:
-      - id: black
-        name: Black (Python Formatter)
-  # ===== Templates =====
+        name: Lint Python (ruff)
   - repo: https://github.com/aristanetworks/j2lint.git
     rev: v1.2.0
     hooks:
       - id: j2lint
-        name: Jinja2 Lint
+        name: Lint Jinja2 Templates (j2lint)
         files: ".*\\.j2$"
-  # ===== Shell =====
   - repo: https://github.com/shellcheck-py/shellcheck-py
     rev: v0.11.0.1
     hooks:
       - id: shellcheck
-        name: Shellcheck (Shell Lint)
+        name: Lint Shell Scripts (shellcheck)
         files: ^(tools/|config/|systemd/).*\.(sh|bash)$
         args: ["--severity=warning", "--exclude=SC1091"]
-  # ===== Secrets =====
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.0
     hooks:
       - id: gitleaks
-        name: Gitleaks (Detect Hardcoded Secrets)
+        name: Detect Hardcoded Secrets (gitleaks)
         entry: gitleaks git --pre-commit --redact --staged --verbose
         language: golang
         pass_filenames: false

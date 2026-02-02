@@ -4,8 +4,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Pod]
-Network={{ services[service_name].vlan }}.network
-IP={{ services[service_name].address | strip_cidr }}
+Network={{ network.services[service_name].vlan }}.network
+IP={{ network.services[service_name].address | strip_cidr }}
 
 [Install]
 WantedBy=multi-user.target

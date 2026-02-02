@@ -1,36 +1,37 @@
 name: caddy-dmz
-type: container
-mode: rootful
-network: ipvlan-l2
-ingress:
-  dmz:
-    - base: caddy-dmz/config/Caddyfile
-      destination: /srv/caddy/dmz/Caddyfile
-config:
-  - source: caddy-dmz/build/Containerfile
-    destination: /srv/build/caddy-desec/Containerfile
-  - source: caddy-dmz/systemd/caddy-dns-desec.service
-    destination: /etc/systemd/system/caddy-dns-desec.service
-  - source: caddy-dmz/systemd/caddy-dns-desec.path
-    destination: /etc/systemd/system/caddy-dns-desec.path
-vault_agent:
-  templates:
-    - source: "caddy-dmz/templates/caddy-dns-desec.env.ctmpl"
-      out: "caddy-dns-desec.env"
-      perms: "0640"
-container:
-  named_volumes:
-    - name: config
-      host: /srv/caddy/dmz/config
-      mount: /config
-    - name: data
-      host: /srv/caddy/dmz/data
-      mount: /data
-    - name: host-certs
-      host: /etc/ssl/certs
-      mount: /etc/ssl/certs
-      mode: ro
-      shared: true
-  mounted_files:
-    - host: /srv/caddy/dmz/Caddyfile
-      mount: /etc/caddy/Caddyfile
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  config:
+    - source: caddy-dmz/build/Containerfile
+      destination: /srv/build/caddy-desec/Containerfile
+    - source: caddy-dmz/systemd/caddy-dns-desec.service
+      destination: /etc/systemd/system/caddy-dns-desec.service
+    - source: caddy-dmz/systemd/caddy-dns-desec.path
+      destination: /etc/systemd/system/caddy-dns-desec.path
+  vault_agent:
+    templates:
+      - source: caddy-dmz/templates/caddy-dns-desec.env.ctmpl
+        out: caddy-dns-desec.env
+        perms: '0640'
+  ingress:
+    dmz:
+      - base: caddy-dmz/config/Caddyfile
+        destination: /srv/caddy/dmz/Caddyfile
+  container:
+    named_volumes:
+      - name: config
+        host: /srv/caddy/dmz/config
+        mount: /config
+      - name: data
+        host: /srv/caddy/dmz/data
+        mount: /data
+      - name: host-certs
+        host: /etc/ssl/certs
+        mount: /etc/ssl/certs
+        mode: ro
+        shared: true
+    mounted_files:
+      - host: /srv/caddy/dmz/Caddyfile
+        mount: /etc/caddy/Caddyfile

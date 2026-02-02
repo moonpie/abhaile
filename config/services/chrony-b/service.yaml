@@ -1,12 +1,12 @@
 name: chrony-b
-type: host
-mode: ''
-network: service-32
-config:
-  - source:
-      template: chrony-common/config/chrony.conf.j2
-      variables:
-        bind_ip: "%%services.chrony-b.address%%"
-        peer_ip: "%%services.chrony-a.address%%"
-        stratum: 11
-    destination: /etc/chrony/chrony.conf
+systemd:
+  network: service-32
+composition:
+  config:
+    - source:
+        template: chrony-common/config/chrony.conf.j2
+        variables:
+          bind_ip: '%%network.services.chrony-b.address%%'
+          peer_ip: '%%network.services.chrony-a.address%%'
+          stratum: 11
+      destination: /etc/chrony/chrony.conf

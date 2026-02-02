@@ -1,4 +1,6 @@
 name: prometheus
-type: container
-mode: rootful
-network: ipvlan-l2
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  container: {}

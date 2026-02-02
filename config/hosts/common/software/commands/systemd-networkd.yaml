@@ -1,0 +1,6 @@
+name: "Switch host networking to systemd-networkd"
+description: "Disable legacy /etc/network/interfaces and enable systemd-networkd"
+commands:
+  - 'if [ -f /etc/network/interfaces ]; then sudo mv /etc/network/interfaces /etc/network/interfaces.save; fi'
+  - 'sudo systemctl enable systemd-networkd.service'
+  - 'sudo systemctl start systemd-networkd.service'

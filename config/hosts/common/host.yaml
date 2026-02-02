@@ -1,0 +1,62 @@
+name: common
+composition:
+  include: []
+  config:
+    - source:
+        template: common/systemd-resolved/resolved.conf.j2
+        variables: {}
+      destination: /etc/systemd/resolved.conf
+  software:
+    packages:
+      - podman
+      - crun
+      - vim
+      - git
+      - vlan
+      - curl
+      - systemd-resolved
+      - lm-sensors
+      - sudo
+      - unattended-upgrades
+      - iperf
+      - iperf3
+      - chrony
+      - unzip
+      - age
+      - jq
+    downloads:
+      - sops
+    builds: []
+    commands:
+      - unattended-upgrades
+      - kernel-modules
+      - systemd-networkd
+      - systemd-resolved
+      - netavark-dhcp-proxy
+  user_management:
+    users:
+      abhaile:
+        uid: 1001
+        primary_group: abhaile
+        home: /home/abhaile
+        shell: /bin/bash
+        description: "Abhaile service account"
+        ssh_authorized_keys: []
+        # SSH public keys for remote management
+        # Format: "ssh-rsa AAAA... user@host" or "ssh-ed25519 AAAA... user@host"
+        # Example (replace with actual keys):
+        # - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM... moonpie@laptop"
+    groups:
+      abhaile:
+        gid: 1001
+      apex:
+        # For Coral TPU access (phobos only, but defined here for idempotency)
+        gid: 1002
+      sudo:
+        # For sudoers access (all hosts)
+        gid: 27
+    sudoers:
+      - name: abhaile
+        rules:
+          - "abhaile  ALL=(ALL) NOPASSWD:ALL"
+          - "# Abhaile system account - unrestricted access"

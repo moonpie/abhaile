@@ -9,7 +9,6 @@ vlans:
     cidr: 172.20.100.0/24
     gateway: 172.20.100.1
     ipvlanl2_range: 172.20.100.200-172.20.100.254
-
 dns:
   zones:
     - name: abhaile.dedyn.io.
@@ -38,10 +37,8 @@ dns:
         date: 20260106
         counter: 00
         content_hash: 9a32cef98220c14c59d436eab5b80e9d3f2c20beb986662b10feae963a35a7e0
-
 hosts:
   phobos:
-    physical_device: enp0s31f6
     interfaces:
       enp0s31f6:
         address: 172.20.20.10/24
@@ -60,11 +57,11 @@ hosts:
         records:
           - type: a
             name: phobos
-            rdata: "%%hosts.phobos.interfaces.enp0s31f6.address | strip_cidr%%"
+            rdata: "%%network.hosts.phobos.interfaces.enp0s31f6.address | strip_cidr%%"
             ptr: true
           - type: a
             name: dmz
-            rdata: "%%hosts.phobos.interfaces.enp0s31f6.100.address | strip_cidr%%"
+            rdata: "%%network.hosts.phobos.interfaces.enp0s31f6.100.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -72,7 +69,6 @@ hosts:
             name: phobos
             rdata: phobos.svc.abhaile.home.arpa.
   deimos:
-    physical_device: enp0s31f6
     interfaces:
       enp0s31f6:
         address: 172.20.20.11/24
@@ -85,14 +81,13 @@ hosts:
         records:
           - type: a
             name: deimos
-            rdata: "%%hosts.deimos.interfaces.enp0s31f6.address | strip_cidr%%"
+            rdata: "%%network.hosts.deimos.interfaces.enp0s31f6.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
           - type: cname
             name: deimos
             rdata: deimos.svc.abhaile.home.arpa.
-
 services:
   caddy-dmz:
     address: 172.20.100.200/32
@@ -102,13 +97,13 @@ services:
         records:
           - type: a
             name: caddy-dmz
-            rdata: "%%services.caddy-dmz.address | strip_cidr%%"
+            rdata: "%%network.services.caddy-dmz.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.dedyn.io.
         records:
           - type: a
             name: "*"
-            rdata: "%%services.caddy-dmz.address | strip_cidr%%"
+            rdata: "%%network.services.caddy-dmz.address | strip_cidr%%"
   caddy-internal:
     address: 172.20.20.200/32
     vlan: services
@@ -117,7 +112,7 @@ services:
         records:
           - type: a
             name: caddy-internal
-            rdata: "%%services.caddy-internal.address | strip_cidr%%"
+            rdata: "%%network.services.caddy-internal.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -138,7 +133,7 @@ services:
         records:
           - type: a
             name: authelia
-            rdata: "%%services.authelia.address | strip_cidr%%"
+            rdata: "%%network.services.authelia.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -156,7 +151,7 @@ services:
         records:
           - type: a
             name: homepage
-            rdata: "%%services.homepage.address | strip_cidr%%"
+            rdata: "%%network.services.homepage.address | strip_cidr%%"
             ptr: true
   netbox:
     address: 172.20.20.203/32
@@ -166,7 +161,7 @@ services:
         records:
           - type: a
             name: netbox
-            rdata: "%%services.netbox.address | strip_cidr%%"
+            rdata: "%%network.services.netbox.address | strip_cidr%%"
             ptr: true
   vault:
     address: 172.20.20.204/32
@@ -176,7 +171,7 @@ services:
         records:
           - type: a
             name: vault
-            rdata: "%%services.vault.address | strip_cidr%%"
+            rdata: "%%network.services.vault.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -191,7 +186,7 @@ services:
         records:
           - type: a
             name: vaultwarden
-            rdata: "%%services.vaultwarden.address | strip_cidr%%"
+            rdata: "%%network.services.vaultwarden.address | strip_cidr%%"
             ptr: true
   postfix:
     address: 172.20.20.206/32
@@ -201,7 +196,7 @@ services:
         records:
           - type: a
             name: postfix
-            rdata: "%%services.postfix.address | strip_cidr%%"
+            rdata: "%%network.services.postfix.address | strip_cidr%%"
             ptr: true
   crowdsec:
     address: 172.20.20.207/32
@@ -211,7 +206,7 @@ services:
         records:
           - type: a
             name: crowdsec
-            rdata: "%%services.crowdsec.address | strip_cidr%%"
+            rdata: "%%network.services.crowdsec.address | strip_cidr%%"
             ptr: true
   prometheus:
     address: 172.20.20.210/32
@@ -221,7 +216,7 @@ services:
         records:
           - type: a
             name: prometheus
-            rdata: "%%services.prometheus.address | strip_cidr%%"
+            rdata: "%%network.services.prometheus.address | strip_cidr%%"
             ptr: true
   alertmanager:
     address: 172.20.20.211/32
@@ -231,7 +226,7 @@ services:
         records:
           - type: a
             name: alertmanager
-            rdata: "%%services.alertmanager.address | strip_cidr%%"
+            rdata: "%%network.services.alertmanager.address | strip_cidr%%"
             ptr: true
   grafana:
     address: 172.20.20.212/32
@@ -241,7 +236,7 @@ services:
         records:
           - type: a
             name: grafana
-            rdata: "%%services.grafana.address | strip_cidr%%"
+            rdata: "%%network.services.grafana.address | strip_cidr%%"
             ptr: true
   blackbox-exporter:
     address: 172.20.20.213/32
@@ -251,7 +246,7 @@ services:
         records:
           - type: a
             name: blackbox-exporter
-            rdata: "%%services.blackbox-exporter.address | strip_cidr%%"
+            rdata: "%%network.services.blackbox-exporter.address | strip_cidr%%"
             ptr: true
   snmp-exporter:
     address: 172.20.20.214/32
@@ -261,7 +256,7 @@ services:
         records:
           - type: a
             name: snmp-exporter
-            rdata: "%%services.snmp-exporter.address | strip_cidr%%"
+            rdata: "%%network.services.snmp-exporter.address | strip_cidr%%"
             ptr: true
   uptime-kuma:
     address: 172.20.20.215/32
@@ -271,7 +266,7 @@ services:
         records:
           - type: a
             name: uptime-kuma
-            rdata: "%%services.uptime-kuma.address | strip_cidr%%"
+            rdata: "%%network.services.uptime-kuma.address | strip_cidr%%"
             ptr: true
   librespeed:
     address: 172.20.20.216/32
@@ -281,7 +276,7 @@ services:
         records:
           - type: a
             name: librespeed
-            rdata: "%%services.librespeed.address | strip_cidr%%"
+            rdata: "%%network.services.librespeed.address | strip_cidr%%"
             ptr: true
   smokeping:
     address: 172.20.20.217/32
@@ -291,7 +286,7 @@ services:
         records:
           - type: a
             name: smokeping
-            rdata: "%%services.smokeping.address | strip_cidr%%"
+            rdata: "%%network.services.smokeping.address | strip_cidr%%"
             ptr: true
   loki:
     address: 172.20.20.218/32
@@ -301,7 +296,7 @@ services:
         records:
           - type: a
             name: loki
-            rdata: "%%services.loki.address | strip_cidr%%"
+            rdata: "%%network.services.loki.address | strip_cidr%%"
             ptr: true
   omada-controller:
     address: 172.20.20.220/32
@@ -311,7 +306,7 @@ services:
         records:
           - type: a
             name: omada-controller
-            rdata: "%%services.omada-controller.address | strip_cidr%%"
+            rdata: "%%network.services.omada-controller.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -326,7 +321,7 @@ services:
         records:
           - type: a
             name: home-assistant
-            rdata: "%%services.home-assistant.address | strip_cidr%%"
+            rdata: "%%network.services.home-assistant.address | strip_cidr%%"
             ptr: true
   mosquitto:
     address: 172.20.20.222/32
@@ -336,7 +331,7 @@ services:
         records:
           - type: a
             name: mosquitto
-            rdata: "%%services.mosquitto.address | strip_cidr%%"
+            rdata: "%%network.services.mosquitto.address | strip_cidr%%"
             ptr: true
   zigbee2mqtt:
     address: 172.20.20.223/32
@@ -346,7 +341,7 @@ services:
         records:
           - type: a
             name: zigbee2mqtt
-            rdata: "%%services.zigbee2mqtt.address | strip_cidr%%"
+            rdata: "%%network.services.zigbee2mqtt.address | strip_cidr%%"
             ptr: true
   esphome:
     address: 172.20.20.224/32
@@ -356,7 +351,7 @@ services:
         records:
           - type: a
             name: esphome
-            rdata: "%%services.esphome.address | strip_cidr%%"
+            rdata: "%%network.services.esphome.address | strip_cidr%%"
             ptr: true
   go2rtc:
     address: 172.20.20.225/32
@@ -366,7 +361,7 @@ services:
         records:
           - type: a
             name: go2rtc
-            rdata: "%%services.go2rtc.address | strip_cidr%%"
+            rdata: "%%network.services.go2rtc.address | strip_cidr%%"
             ptr: true
   frigate:
     address: 172.20.20.226/32
@@ -376,7 +371,7 @@ services:
         records:
           - type: a
             name: frigate
-            rdata: "%%services.frigate.address | strip_cidr%%"
+            rdata: "%%network.services.frigate.address | strip_cidr%%"
             ptr: true
   blocky:
     address: 172.20.20.234/32
@@ -386,7 +381,7 @@ services:
         records:
           - type: a
             name: blocky
-            rdata: "%%services.blocky.address | strip_cidr%%"
+            rdata: "%%network.services.blocky.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -401,7 +396,7 @@ services:
         records:
           - type: a
             name: coredns-filtered
-            rdata: "%%services.coredns-filtered.address | strip_cidr%%"
+            rdata: "%%network.services.coredns-filtered.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -416,7 +411,7 @@ services:
         records:
           - type: a
             name: coredns-clean
-            rdata: "%%services.coredns-clean.address | strip_cidr%%"
+            rdata: "%%network.services.coredns-clean.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -431,7 +426,7 @@ services:
         records:
           - type: a
             name: chrony-a
-            rdata: "%%services.chrony-a.address | strip_cidr%%"
+            rdata: "%%network.services.chrony-a.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -446,7 +441,7 @@ services:
         records:
           - type: a
             name: chrony-b
-            rdata: "%%services.chrony-b.address | strip_cidr%%"
+            rdata: "%%network.services.chrony-b.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
@@ -461,7 +456,7 @@ services:
         records:
           - type: a
             name: gluetun
-            rdata: "%%services.gluetun.address | strip_cidr%%"
+            rdata: "%%network.services.gluetun.address | strip_cidr%%"
             ptr: true
   immich:
     address: 172.20.20.240/32
@@ -471,7 +466,7 @@ services:
         records:
           - type: a
             name: immich
-            rdata: "%%services.immich.address | strip_cidr%%"
+            rdata: "%%network.services.immich.address | strip_cidr%%"
             ptr: true
   jellyfin:
     address: 172.20.20.241/32
@@ -481,7 +476,7 @@ services:
         records:
           - type: a
             name: jellyfin
-            rdata: "%%services.jellyfin.address | strip_cidr%%"
+            rdata: "%%network.services.jellyfin.address | strip_cidr%%"
             ptr: true
   tdarr:
     address: 172.20.20.242/32
@@ -491,7 +486,7 @@ services:
         records:
           - type: a
             name: tdarr
-            rdata: "%%services.tdarr.address | strip_cidr%%"
+            rdata: "%%network.services.tdarr.address | strip_cidr%%"
             ptr: true
   radarr:
     address: 172.20.20.243/32
@@ -501,7 +496,7 @@ services:
         records:
           - type: a
             name: radarr
-            rdata: "%%services.radarr.address | strip_cidr%%"
+            rdata: "%%network.services.radarr.address | strip_cidr%%"
             ptr: true
   sonarr:
     address: 172.20.20.244/32
@@ -511,7 +506,7 @@ services:
         records:
           - type: a
             name: sonarr
-            rdata: "%%services.sonarr.address | strip_cidr%%"
+            rdata: "%%network.services.sonarr.address | strip_cidr%%"
             ptr: true
   lidarr:
     address: 172.20.20.245/32
@@ -521,7 +516,7 @@ services:
         records:
           - type: a
             name: lidarr
-            rdata: "%%services.lidarr.address | strip_cidr%%"
+            rdata: "%%network.services.lidarr.address | strip_cidr%%"
             ptr: true
   readarr:
     address: 172.20.20.246/32
@@ -531,7 +526,7 @@ services:
         records:
           - type: a
             name: readarr
-            rdata: "%%services.readarr.address | strip_cidr%%"
+            rdata: "%%network.services.readarr.address | strip_cidr%%"
             ptr: true
   bazarr:
     address: 172.20.20.247/32
@@ -541,7 +536,7 @@ services:
         records:
           - type: a
             name: bazarr
-            rdata: "%%services.bazarr.address | strip_cidr%%"
+            rdata: "%%network.services.bazarr.address | strip_cidr%%"
             ptr: true
   prowlarr:
     address: 172.20.20.248/32
@@ -551,7 +546,7 @@ services:
         records:
           - type: a
             name: prowlarr
-            rdata: "%%services.prowlarr.address | strip_cidr%%"
+            rdata: "%%network.services.prowlarr.address | strip_cidr%%"
             ptr: true
   jellyseerr:
     address: 172.20.20.249/32
@@ -561,7 +556,7 @@ services:
         records:
           - type: a
             name: jellyseerr
-            rdata: "%%services.jellyseerr.address | strip_cidr%%"
+            rdata: "%%network.services.jellyseerr.address | strip_cidr%%"
             ptr: true
   flaresolverr:
     address: 172.20.20.250/32
@@ -571,5 +566,5 @@ services:
         records:
           - type: a
             name: flaresolverr
-            rdata: "%%services.flaresolverr.address | strip_cidr%%"
+            rdata: "%%network.services.flaresolverr.address | strip_cidr%%"
             ptr: true

@@ -1,4 +1,4 @@
 name: podman-exporter
-type: host
-mode: ''
-network: host
+systemd:
+  network: host
+composition: {}

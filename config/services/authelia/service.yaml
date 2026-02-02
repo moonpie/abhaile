@@ -1,54 +1,55 @@
 name: authelia
-type: pod
-mode: rootful
-network: ipvlan-l2
-config:
-  - source: authelia/config/users_database.yml
-    destination: /srv/authelia/authelia/config/users_database.yml
-  - source: authelia/systemd/authelia-config.service
-    destination: /etc/systemd/system/authelia-config.service
-  - source: authelia/systemd/authelia-config.path
-    destination: /etc/systemd/system/authelia-config.path
-  - source: authelia/systemd/authelia-redis-conf.service
-    destination: /etc/systemd/system/authelia-redis-conf.service
-  - source: authelia/systemd/authelia-redis-conf.path
-    destination: /etc/systemd/system/authelia-redis-conf.path
-vault_agent:
-  templates:
-    - source: "authelia/templates/authelia.configuration.yml.ctmpl"
-      out: "authelia.configuration.yml"
-      perms: "0640"
-    - source: "authelia/templates/authelia-redis.conf.ctmpl"
-      out: "authelia-redis.conf"
-      perms: "0640"
-ingress:
-  internal:
-    - block: authelia/caddy/internal-ingress.txt
-pod:
-  containers:
-    - name: authelia
-      named_volumes:
-        - name: config
-          host: /srv/authelia/authelia/config
-          mount: /config
-        - name: data
-          host: /srv/authelia/authelia/data
-          mount: /data
-        - name: host-certs
-          host: /etc/ssl/certs
-          mount: /etc/ssl/certs
-          mode: ro
-          shared: true
-    - name: redis
-      named_volumes:
-        - name: data
-          host: /srv/authelia/redis/data
-          mount: /data
-        - name: host-certs
-          host: /etc/ssl/certs
-          mount: /etc/ssl/certs
-          mode: ro
-          shared: true
-      mounted_files:
-        - host: /srv/authelia/redis/config/redis.conf
-          mount: /usr/local/etc/redis/redis.conf
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  config:
+    - source: authelia/config/users_database.yml
+      destination: /srv/authelia/authelia/config/users_database.yml
+    - source: authelia/systemd/authelia-config.service
+      destination: /etc/systemd/system/authelia-config.service
+    - source: authelia/systemd/authelia-config.path
+      destination: /etc/systemd/system/authelia-config.path
+    - source: authelia/systemd/authelia-redis-conf.service
+      destination: /etc/systemd/system/authelia-redis-conf.service
+    - source: authelia/systemd/authelia-redis-conf.path
+      destination: /etc/systemd/system/authelia-redis-conf.path
+  vault_agent:
+    templates:
+      - source: authelia/templates/authelia.configuration.yml.ctmpl
+        out: authelia.configuration.yml
+        perms: '0640'
+      - source: authelia/templates/authelia-redis.conf.ctmpl
+        out: authelia-redis.conf
+        perms: '0640'
+  ingress:
+    internal:
+      - block: authelia/caddy/internal-ingress.txt
+  pod:
+    containers:
+      - name: authelia
+        named_volumes:
+          - name: config
+            host: /srv/authelia/authelia/config
+            mount: /config
+          - name: data
+            host: /srv/authelia/authelia/data
+            mount: /data
+          - name: host-certs
+            host: /etc/ssl/certs
+            mount: /etc/ssl/certs
+            mode: ro
+            shared: true
+      - name: redis
+        named_volumes:
+          - name: data
+            host: /srv/authelia/redis/data
+            mount: /data
+          - name: host-certs
+            host: /etc/ssl/certs
+            mount: /etc/ssl/certs
+            mode: ro
+            shared: true
+        mounted_files:
+          - host: /srv/authelia/redis/config/redis.conf
+            mount: /usr/local/etc/redis/redis.conf

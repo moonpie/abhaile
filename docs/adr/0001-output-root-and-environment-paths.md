@@ -36,8 +36,8 @@ Use `--output <dir>` to set a local output root.
 
 ```text
 --output ./out
-    ./out/rendered/<host>/
-    ./out/state/<host>/
+    ./out/rendered/
+    ./out/state/
 ```
 
 **Multi-host render:**

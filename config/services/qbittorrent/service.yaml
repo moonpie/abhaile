@@ -1,4 +1,6 @@
 name: qbittorrent
-type: container
-mode: rootful
-network: container:gluetun
+podman:
+  user: root
+  network: container:gluetun
+composition:
+  container: {}

@@ -1,0 +1,4 @@
+name: "Enable netavark DHCP proxy"
+description: "Start the Podman netavark DHCP proxy socket for ipvlan networks"
+commands:
+  - 'sudo systemctl enable --now netavark-dhcp-proxy.socket'

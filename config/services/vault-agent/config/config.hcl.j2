@@ -2,7 +2,7 @@ exit_after_auth = false
 pid_file = "/agent/run/agent.pid"
 
 vault {
-  address = "http://{{ config.vault_addr | strip_cidr }}:8200"
+  address = "http://{{ service.config.vault_addr | strip_cidr }}:8200"
 }
 
 auto_auth {

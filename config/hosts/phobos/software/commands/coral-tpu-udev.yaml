@@ -1,0 +1,11 @@
+name: "Install Coral TPU udev rules"
+description: "Configure udev rules for Google Coral TPU device access (phobos-specific)"
+commands:
+  - |
+    cat << 'EOF' | sudo tee /etc/udev/rules.d/65-apex.rules >/dev/null
+    # Coral Edge TPU udev rules
+    # Allow apex group members to access the Coral TPU device
+    SUBSYSTEM=="apex", MODE="0660", GROUP="apex"
+    EOF
+  - 'sudo udevadm control --reload-rules'
+  - 'sudo udevadm trigger'

@@ -1,33 +1,34 @@
 name: omada-controller
-type: container
-mode: rootful
-network: ipvlan-l2
-ingress:
-  internal:
-    - block: omada-controller/caddy/internal-ingress.txt
-    - block: omada-controller/caddy/svc-cert.txt
-  dmz:
-    - block: omada-controller/caddy/dmz-ingress.txt
-config:
-  - source: omada-controller/config/omada-controller.env
-    destination: /etc/omada-controller/omada-controller.env
-  - source: omada-controller/systemd/rebuild-omada-cert.service
-    destination: /etc/systemd/system/rebuild-omada-cert.service
-  - source: omada-controller/systemd/rebuild-omada-cert.path
-    destination: /etc/systemd/system/rebuild-omada-cert.path
-container:
-  named_volumes:
-    - name: cert
-      host: /srv/omada-controller/cert
-      mount: /cert
-    - name: data
-      host: /srv/omada-controller/data
-      mount: /opt/tplink/EAPController/data
-    - name: logs
-      host: /srv/omada-controller/logs
-      mount: /opt/tplink/EAPController/logs
-    - name: host-certs
-      host: /etc/ssl/certs
-      mount: /etc/ssl/certs
-      mode: ro
-      shared: true
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  config:
+    - source: omada-controller/config/omada-controller.env
+      destination: /etc/omada-controller/omada-controller.env
+    - source: omada-controller/systemd/rebuild-omada-cert.service
+      destination: /etc/systemd/system/rebuild-omada-cert.service
+    - source: omada-controller/systemd/rebuild-omada-cert.path
+      destination: /etc/systemd/system/rebuild-omada-cert.path
+  ingress:
+    internal:
+      - block: omada-controller/caddy/internal-ingress.txt
+      - block: omada-controller/caddy/svc-cert.txt
+    dmz:
+      - block: omada-controller/caddy/dmz-ingress.txt
+  container:
+    named_volumes:
+      - name: cert
+        host: /srv/omada-controller/cert
+        mount: /cert
+      - name: data
+        host: /srv/omada-controller/data
+        mount: /opt/tplink/EAPController/data
+      - name: logs
+        host: /srv/omada-controller/logs
+        mount: /opt/tplink/EAPController/logs
+      - name: host-certs
+        host: /etc/ssl/certs
+        mount: /etc/ssl/certs
+        mode: ro
+        shared: true

@@ -121,10 +121,6 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "physical_device": {
-            "type": "string",
-            "description": "Primary physical network interface (e.g., enp0s31f6)"
-          },
           "interfaces": {
             "type": "object",
             "description": "Network interface definitions",
@@ -189,7 +185,7 @@
             }
           }
         },
-        "required": ["physical_device", "interfaces"],
+        "required": ["interfaces"],
         "additionalProperties": false
       }
     },

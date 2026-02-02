@@ -1,8 +1,0 @@
----
-name: "Load Coral TPU kernel modules"
-description: "Load gasket and apex modules for Google Coral TPU (phobos-specific)"
-commands:
-  - 'sudo modprobe gasket || true'
-  - 'sudo modprobe apex || true'
-  - 'grep -q "^gasket" /etc/modules || echo "gasket" | sudo tee -a /etc/modules >/dev/null'
-  - 'grep -q "^apex" /etc/modules || echo "apex" | sudo tee -a /etc/modules >/dev/null'

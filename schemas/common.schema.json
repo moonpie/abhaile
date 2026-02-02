@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Abhaile Common Schema Definitions",
+  "description": "Shared schema definitions used across host.schema.json and service.schema.json",
+  "definitions": {
+    "templateSource": {
+      "type": "object",
+      "description": "Jinja2 template source with optional variables",
+      "required": ["template"],
+      "properties": {
+        "template": {
+          "type": "string",
+          "description": "Relative path to Jinja2 template (e.g., 'common/systemd-resolved/resolved.conf.j2')"
+        },
+        "variables": {
+          "type": "object",
+          "description": "Explicit template variables (optional, context is provided automatically)",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "configEntry": {
+      "type": "object",
+      "description": "Configuration file entry: static file, template, or directory to ensure exists",
+      "properties": {
+        "source": {
+          "description": "Source file path (static) or template object",
+          "oneOf": [
+            {
+              "type": "string",
+              "description": "Static source file path"
+            },
+            {
+              "$ref": "#/definitions/templateSource"
+            }
+          ]
+        },
+        "destination": {
+          "type": "string",
+          "description": "Destination path on target system (absolute path)"
+        }
+      },
+      "oneOf": [
+        {
+          "description": "Static or templated file with source and destination",
+          "required": ["source", "destination"]
+        },
+        {
+          "description": "Directory to ensure exists (destination only, no source)",
+          "required": ["destination"],
+          "not": {
+            "required": ["source"]
+          }
+        }
+      ],
+      "additionalProperties": false
+    }
+  }
+}
