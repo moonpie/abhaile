@@ -194,3 +194,72 @@ class TestRenderE2E:
 
         # Artifacts should be identical
         assert m1["artifacts"] == m2["artifacts"]
+
+    def test_render_services_configs(self, tmp_repo_with_config, tmp_output):
+        """Test that service configs are rendered correctly for mapped services."""
+        repo_root = tmp_repo_with_config
+        output_dir = tmp_output
+
+        # Add a service with static and templated configs
+        services_root = repo_root / "config" / "services"
+        test_service_dir = services_root / "test-service"
+        test_service_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create service.yaml
+        (test_service_dir / "service.yaml").write_text("""name: test-service
+composition:
+  config:
+    - source: test-service/config/static.conf
+      destination: /etc/test/static.conf
+    - source:
+        template: test-service/config/app.conf.j2
+        variables:
+          service_ip: '%%network.services.test-service.address | strip_cidr%%'
+      destination: /etc/test/app.conf
+""")
+
+        # Create static config
+        config_dir = test_service_dir / "config"
+        config_dir.mkdir(parents=True)
+        (config_dir / "static.conf").write_text("# Static config\nenabled=true\n")
+
+        # Create template
+        (config_dir / "app.conf.j2").write_text(
+            "# App config\nhost={{ host_name }}\nservice={{ service_name }}\nbind={{ service.config.service_ip }}\n"
+        )
+
+        # Import and use the full render pipeline
+        import sys
+        from pathlib import Path as PathLib
+
+        sys.path.insert(
+            0,
+            str(PathLib(__file__).parent.parent.parent / "scripts" / "lib" / "python"),
+        )
+        from renderers.services import render_service_configs
+        from utils.config import read_yaml
+
+        network = read_yaml(repo_root / "config" / "network.yaml")
+        rendered_dir = output_dir / "rendered"
+        services_output_dir = rendered_dir / "services"
+
+        render_service_configs(
+            "phobos",
+            ["test-service"],
+            network,
+            repo_root / "config",
+            services_output_dir,
+        )
+
+        # Verify static config was copied
+        static_output = services_output_dir / "test-service" / "etc/test/static.conf"
+        assert static_output.exists()
+        assert static_output.read_text() == "# Static config\nenabled=true\n"
+
+        # Verify templated config was rendered with correct substitutions
+        template_output = services_output_dir / "test-service" / "etc/test/app.conf"
+        assert template_output.exists()
+        content = template_output.read_text()
+        assert "host=phobos" in content
+        assert "service=test-service" in content
+        assert "bind=172.20.20.200" in content

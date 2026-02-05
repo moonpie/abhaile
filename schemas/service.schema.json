@@ -56,6 +56,10 @@
           "type": "object",
           "description": "Vault Agent configuration for secret injection",
           "properties": {
+            "base": {
+              "description": "Base Vault Agent configuration file",
+              "$ref": "common.schema.json#/definitions/configEntry"
+            },
             "templates": {
               "type": "array",
               "description": "Vault Agent templates to render",
@@ -87,27 +91,22 @@
           "type": "object",
           "description": "Caddy ingress/reverse proxy configuration",
           "additionalProperties": {
-            "type": "array",
-            "description": "Ingress rules for a domain",
-            "items": {
-              "type": "object",
-              "properties": {
-                "block": {
-                  "type": "string",
-                  "description": "Caddy config block file path"
-                },
-                "base": {
-                  "type": "string",
-                  "description": "Base Caddyfile path"
-                },
-                "destination": {
-                  "type": "string",
-                  "description": "Destination path for Caddyfile"
-                }
-              },
-              "additionalProperties": false
-            }
+            "$ref": "common.schema.json#/definitions/ingressDomain"
           }
+        },
+        "dns": {
+          "type": "object",
+          "description": "DNS zone configuration for CoreDNS",
+          "properties": {
+            "zone_files": {
+              "type": "array",
+              "description": "DNS zone file definitions",
+              "items": {
+                "$ref": "common.schema.json#/definitions/dnsZoneFile"
+              }
+            }
+          },
+          "additionalProperties": false
         },
         "pod": {
           "type": "object",
@@ -124,61 +123,9 @@
                     "type": "string",
                     "description": "Container name"
                   },
-                  "named_volumes": {
-                    "type": "array",
-                    "description": "Named volumes to mount in this container",
-                    "items": {
-                      "type": "object",
-                      "required": ["name", "host", "mount"],
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "description": "Volume name"
-                        },
-                        "host": {
-                          "type": "string",
-                          "description": "Host path"
-                        },
-                        "mount": {
-                          "type": "string",
-                          "description": "Container mount path"
-                        },
-                        "mode": {
-                          "type": "string",
-                          "enum": ["ro", "rw"],
-                          "description": "Mount mode (ro=read-only, rw=read-write)"
-                        },
-                        "shared": {
-                          "type": "boolean",
-                          "description": "Whether volume is shared between containers"
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  },
-                  "mounted_files": {
-                    "type": "array",
-                    "description": "Individual files to mount",
-                    "items": {
-                      "type": "object",
-                      "required": ["host", "mount"],
-                      "properties": {
-                        "host": {
-                          "type": "string",
-                          "description": "Host file path"
-                        },
-                        "mount": {
-                          "type": "string",
-                          "description": "Container mount path"
-                        },
-                        "mode": {
-                          "type": "string",
-                          "enum": ["ro", "rw"],
-                          "description": "Mount mode"
-                        }
-                      },
-                      "additionalProperties": false
-                    }
+                  "container": {
+                    "description": "Container configuration",
+                    "$ref": "common.schema.json#/definitions/containerConfig"
                   }
                 },
                 "additionalProperties": false
@@ -188,67 +135,8 @@
           "additionalProperties": false
         },
         "container": {
-          "type": "object",
           "description": "Container configuration (for podman services with type=container)",
-          "properties": {
-            "named_volumes": {
-              "type": "array",
-              "description": "Named volumes to mount",
-              "items": {
-                "type": "object",
-                "required": ["name", "host", "mount"],
-                "properties": {
-                  "name": {
-                    "type": "string",
-                    "description": "Volume name"
-                  },
-                  "host": {
-                    "type": "string",
-                    "description": "Host path"
-                  },
-                  "mount": {
-                    "type": "string",
-                    "description": "Container mount path"
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": ["ro", "rw"],
-                    "description": "Mount mode"
-                  },
-                  "shared": {
-                    "type": "boolean",
-                    "description": "Whether volume is shared"
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "mounted_files": {
-              "type": "array",
-              "description": "Individual files to mount",
-              "items": {
-                "type": "object",
-                "required": ["host", "mount"],
-                "properties": {
-                  "host": {
-                    "type": "string",
-                    "description": "Host file path"
-                  },
-                  "mount": {
-                    "type": "string",
-                    "description": "Container mount path"
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": ["ro", "rw"],
-                    "description": "Mount mode"
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          },
-          "additionalProperties": false
+          "$ref": "common.schema.json#/definitions/containerConfig"
         }
       },
       "additionalProperties": false

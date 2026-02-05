@@ -4,16 +4,17 @@ podman:
   network: host
 composition:
   config:
-    - source:
-        template: vault-agent/config/config.hcl.j2
-        variables:
-          vault_addr: '%%network.services.vault.address%%'
-      destination: /srv/vault/agent/config.hcl
     - source: vault-agent/systemd/abhaile-secrets-ready.service
       destination: /etc/systemd/system/abhaile-secrets-ready.service
     - source: vault-agent/systemd/abhaile-secrets-ready.path
       destination: /etc/systemd/system/abhaile-secrets-ready.path
   vault_agent:
+    base:
+      source:
+        template: vault-agent/config/config.hcl.j2
+        variables:
+          vault_addr: '%%network.services.vault.address%%'
+      destination: /srv/vault/agent/config.hcl
     templates:
       - source: vault-agent/templates/ready.ctmpl
         out: .ready

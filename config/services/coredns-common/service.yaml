@@ -5,7 +5,11 @@ composition:
       destination: /etc/systemd/system/coredns-zones.path
     - source: coredns-common/systemd/coredns-zones.service
       destination: /etc/systemd/system/coredns-zones.service
-    - source:
-        template: coredns-common/config/zones/zone.zone.j2
-        variables: {}
-      destination: /etc/coredns/zones/DYNAMIC_ZONE_PLACEHOLDER
+  dns:
+    zone_files:
+      - zone: '*'
+        file:
+          source:
+            template: coredns-common/config/zones/zone.zone.j2
+            variables: {}
+          destination: /etc/coredns/zones/zone.zone

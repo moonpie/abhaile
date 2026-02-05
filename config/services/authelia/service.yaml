@@ -24,32 +24,35 @@ composition:
         perms: '0640'
   ingress:
     internal:
-      - block: authelia/caddy/internal-ingress.txt
+      blocks:
+        - authelia/caddy/internal-ingress.txt
   pod:
     containers:
       - name: authelia
-        named_volumes:
-          - name: config
-            host: /srv/authelia/authelia/config
-            mount: /config
-          - name: data
-            host: /srv/authelia/authelia/data
-            mount: /data
-          - name: host-certs
-            host: /etc/ssl/certs
-            mount: /etc/ssl/certs
-            mode: ro
-            shared: true
+        container:
+          named_volumes:
+            - name: config
+              host: /srv/authelia/authelia/config
+              mount: /config
+            - name: data
+              host: /srv/authelia/authelia/data
+              mount: /data
+            - name: host-certs
+              host: /etc/ssl/certs
+              mount: /etc/ssl/certs
+              mode: ro
+              shared: true
       - name: redis
-        named_volumes:
-          - name: data
-            host: /srv/authelia/redis/data
-            mount: /data
-          - name: host-certs
-            host: /etc/ssl/certs
-            mount: /etc/ssl/certs
-            mode: ro
-            shared: true
-        mounted_files:
-          - host: /srv/authelia/redis/config/redis.conf
-            mount: /usr/local/etc/redis/redis.conf
+        container:
+          named_volumes:
+            - name: data
+              host: /srv/authelia/redis/data
+              mount: /data
+            - name: host-certs
+              host: /etc/ssl/certs
+              mount: /etc/ssl/certs
+              mode: ro
+              shared: true
+          mounted_files:
+            - host: /srv/authelia/redis/config/redis.conf
+              mount: /usr/local/etc/redis/redis.conf

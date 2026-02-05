@@ -12,10 +12,12 @@ composition:
       destination: /etc/systemd/system/rebuild-omada-cert.path
   ingress:
     internal:
-      - block: omada-controller/caddy/internal-ingress.txt
-      - block: omada-controller/caddy/svc-cert.txt
+      blocks:
+        - omada-controller/caddy/internal-ingress.txt
+        - omada-controller/caddy/svc-cert.txt
     dmz:
-      - block: omada-controller/caddy/dmz-ingress.txt
+      blocks:
+        - omada-controller/caddy/dmz-ingress.txt
   container:
     named_volumes:
       - name: cert

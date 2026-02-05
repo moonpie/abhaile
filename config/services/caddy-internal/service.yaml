@@ -5,7 +5,8 @@ podman:
 composition:
   ingress:
     internal:
-      - base: caddy-internal/config/Caddyfile
+      base:
+        source: caddy-internal/config/Caddyfile
         destination: /srv/caddy/internal/Caddyfile
   container:
     named_volumes:

@@ -22,6 +22,7 @@ from validation.services import (
 )
 from renderers.manifest import build_manifest, write_manifest
 from renderers.host import render_host_config
+from renderers.services import render_service_configs
 from renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
@@ -121,14 +122,30 @@ def render_host(
     common_config = read_yaml(hosts_root / "common" / "host.yaml")
     host_config = read_yaml(hosts_root / host / "host.yaml")
 
+    # System configuration artifacts (atomic file placement)
+    system_dir = rendered_dir / paths["system_dir_name"]
+    system_dir.mkdir(parents=True, exist_ok=True)
+
+    # Software installation artifacts (execution required)
+    software_dir = rendered_dir / paths["software_dir_name"]
+    software_dir.mkdir(parents=True, exist_ok=True)
+
+    # User management artifacts (execution required)
+    users_dir = rendered_dir / paths["users_dir_name"]
+    users_dir.mkdir(parents=True, exist_ok=True)
+
+    # Service artifacts go under services/<service>/
+    services_output_dir = rendered_dir / paths["services_dir_name"]
+    services_output_dir.mkdir(parents=True, exist_ok=True)
+
     # Render host configuration files (systemd units, resolved, etc.)
     render_host_config(
-        host, host_config, common_config, network, config_root, rendered_dir
+        host, host_config, common_config, network, config_root, system_dir
     )
 
     # Render systemd-networkd configuration files
     render_networkd_config(
-        host, host_config, common_config, network, config_root, rendered_dir
+        host, host_config, common_config, network, config_root, system_dir
     )
 
     # Render systemd-networkd service drop-ins
@@ -137,7 +154,16 @@ def render_host(
         host_services.get(host, []),
         network,
         config_root,
-        rendered_dir / "etc/systemd/network",
+        system_dir / "etc/systemd/network",
+    )
+
+    # Render service configuration files
+    render_service_configs(
+        host,
+        host_services.get(host, []),
+        network,
+        config_root,
+        services_output_dir,
     )
 
     target_root = Path(paths["target_root"])

@@ -17,7 +17,8 @@ composition:
         perms: '0640'
   ingress:
     dmz:
-      - base: caddy-dmz/config/Caddyfile
+      base:
+        source: caddy-dmz/config/Caddyfile
         destination: /srv/caddy/dmz/Caddyfile
   container:
     named_volumes:

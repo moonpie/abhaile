@@ -121,13 +121,38 @@ Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
 
 **Single-host render:**
 
-- `./out/rendered/`
-- `./out/state/`
+```text
+./out/
+├── rendered/
+│   ├── system/                  (systemd-networkd, resolved - atomic file placement)
+│   ├── software/                (packages, downloads, builds - execution required)
+│   ├── users/                   (user/group setup, sudoers - execution required)
+│   └── services/
+│       ├── caddy-dmz/
+│       └── vault/
+└── state/
+    └── manifest.json
+```
 
 **Multi-host render (`--all`):**
 
-- `./out/<host>/rendered/`
-- `./out/<host>/state/`
+```text
+./out/
+├── phobos/
+│   ├── rendered/
+│   │   ├── system/
+│   │   ├── software/
+│   │   ├── users/
+│   │   └── services/
+│   └── state/
+└── deimos/
+    ├── rendered/
+    │   ├── system/
+    │   ├── software/
+    │   ├── users/
+    │   └── services/
+    └── state/
+```
 
 The `<host>` subdirectory avoids collisions when rendering multiple hosts into one output tree.
 
@@ -135,12 +160,19 @@ The `<host>` subdirectory avoids collisions when rendering multiple hosts into o
 
 Apply uses hash-based drift detection to compare desired state (manifest) against live system:
 
-1. **Render** produces desired-state artifacts in `<output>/rendered/` and writes a manifest to `<output>/state/manifest.json`
+1. **Render** produces desired-state artifacts in `<output>/rendered/` organized by type (system/software/users/services), and writes a manifest to `<output>/state/manifest.json`
 1. **Manifest** contains SHA256 hashes, sizes, permissions, and ownership for each file
 1. **Apply** compares manifest hashes against live filesystem to detect changes
 1. **Sync** copies changed/added files from `rendered/` to `/` and updates manifest
 
-This allows render to overwrite `rendered/` safely; the manifest in `state/` is the durable record.
+Artifacts are organized under `rendered/` by apply method:
+
+- `rendered/system/` — systemd-networkd, resolved, systemd units (atomic file placement)
+- `rendered/software/` — package installation, downloads, builds (execution required)
+- `rendered/users/` — user/group management, sudoers (execution required)
+- `rendered/services/<service>/` — per-service quadlets and configs
+
+This makes it easy to identify which services/hosts are impacted by a change. The manifest still tracks target paths (e.g., `/etc/systemd/network/10-eth0.network`), so the intermediate directory structure is organizational only and does not affect apply.
 
 See [ADR 0001](docs/adr/0001-output-root-and-environment-paths.md) and [ADR 0002](docs/adr/0002-hash-based-drift-detection-and-state-model.md) for design details.
 

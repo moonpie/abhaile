@@ -44,8 +44,7 @@ def render_config_entries(
     jinja_env = Environment(
         loader=FileSystemLoader(template_base_dir),
         undefined=StrictUndefined,
-        trim_blocks=True,
-        lstrip_blocks=True,
+        keep_trailing_newline=True,
     )
     jinja_env.filters["strip_cidr"] = _strip_cidr
 
@@ -75,6 +74,14 @@ def render_config_entries(
 
             # Merge explicit variables with context
             template_context = {**context, **variables}
+            if "service_name" in context:
+                template_context.setdefault(
+                    "service",
+                    {
+                        "name": context["service_name"],
+                        "config": variables,
+                    },
+                )
 
             try:
                 template = jinja_env.get_template(template_path)

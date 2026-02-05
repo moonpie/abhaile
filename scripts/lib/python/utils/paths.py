@@ -17,9 +17,10 @@ REQUIRED_PATH_KEYS = {
     "services_subdir",
     "rendered_dir_name",
     "state_dir_name",
-    "systemd_networkd_dir",
-    "systemd_resolved_dir",
-    "systemd_units_dir",
+    "system_dir_name",
+    "software_dir_name",
+    "users_dir_name",
+    "services_dir_name",
 }
 
 

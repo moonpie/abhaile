@@ -2,6 +2,12 @@
 
 ## Decision Log
 
+1. Decision: Service config rendering resolves composition includes first (depth-first), then renders the service's own config entries to allow overrides by later entries; cycles are an error.
+   Date: 2026-02-04
+   Rationale: Ensures shared config from included services is applied before service-specific overrides; avoids silent infinite recursion.
+   Scope: Service configs renderer include handling.
+   Confirmed by: assistant
+
 1. Decision: Resolve systemd-networkd drop-in interface names by parsing the base file's [Match] Name=, and allow any \*.d drop-in directory (not just .network.d).
    Date: 2026-02-02
    Rationale: Avoids fragile filename parsing and supports all systemd-networkd drop-in types; ensures base file exists and provides authoritative interface name.
@@ -82,6 +88,7 @@ Proceed with the plan. Ask for confirmation if you need to deviate.
 
 ```text
 Summarize what changed, list files modified, note any follow-ups, and update the Decision Log if a decision was made.
+Or create/update ADRs if any decision is high-profile enough to warrant that
 ```
 
 ## Render/Apply Contract (Derived From config/)
@@ -93,6 +100,36 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 - `config/hosts/**/host.yaml` defines host software, users, systemd-networkd templates, and common config.
 - `config/services/**` defines service metadata, quadlets, systemd units, configs, and vault-agent templates.
 - `config/_templates/**` defines shared Jinja-style templates for network, quadlets, and host/service files.
+
+### Rendered Output Structure
+
+Artifacts are organized under `<output>/rendered/` by apply method:
+
+```text
+<output>/rendered/
+├── system/                      (atomic file placement)
+│   ├── etc/systemd/network/
+│   ├── etc/systemd/resolved.conf
+│   └── etc/systemd/system/
+├── software/                    (execution required)
+│   ├── install-packages.sh
+│   ├── downloads.sh
+│   ├── builds.sh
+│   └── commands.sh
+├── users/                       (execution required)
+│   ├── setup-users.sh
+│   └── etc/sudoers.d/abhaile
+├── services/                    (service-specific artifacts)
+│   ├── caddy-dmz/
+│   │   ├── etc/containers/systemd/
+│   │   └── srv/caddy-dmz/
+│   └── vault/
+│       ├── etc/containers/systemd/
+│       └── srv/vault/
+└── <output>/state/manifest.json
+```
+
+This organization makes it easy to identify which artifacts require execution vs atomic file placement. The manifest tracks final target paths (e.g., `/etc/systemd/network/10-eth0.network`); the intermediate directory structure is organizational only.
 
 ### Required Artifact Types Per Host
 
@@ -172,14 +209,15 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 | Status | Task | Description | Completion Criteria | Dependencies |
 | --- | --- | --- | --- | --- |
 | [x] | Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `<output>/rendered/` (default: `/var/lib/abhaile/rendered/` on hosts). | Running the tool renders a host tree with a manifest in `<output>/state/manifest.json`. | Define config schema |
-| [x] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/etc/systemd/network/` and resolved files present. | Renderer CLI |
+| [x] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/system/etc/systemd/network/` and resolved files present. | Renderer CLI |
 | [ ] | Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` from `config/hosts/**/host.yaml` (composition.software) across host/common. | Per-host package manifest and command plan rendered under `<output>/rendered/`. | Renderer CLI |
 | [ ] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/host.yaml` (user_management). | User/group/sudoers files generated under `<output>/rendered/` with deterministic ordering. | Renderer CLI |
-| [ ] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/`. | Renderer CLI |
-| [ ] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/` per mapped service. | Renderer CLI |
-| [ ] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/` per mapped service. | Renderer CLI |
-| [ ] | Ingress renderer | Aggregate ingress blocks into per-host Caddy fragments. | Host ingress files rendered under `<output>/rendered/` from service ingress definitions. | Service configs renderer |
-| [ ] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `coredns-common`. | Zone files and serial metadata rendered deterministically under `<output>/rendered/`. | Renderer CLI |
+| [x] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/services/<service>`. | Renderer CLI |
+| [ ] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
+| [ ] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
+| [ ] | Ingress renderer | Aggregate ingress blocks with base into Caddy configuration. | Caddyfiles rendered under `<output>/rendered/services/<service>` for `<service>` that defines the base ingress definition. | Service configs renderer |
+| [ ] | Vault Templates renderer | Aggregate vault_agent templates with base into per-host vault-agent configuration. | vault-agent configuration rendered under `<output>/rendered/services/vault-agent` as per definition. | Service configs renderer |
+| [ ] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `composition.dns` found in `service.yaml` files. | Zone files and serial metadata rendered deterministically under `<output>/rendered/services/<service>` as per definition. | Renderer CLI |
 | [-] | Manifest writer | Produce `<output>/state/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
 
 #### Session Prompt (Renderer CLI)
@@ -195,7 +233,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Networking renderer.
 - Required inputs: `config/network.yaml`, `config/hosts/**`, `config/_templates/hosts/**`.
-- Outputs to produce: `<output>/rendered/etc/systemd/network/*.network` and `.netdev`; `<output>/rendered/etc/systemd/resolved.conf`.
+- Outputs to produce: `<output>/rendered/system/etc/systemd/network/*.network` and `.netdev`; `<output>/rendered/system/etc/systemd/resolved.conf`.
 - Acceptance: generated files are deterministic and include VLANs, ipvlan-l2, and host interfaces.
 - Constraints: templates fail fast on missing network data.
 - Dependencies: Renderer CLI.
@@ -204,7 +242,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Packaging renderer.
 - Required inputs: `config/hosts/**/host.yaml` (composition.software), `config/hosts/common/host.yaml`.
-- Outputs to produce: `<output>/rendered/var/lib/abhaile/package-manifest.json`; `<output>/rendered/var/lib/abhaile/command-plan.json`.
+- Outputs to produce: `<output>/rendered/software/install-packages.sh`; `<output>/rendered/software/downloads.sh`; `<output>/rendered/software/builds.sh`; `<output>/rendered/software/commands.sh`.
 - Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host.
 - Constraints: deterministic ordering; no network access.
 - Dependencies: Renderer CLI.
@@ -213,7 +251,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Users renderer.
 - Required inputs: `config/hosts/**/host.yaml` (user_management), `config/hosts/common/host.yaml`.
-- Outputs to produce: `<output>/rendered/etc/abhaile/users.d/users.json`; `<output>/rendered/etc/sudoers.d/abhaile`.
+- Outputs to produce: `<output>/rendered/users/setup-users.sh`; `<output>/rendered/users/etc/sudoers.d/abhaile`.
 - Acceptance: user/group/sudo data is deterministic and sorted; no duplicates.
 - Constraints: no secrets; read-only from `config/`.
 - Dependencies: Renderer CLI.
@@ -222,7 +260,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Service configs renderer.
 - Required inputs: `config/services/**`, `config/_templates/services/**`, `config/network.yaml`.
-- Outputs to produce: `<output>/rendered/etc/abhaile/services/<service>/...` with configs and rendered templates.
+- Outputs to produce: `<output>/rendered/services/<service>/...` with configs and rendered templates.
 - Acceptance: all configs referenced by service.yaml are rendered; template errors fail the render.
 - Constraints: templates must not materialize secrets.
 - Dependencies: Renderer CLI.
@@ -231,7 +269,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Quadlets renderer (containers).
 - Required inputs: `config/services/**`, `config/_templates/services/quadlets/**`, `config/mapping.yaml`.
-- Outputs to produce: `<output>/rendered/etc/containers/systemd/*.container`, `.image`, `.network`, `.volume`, `.build`.
+- Outputs to produce: `<output>/rendered/services/<service>/etc/containers/systemd/*.container`, `.image`, `.network`, `.volume`, `.build`.
 - Acceptance: quadlets generated for all mapped container services; files are deterministic.
 - Constraints: no secrets; rootful/rootless modes follow service config.
 - Dependencies: Renderer CLI.
@@ -240,7 +278,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Quadlets renderer (pods).
 - Required inputs: `config/services/**`, `config/_templates/services/quadlets/**`, `config/mapping.yaml`.
-- Outputs to produce: `<output>/rendered/etc/containers/systemd/*.pod` and related `.container` units.
+- Outputs to produce: `<output>/rendered/services/<service>/etc/containers/systemd/*.pod` and related `.container` units.
 - Acceptance: pod quadlets generated for all mapped pod services; dependencies are explicit.
 - Constraints: no secrets; pod definitions derived from service config.
 - Dependencies: Renderer CLI.
@@ -249,8 +287,17 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / Ingress renderer.
 - Required inputs: `config/services/**`, `config/network.yaml`.
-- Outputs to produce: `<output>/rendered/etc/caddy/ingress.d/*.caddy`.
+- Outputs to produce: `<output>/rendered/services/{caddy-dmz,caddy-internal}/`.
 - Acceptance: host ingress fragments are aggregated and deterministic.
+- Constraints: no secrets; only mapped services included.
+- Dependencies: Service configs renderer.
+
+#### Session Prompt (Vault Templates renderer)
+
+- Phase/Task: Render Pipeline / Vault Templates renderer.
+- Required inputs: `config/services/**`, `config/network.yaml`.
+- Outputs to produce: `<output>/rendered/services/vault-agent/`.
+- Acceptance: vault-agent config is aggregated and deterministic.
 - Constraints: no secrets; only mapped services included.
 - Dependencies: Service configs renderer.
 
@@ -258,7 +305,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Render Pipeline / DNS renderer.
 - Required inputs: `config/network.yaml`, `config/services/**`, `config/_templates/services/**`.
-- Outputs to produce: `<output>/rendered/etc/coredns/zones/*`; `<output>/state/dns-serials.json`.
+- Outputs to produce: `<output>/rendered/services/<service>/etc/coredns/zones/*`; `<output>/state/dns-serials.json`.
 - Acceptance: zones render deterministically with stable serials and correct records.
 - Constraints: no secrets; zone rendering is pure function of `config/network.yaml`.
 - Dependencies: Renderer CLI.
@@ -352,7 +399,7 @@ Summarize what changed, list files modified, note any follow-ups, and update the
 
 - Phase/Task: Secrets / Vault agent integration.
 - Required inputs: `config/services/**` (vault-agent templates), `<output>/rendered/` if present.
-- Outputs to produce: render-stage updates to include vault-agent templates under `<output>/rendered/etc/abhaile/services/vault-agent/`.
+- Outputs to produce: render-stage updates to include vault-agent templates under `<output>/rendered/services/vault-agent/`.
 - Acceptance: vault-agent templates render with correct permissions metadata in manifest.
 - Constraints: no secret material rendered.
 - Dependencies: Service configs renderer.

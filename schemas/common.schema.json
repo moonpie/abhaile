@@ -55,6 +55,112 @@
         }
       ],
       "additionalProperties": false
+    },
+    "namedVolume": {
+      "type": "object",
+      "description": "Named volume definition for containers",
+      "required": ["name", "host", "mount"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Volume name"
+        },
+        "host": {
+          "type": "string",
+          "description": "Host path"
+        },
+        "mount": {
+          "type": "string",
+          "description": "Container mount path"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["ro", "rw"],
+          "description": "Mount mode (ro=read-only, rw=read-write)"
+        },
+        "shared": {
+          "type": "boolean",
+          "description": "Whether volume is shared between containers"
+        }
+      },
+      "additionalProperties": false
+    },
+    "mountedFile": {
+      "type": "object",
+      "description": "Individual file mount definition for containers",
+      "required": ["host", "mount"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "description": "Host file path"
+        },
+        "mount": {
+          "type": "string",
+          "description": "Container mount path"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["ro", "rw"],
+          "description": "Mount mode"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ingressDomain": {
+      "type": "object",
+      "description": "Ingress configuration for a domain",
+      "properties": {
+        "base": {
+          "description": "Base Caddyfile configuration",
+          "$ref": "#/definitions/configEntry"
+        },
+        "blocks": {
+          "type": "array",
+          "description": "Additional Caddy config block file paths",
+          "items": {
+            "type": "string",
+            "description": "Path to Caddy config block file"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "dnsZoneFile": {
+      "type": "object",
+      "description": "DNS zone file definition",
+      "required": ["zone", "file"],
+      "properties": {
+        "zone": {
+          "type": "string",
+          "description": "DNS zone name (e.g., 'example.com' or '*' for catch-all)"
+        },
+        "file": {
+          "description": "Zone file configuration",
+          "$ref": "#/definitions/configEntry"
+        }
+      },
+      "additionalProperties": false
+    },
+    "containerConfig": {
+      "type": "object",
+      "description": "Container volume and mount configuration",
+      "properties": {
+        "named_volumes": {
+          "type": "array",
+          "description": "Named volumes to mount",
+          "items": {
+            "$ref": "#/definitions/namedVolume"
+          }
+        },
+        "mounted_files": {
+          "type": "array",
+          "description": "Individual files to mount",
+          "items": {
+            "$ref": "#/definitions/mountedFile"
+          }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

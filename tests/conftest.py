@@ -35,9 +35,10 @@ def tmp_repo():
             "services_subdir = services\n"
             "rendered_dir_name = rendered\n"
             "state_dir_name = state\n"
-            "systemd_networkd_dir = systemd-networkd\n"
-            "systemd_resolved_dir = systemd-resolved\n"
-            "systemd_units_dir = systemd-units\n"
+            "system_dir_name = system\n"
+            "software_dir_name = software\n"
+            "users_dir_name = users\n"
+            "services_dir_name = services\n"
         )
 
         yield repo_root
