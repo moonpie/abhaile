@@ -59,17 +59,17 @@
     "namedVolume": {
       "type": "object",
       "description": "Named volume definition for containers",
-      "required": ["name", "host", "mount"],
+      "required": ["name", "host_path", "mount_path"],
       "properties": {
         "name": {
           "type": "string",
           "description": "Volume name"
         },
-        "host": {
+        "host_path": {
           "type": "string",
           "description": "Host path"
         },
-        "mount": {
+        "mount_path": {
           "type": "string",
           "description": "Container mount path"
         },
@@ -88,13 +88,13 @@
     "mountedFile": {
       "type": "object",
       "description": "Individual file mount definition for containers",
-      "required": ["host", "mount"],
+      "required": ["host_path", "mount_path"],
       "properties": {
-        "host": {
+        "host_path": {
           "type": "string",
           "description": "Host file path"
         },
-        "mount": {
+        "mount_path": {
           "type": "string",
           "description": "Container mount path"
         },

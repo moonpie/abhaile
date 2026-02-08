@@ -11,16 +11,16 @@ composition:
   container:
     named_volumes:
       - name: config
-        host: /srv/caddy/internal/config
-        mount: /config
+        host_path: /srv/caddy/internal/config
+        mount_path: /config
       - name: data
-        host: /srv/caddy/internal/data
-        mount: /data
+        host_path: /srv/caddy/internal/data
+        mount_path: /data
       - name: host-certs
-        host: /etc/ssl/certs
-        mount: /etc/ssl/certs
+        host_path: /etc/ssl/certs
+        mount_path: /etc/ssl/certs
         mode: ro
         shared: true
     mounted_files:
-      - host: /srv/caddy/internal/Caddyfile
-        mount: /etc/caddy/Caddyfile
+      - host_path: /srv/caddy/internal/Caddyfile
+        mount_path: /etc/caddy/Caddyfile

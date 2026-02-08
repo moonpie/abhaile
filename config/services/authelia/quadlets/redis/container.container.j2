@@ -7,7 +7,7 @@ After=abhaile-secrets-ready.service
 Pod={{ pod }}
 Image={{ image }}
 Timezone=local
-{% for v in volume_lines   %}
+{% for v in volume_lines %}
 {{ v }}
 {% endfor %}
 Exec=redis-server /usr/local/etc/redis/redis.conf

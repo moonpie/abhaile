@@ -32,27 +32,27 @@ composition:
         container:
           named_volumes:
             - name: config
-              host: /srv/authelia/authelia/config
-              mount: /config
+              host_path: /srv/authelia/authelia/config
+              mount_path: /config
             - name: data
-              host: /srv/authelia/authelia/data
-              mount: /data
+              host_path: /srv/authelia/authelia/data
+              mount_path: /data
             - name: host-certs
-              host: /etc/ssl/certs
-              mount: /etc/ssl/certs
+              host_path: /etc/ssl/certs
+              mount_path: /etc/ssl/certs
               mode: ro
               shared: true
       - name: redis
         container:
           named_volumes:
             - name: data
-              host: /srv/authelia/redis/data
-              mount: /data
+              host_path: /srv/authelia/redis/data
+              mount_path: /data
             - name: host-certs
-              host: /etc/ssl/certs
-              mount: /etc/ssl/certs
+              host_path: /etc/ssl/certs
+              mount_path: /etc/ssl/certs
               mode: ro
               shared: true
           mounted_files:
-            - host: /srv/authelia/redis/config/redis.conf
-              mount: /usr/local/etc/redis/redis.conf
+            - host_path: /srv/authelia/redis/config/redis.conf
+              mount_path: /usr/local/etc/redis/redis.conf

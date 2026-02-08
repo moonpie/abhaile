@@ -1,4 +1,4 @@
-.PHONY: help install test lint pre-commit render generate-inventory clean clean-venv
+.PHONY: help clean install lint test unit-test integration-test
 
 PYTHON := python3
 VENV := .venv
@@ -10,6 +10,9 @@ help:
 	@echo "  make clean                Remove virtual environment"
 	@echo "  make install              Create venv, install dependencies and pre-commit hooks"
 	@echo "  make lint                 Run pre-commit hooks on all files"
+	@echo "  make test                 Run all python tests"
+	@echo "  make unit-test            Run python unit tests"
+	@echo "  make integration-test     Run integration tests"
 
 	$(VENV):
 	$(PYTHON) -m venv $(VENV)
@@ -25,3 +28,12 @@ install: $(VENV)
 
 lint: $(VENV)
 	$(VENV)/bin/pre-commit run --all-files
+
+test: $(VENV)
+	$(VENV)/bin/pytest tests/
+
+unit-test: $(VENV)
+	$(VENV)/bin/pytest tests/unit/
+
+integration-test: $(VENV)
+	$(VENV)/bin/pytest tests/integration/

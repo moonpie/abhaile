@@ -10,7 +10,7 @@ Image={{ build }}
 Network={{ network.services[service_name].vlan }}.network
 PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
 Timezone=local
-{% for v in volume_lines   %}
+{% for v in volume_lines %}
 {{ v }}
 {% endfor %}
 

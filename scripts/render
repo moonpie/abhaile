@@ -23,6 +23,9 @@ from validation.services import (
 from renderers.manifest import build_manifest, write_manifest
 from renderers.host import render_host_config
 from renderers.services import render_service_configs
+from renderers.quadlets import render_service_quadlets
+from renderers.ingress import render_ingress_configs
+from renderers.vault_templates import render_vault_agent_configs
 from renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
@@ -86,12 +89,57 @@ def load_and_validate(
     return host_services, mapping, network, service_paths
 
 
+def _all_services_in_mapping_order(mapping: dict) -> list[str]:
+    """Return all services in mapping order (deduplicated, first occurrence wins).
+
+    Args:
+        mapping: Mapping configuration data.
+
+    Returns:
+        List of service names in the order they appear in mapping.yaml.
+
+    Raises:
+        RenderError: If mapping structure is invalid.
+    """
+    if not isinstance(mapping, dict) or "abhaile" not in mapping:
+        raise RenderError("mapping.yaml missing top-level 'abhaile' list")
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    for item in mapping["abhaile"]:
+        if not isinstance(item, dict) or len(item) != 1:
+            raise RenderError("mapping.yaml host entries must be single-key objects")
+        _, services = next(iter(item.items()))
+        if not isinstance(services, list):
+            raise RenderError("mapping.yaml services must be a list")
+
+        for svc in services:
+            name: str | None = None
+            if isinstance(svc, str):
+                name = svc
+            elif isinstance(svc, dict):
+                if "name" in svc and isinstance(svc["name"], str):
+                    name = svc["name"]
+                elif len(svc) == 1:
+                    name = next(iter(svc.keys()))
+            if name is None:
+                raise RenderError("mapping.yaml service entries must be string or single-key object")
+
+            if name not in seen:
+                ordered.append(name)
+                seen.add(name)
+
+    return ordered
+
+
 def render_host(
     host: str,
     output_override: Path | None,
     paths: dict[str, str],
     all_mode: bool,
     repo_root: Path,
+    mapping: dict,
     network: dict,
     host_services: dict[str, list[str]],
 ) -> Path:
@@ -166,6 +214,36 @@ def render_host(
         services_output_dir,
     )
 
+    # Render podman quadlet files
+    render_service_quadlets(
+        host,
+        host_services.get(host, []),
+        network,
+        config_root,
+        services_output_dir,
+    )
+
+    # Render aggregated ingress configurations
+    # Collect all services in mapping order for ingress aggregation
+    all_services = _all_services_in_mapping_order(mapping)
+    render_ingress_configs(
+        host,
+        host_services.get(host, []),
+        all_services,
+        config_root,
+        services_output_dir,
+    )
+
+    # Render vault-agent configuration
+    # Only aggregate templates from services on this specific host
+    render_vault_agent_configs(
+        host,
+        host_services.get(host, []),
+        network,
+        config_root,
+        services_output_dir,
+    )
+
     target_root = Path(paths["target_root"])
     manifest = build_manifest(rendered_dir, target_root)
 
@@ -197,7 +275,7 @@ def main() -> int:
 
     output_override = Path(args.output).resolve() if args.output else None
 
-    host_services, _, network, _ = load_and_validate(repo_root, paths)
+    host_services, mapping, network, _ = load_and_validate(repo_root, paths)
 
     if args.all:
         hosts = sorted(host_services.keys())
@@ -213,6 +291,7 @@ def main() -> int:
             paths,
             args.all,
             repo_root,
+            mapping,
             network,
             host_services,
         )

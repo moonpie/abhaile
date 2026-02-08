@@ -52,8 +52,20 @@
                 "description": "Zone name (e.g., svc.abhaile.home.arpa.)"
               },
               "provider": {
-                "type": "string",
-                "description": "DNS provider (e.g., coredns-common, desec.io)"
+                "type": "object",
+                "required": ["type"],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": ["internal", "external"],
+                    "description": "DNS provider type (internal or external)"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Name of the DNS provider"
+                  }
+                },
+                "additionalProperties": false
               },
               "serial": {
                 "type": "object",

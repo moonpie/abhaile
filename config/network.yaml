@@ -12,27 +12,37 @@ vlans:
 dns:
   zones:
     - name: abhaile.dedyn.io.
-      provider: desec.io
+      provider:
+        type: external
+        name: desec.io
     - name: svc.abhaile.home.arpa.
-      provider: coredns-common
+      provider:
+        type: internal
+        name: coredns-common
       serial:
         date: 20260106
         counter: 00
         content_hash: 1248caf61fad0c9c13c5334acd8732e2a950ff6d6da4401639b276d962f37769
     - name: abhaile.home.arpa.
-      provider: coredns-common
+      provider:
+        type: internal
+        name: coredns-common
       serial:
         date: 20260106
         counter: 00
         content_hash: 87fcdca9155330aa363435bc94bd41a03fb7d3ccab1c890307448b842ca3577b
     - name: 20.20.172.in-addr.arpa.
-      provider: coredns-common
+      provider:
+        type: internal
+        name: coredns-common
       serial:
         date: 20260106
         counter: 00
         content_hash: 361d6bce43ccc7043d4392f54bc2018585552eed74681ce3c764a7a8dedfd024
     - name: 100.20.172.in-addr.arpa.
-      provider: coredns-common
+      provider:
+        type: internal
+        name: coredns-common
       serial:
         date: 20260106
         counter: 00

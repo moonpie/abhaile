@@ -95,7 +95,7 @@ class TestRenderNetworkdConfig:
 
         output_file = output_dir / "etc/systemd/network/resolved.conf"
         assert output_file.exists()
-        assert output_file.read_text() == "[Resolve]\nDNS=172.20.20.1"
+        assert output_file.read_text() == "[Resolve]\nDNS=172.20.20.1\n"
 
     def test_render_directories(self, tmp_path: Path) -> None:
         """Directories are created with no source entry."""

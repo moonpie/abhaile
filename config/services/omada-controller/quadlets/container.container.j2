@@ -11,7 +11,7 @@ PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
 StopTimeout=60
 Timezone=local
 Ulimit=nofile=4096:8192
-{% for v in volume_lines   %}
+{% for v in volume_lines %}
 {{ v }}
 {% endfor %}
 

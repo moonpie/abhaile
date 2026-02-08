@@ -20,13 +20,13 @@ composition:
   container:
     named_volumes:
       - name: config
-        host: /srv/vault/config
-        mount: /vault/config
+        host_path: /srv/vault/config
+        mount_path: /vault/config
       - name: data
-        host: /srv/vault/data
-        mount: /vault/data
+        host_path: /srv/vault/data
+        mount_path: /vault/data
       - name: host-certs
-        host: /etc/ssl/certs
-        mount: /etc/ssl/certs
+        host_path: /etc/ssl/certs
+        mount_path: /etc/ssl/certs
         mode: ro
         shared: true

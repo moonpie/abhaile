@@ -9,11 +9,11 @@ composition:
   container:
     named_volumes:
       - name: host-certs
-        host: /etc/ssl/certs
-        mount: /etc/ssl/certs
+        host_path: /etc/ssl/certs
+        mount_path: /etc/ssl/certs
         mode: ro
         shared: true
     mounted_files:
-      - host: /srv/blocky/config.yml
-        mount: /app/config.yml
+      - host_path: /srv/blocky/config.yml
+        mount_path: /app/config.yml
         mode: ro

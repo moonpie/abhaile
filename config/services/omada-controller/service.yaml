@@ -21,16 +21,16 @@ composition:
   container:
     named_volumes:
       - name: cert
-        host: /srv/omada-controller/cert
-        mount: /cert
+        host_path: /srv/omada-controller/cert
+        mount_path: /cert
       - name: data
-        host: /srv/omada-controller/data
-        mount: /opt/tplink/EAPController/data
+        host_path: /srv/omada-controller/data
+        mount_path: /opt/tplink/EAPController/data
       - name: logs
-        host: /srv/omada-controller/logs
-        mount: /opt/tplink/EAPController/logs
+        host_path: /srv/omada-controller/logs
+        mount_path: /opt/tplink/EAPController/logs
       - name: host-certs
-        host: /etc/ssl/certs
-        mount: /etc/ssl/certs
+        host_path: /etc/ssl/certs
+        mount_path: /etc/ssl/certs
         mode: ro
         shared: true

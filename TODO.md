@@ -2,6 +2,36 @@
 
 ## Decision Log
 
+1. Decision: All renderers (vault-agent, ingress, quadlets) recursively follow `composition.include` to collect their respective content from included services; includes are processed depth-first (includes before direct definitions); cycle detection with clear error messages; services rendered in mapping.yaml order with includes expanded inline; visited tracking prevents redundant processing; each renderer has dedicated resolver functions (\_collect_service_vault_templates, \_collect_service_ingress_blocks, \_resolve_pod_definition, \_resolve_container_definition) that handle include traversal.
+   Date: 2026-02-07
+   Rationale: Include mechanism should work consistently across all composition content types (config, vault_agent, ingress, pod, container), not just config; depth-first traversal ensures included content appears before direct definitions, allowing overrides; cycle detection prevents infinite recursion; visited tracking maintains efficiency; this enables base/common services (like coredns-omada) to define vault templates, ingress blocks, or container definitions that are inherited by services that include them (like coredns-filtered, coredns-clean).
+   Scope: All three renderers updated with recursive include resolution (vault_templates.py: \_collect_service_vault_templates, ingress.py: \_collect_service_ingress_blocks, quadlets.py: \_resolve_pod_definition/\_resolve_container_definition); 24 existing unit tests still pass; 20 existing integration tests still pass; 5 new integration tests added (test_composition_includes.py) to explicitly verify include support; verified with coredns-omada vault template now appearing in both phobos (via coredns-filtered) and deimos (via coredns-clean) renders.
+   Confirmed by: user
+
+1. Decision: Vault-agent templates renderer aggregates vault-agent templates from services running on the SAME HOST (not cross-host like ingress) because vault-agent writes to local filesystem at /agent/templates/ on each host; template `source` paths are derived by replacing `<service>/templates/` with `/agent/templates/`, and template files are copied to `/srv/vault/agent/templates/` with the same replacement; template `dest` paths are rendered as `/agent/out/<out>`; base vault-agent service defines vault_agent.base with source template and variables; template variables support network placeholders (%%network.services.vault.address | strip_cidr%%) with jinja2 filter syntax; aggregated template metadata rendered into base config (config.hcl.j2) with deterministic ordering by mapping.yaml order (and within a service, in service.yaml order).
+   Date: 2026-02-07
+   Rationale: Vault-agent runs unprivileged on each host and writes templates to local filesystem, so must only aggregate from co-located services; the templates/out volumes require host-path placement under `/srv/vault/agent/{templates,out}` while config references mounted `/agent/{templates,out}` paths; network placeholder resolution with filter support handles complex configuration like CIDR-stripped addresses; mapping order preserves intent and is deterministic.
+   Scope: Vault templates renderer (scripts/lib/python/renderers/vault_templates.py) with integration into render pipeline (scripts/render); 13 unit tests + 3 integration tests all passing; verified with actual config for phobos (authelia, caddy-dmz, ddclient templates) and deimos (vault-agent only).
+   Confirmed by: user
+
+1. Decision: Ingress renderer aggregates Caddy configuration blocks from ALL services in mapping (across all hosts) into base services (caddy-dmz, caddy-internal) that are running on the CURRENT HOST ONLY; blocks appended in mapping.yaml order (and within a service, in service.yaml order); source paths in service.yaml may include service-name prefix (e.g., "caddy-dmz/config/Caddyfile") which renderer strips; aggregated content marked with comment separators and per-service headers.
+   Date: 2026-02-07
+   Rationale: Centralized reverse proxies need configuration from all services regardless of host placement, but the base Caddyfile should only be rendered on the host where the reverse proxy service is deployed; mapping order preserves intent and enables logical grouping; service-prefix handling maintains compatibility with existing config path patterns; comment separators provide clear visual separation in aggregated Caddyfiles.
+   Scope: Ingress renderer (scripts/lib/python/renderers/ingress.py) with integration into render pipeline; aggregates `ingress.{dmz|internal}.blocks` from all services into services defining `ingress.{dmz|internal}.base` (scoped to current host); 11 unit tests + 3 integration tests.
+   Confirmed by: user
+
+1. Decision: Quadlets renderer (pods) extends container renderer to handle multi-container pods with `-app` suffix naming convention (pod: \<service>-app.pod, containers: \<service>-app-\<container>.container, volumes: \<service>-app-\<container>-\<volume>.volume); container definitions extracted from `containers[].container` key if present; shared volumes across pod containers rendered once and reused; network quadlets generated at pod level for ipvlan-l2 mode.
+   Date: 2026-02-06
+   Rationale: `-app` suffix clearly distinguishes pod-related artifacts from standalone containers; container key extraction supports existing service.yaml structure (authelia pattern); shared volume reuse prevents duplicate host path errors when multiple containers mount same volume; leveraging existing container logic maximizes code reuse while supporting pod-specific features.
+   Scope: Pod rendering in quadlets renderer (\_render_pod_quadlets, \_render_named_volumes_for_pod_container); tested with authelia service (2 containers: authelia + redis, shared host-certs volume); 6 new unit tests + 1 integration test.
+   Confirmed by: user
+
+1. Decision: Quadlets renderer (containers) generates output to well-known paths per user (rootful: /etc/containers/systemd/, rootless: /home/\<user>/.config/containers/systemd/); shared volumes render to \_shared subdirectory with non-prefixed names; network quadlets deduplicated per VLAN and rendered to podman-networks/ (rootful only); volume_lines in container templates include both named_volumes and mounted_files; Jinja2 trim_blocks/lstrip_blocks prevent blank lines from template control tags.
+   Date: 2026-02-06
+   Rationale: Well-known paths align with systemd/podman quadlet conventions; shared volume deduplication reduces redundancy; network quadlet deduplication avoids duplicates when multiple services use same VLAN; whitespace control ensures clean output formatting without empty lines from templating.
+   Scope: Quadlets renderer (scripts/lib/python/renderers/quadlets.py) and integration into render pipeline (scripts/render).
+   Confirmed by: user
+
 1. Decision: Service config rendering resolves composition includes first (depth-first), then renders the service's own config entries to allow overrides by later entries; cycles are an error.
    Date: 2026-02-04
    Rationale: Ensures shared config from included services is applied before service-specific overrides; avoids silent infinite recursion.
@@ -213,10 +243,10 @@ This organization makes it easy to identify which artifacts require execution vs
 | [ ] | Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` from `config/hosts/**/host.yaml` (composition.software) across host/common. | Per-host package manifest and command plan rendered under `<output>/rendered/`. | Renderer CLI |
 | [ ] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/host.yaml` (user_management). | User/group/sudoers files generated under `<output>/rendered/` with deterministic ordering. | Renderer CLI |
 | [x] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/services/<service>`. | Renderer CLI |
-| [ ] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
-| [ ] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
-| [ ] | Ingress renderer | Aggregate ingress blocks with base into Caddy configuration. | Caddyfiles rendered under `<output>/rendered/services/<service>` for `<service>` that defines the base ingress definition. | Service configs renderer |
-| [ ] | Vault Templates renderer | Aggregate vault_agent templates with base into per-host vault-agent configuration. | vault-agent configuration rendered under `<output>/rendered/services/vault-agent` as per definition. | Service configs renderer |
+| [x] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
+| [x] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
+| [x] | Ingress renderer | Aggregate ingress blocks with base into Caddy configuration. | Caddyfiles rendered under `<output>/rendered/services/<service>` for `<service>` that defines the base ingress definition. | Service configs renderer |
+| [x] | Vault Templates renderer | Aggregate vault_agent templates with base into per-host vault-agent configuration. | vault-agent configuration rendered under `<output>/rendered/services/vault-agent` as per definition. | Service configs renderer |
 | [ ] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `composition.dns` found in `service.yaml` files. | Zone files and serial metadata rendered deterministically under `<output>/rendered/services/<service>` as per definition. | Renderer CLI |
 | [-] | Manifest writer | Produce `<output>/state/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
 

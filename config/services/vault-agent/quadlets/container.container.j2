@@ -7,7 +7,7 @@ Wants=network-online.target abhaile-vault-unseal.service
 Image={{ image }}
 Network=host
 Timezone=local
-{% for v in volume_lines   %}
+{% for v in volume_lines %}
 {{ v }}
 {% endfor %}
 Entrypoint=/bin/vault

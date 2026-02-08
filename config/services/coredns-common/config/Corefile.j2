@@ -2,7 +2,7 @@
 # Bind Address: {{ service.config.bind_ip }}
 # Forward To: {{ service.config.forward_to }}
 
-{% for zone in network.dns.zones if zone.provider == 'coredns-common' %}
+{% for zone in network.dns.zones if zone.provider.name == 'coredns-common' %}
 # ----- Authoritative: {{ zone.name.rstrip('.') }} -----
 {{ zone.name.rstrip('.') }}:53 {
     bind {{ service.config.bind_ip }}
