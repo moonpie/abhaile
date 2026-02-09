@@ -20,33 +20,33 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20260106
+        date: 20260208
         counter: 00
-        content_hash: 1248caf61fad0c9c13c5334acd8732e2a950ff6d6da4401639b276d962f37769
+        content_hash: 21ba53492270687177a1a61a54e5ed8c3fa109233764a11956785ac9eecc9cf2
     - name: abhaile.home.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260106
+        date: 20260208
         counter: 00
-        content_hash: 87fcdca9155330aa363435bc94bd41a03fb7d3ccab1c890307448b842ca3577b
+        content_hash: ce81a9b6e0829f4496af3479a82645e69b73be69f4a4bba8d0a0a36659cfd847
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260106
+        date: 20260208
         counter: 00
-        content_hash: 361d6bce43ccc7043d4392f54bc2018585552eed74681ce3c764a7a8dedfd024
+        content_hash: 2cd3e36f9eea22d8dd6216bbda39a023a03e107f826c8679b9ef30eb80c2b6ed
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260106
+        date: 20260208
         counter: 00
-        content_hash: 9a32cef98220c14c59d436eab5b80e9d3f2c20beb986662b10feae963a35a7e0
+        content_hash: e22f96f38ccab0b38e96a07f4821698516c61fb11b7069155a6bdef1fcea8fa2
 hosts:
   phobos:
     interfaces:

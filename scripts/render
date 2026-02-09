@@ -15,6 +15,7 @@ from utils.paths import get_repo_root, load_paths, resolve_output_root
 from utils.config import read_yaml, read_json
 from validation.schema import validate_schema
 from validation.network import validate_network_sanity, validate_host_physical_device
+from validation.dns import validate_dns_serials
 from validation.services import (
     parse_mapping,
     ensure_service_definitions,
@@ -26,6 +27,7 @@ from renderers.services import render_service_configs
 from renderers.quadlets import render_service_quadlets
 from renderers.ingress import render_ingress_configs
 from renderers.vault_templates import render_vault_agent_configs
+from renderers.dns import render_dns
 from renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
@@ -244,11 +246,24 @@ def render_host(
         services_output_dir,
     )
 
+    # Render DNS zone files
+    # Only render zones for services on this specific host
+    render_dns(
+        network,
+        rendered_dir,
+        host_services.get(host, []),
+        all_services,
+        config_root,
+    )
+
     target_root = Path(paths["target_root"])
     manifest = build_manifest(rendered_dir, target_root)
 
     manifest_path = state_dir / "manifest.json"
     write_manifest(manifest, manifest_path)
+
+    # Validate DNS serials after rendering so artifacts exist for troubleshooting
+    validate_dns_serials(network)
 
     return manifest_path
 
