@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from renderers.ingress import render_ingress_configs
-from utils.errors import RenderError
-
-
-def _write(path: Path, content: str) -> None:
-    """Helper to write file with parent directory creation."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+from abhaile.renderers.ingress import render_ingress_configs
+from abhaile.utils.errors import RenderError
 
 
 class TestRenderIngressConfigs:
@@ -35,12 +30,12 @@ class TestRenderIngressConfigs:
         # No output should be generated
         assert not output_dir.exists()
 
-    def test_no_base_services_does_nothing(self, tmp_path: Path) -> None:
+    def test_no_base_services_does_nothing(self, tmp_path: Path, write_file: Any) -> None:
         """Services without ingress base definitions are skipped."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "blocky" / "service.yaml",
             """name: blocky
 composition:
@@ -60,12 +55,12 @@ composition:
         # No ingress output
         assert not (output_dir / "blocky").exists()
 
-    def test_render_single_base_no_blocks(self, tmp_path: Path) -> None:
+    def test_render_single_base_no_blocks(self, tmp_path: Path, write_file: Any) -> None:
         """Base service without blocks renders only base content."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "service.yaml",
             """name: caddy-dmz
 composition:
@@ -77,7 +72,7 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
             """{
 \tadmin off
@@ -106,13 +101,13 @@ composition:
         # No blocks appended
         assert "Aggregated Ingress Blocks" not in content
 
-    def test_render_base_with_blocks(self, tmp_path: Path) -> None:
+    def test_render_base_with_blocks(self, tmp_path: Path, write_file: Any) -> None:
         """Base service aggregates blocks from other services."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
         # Base service
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "service.yaml",
             """name: caddy-internal
 composition:
@@ -124,7 +119,7 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "config" / "Caddyfile",
             """{
 \tadmin off
@@ -133,7 +128,7 @@ composition:
         )
 
         # Service with block
-        _write(
+        write_file(
             config_root / "services" / "authelia" / "service.yaml",
             """name: authelia
 composition:
@@ -144,7 +139,7 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "authelia" / "caddy" / "internal-ingress.txt",
             """authelia.abhaile.home.arpa {
 \treverse_proxy http://authelia.svc:9091
@@ -170,12 +165,12 @@ composition:
         assert "authelia.abhaile.home.arpa" in content
         assert "reverse_proxy" in content
 
-    def test_multiple_blocks_deterministic_order(self, tmp_path: Path) -> None:
+    def test_multiple_blocks_deterministic_order(self, tmp_path: Path, write_file: Any) -> None:
         """Multiple blocks are aggregated in alphabetical order by service."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "service.yaml",
             """name: caddy-dmz
 composition:
@@ -187,13 +182,13 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
             "{ admin off }\n",
         )
 
         # Service vault (alphabetically last)
-        _write(
+        write_file(
             config_root / "services" / "vault" / "service.yaml",
             """name: vault
 composition:
@@ -204,13 +199,13 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "vault" / "caddy" / "dmz-ingress.txt",
             "vault.example.com { reverse_proxy :8200 }\n",
         )
 
         # Service authelia (alphabetically first)
-        _write(
+        write_file(
             config_root / "services" / "authelia" / "service.yaml",
             """name: authelia
 composition:
@@ -221,7 +216,7 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "authelia" / "caddy" / "dmz-ingress.txt",
             "auth.example.com { reverse_proxy :9091 }\n",
         )
@@ -242,12 +237,12 @@ composition:
         vault_pos = content.find("# --- vault ---")
         assert authelia_pos < vault_pos
 
-    def test_multiple_blocks_from_same_service(self, tmp_path: Path) -> None:
+    def test_multiple_blocks_from_same_service(self, tmp_path: Path, write_file: Any) -> None:
         """Service with multiple block files includes all."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "service.yaml",
             """name: caddy-internal
 composition:
@@ -259,12 +254,12 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "config" / "Caddyfile",
             "{ admin off }\n",
         )
 
-        _write(
+        write_file(
             config_root / "services" / "omada" / "service.yaml",
             """name: omada
 composition:
@@ -276,12 +271,12 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "omada" / "caddy" / "ingress.txt",
             "omada.home { reverse_proxy :8043 }\n",
         )
 
-        _write(
+        write_file(
             config_root / "services" / "omada" / "caddy" / "cert.txt",
             "cert.home { file_server }\n",
         )
@@ -302,13 +297,13 @@ composition:
         # Both under same service comment
         assert content.count("# --- omada ---") == 2
 
-    def test_multiple_zones_separate_outputs(self, tmp_path: Path) -> None:
+    def test_multiple_zones_separate_outputs(self, tmp_path: Path, write_file: Any) -> None:
         """Service defining multiple zones renders each independently."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
         # Service with dmz base
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "service.yaml",
             """name: caddy-dmz
 composition:
@@ -320,13 +315,13 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
             "# DMZ Base\n",
         )
 
         # Service with internal base
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "service.yaml",
             """name: caddy-internal
 composition:
@@ -338,13 +333,13 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "config" / "Caddyfile",
             "# Internal Base\n",
         )
 
         # Service with blocks for both zones
-        _write(
+        write_file(
             config_root / "services" / "omada" / "service.yaml",
             """name: omada
 composition:
@@ -358,12 +353,12 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "omada" / "caddy" / "dmz-ingress.txt",
             "omada-dmz.example.com { }\n",
         )
 
-        _write(
+        write_file(
             config_root / "services" / "omada" / "caddy" / "internal-ingress.txt",
             "omada.home { }\n",
         )
@@ -393,12 +388,12 @@ composition:
         assert "omada.home" in internal_content
         assert "omada-dmz.example.com" not in internal_content
 
-    def test_missing_base_source_raises_error(self, tmp_path: Path) -> None:
+    def test_missing_base_source_raises_error(self, tmp_path: Path, write_file: Any) -> None:
         """Missing base Caddyfile source raises error."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "service.yaml",
             """name: caddy-dmz
 composition:
@@ -421,12 +416,12 @@ composition:
                 output_dir,
             )
 
-    def test_missing_block_file_raises_error(self, tmp_path: Path) -> None:
+    def test_missing_block_file_raises_error(self, tmp_path: Path, write_file: Any) -> None:
         """Missing ingress block file raises error."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "service.yaml",
             """name: caddy-internal
 composition:
@@ -438,12 +433,12 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-internal" / "config" / "Caddyfile",
             "{ admin off }\n",
         )
 
-        _write(
+        write_file(
             config_root / "services" / "authelia" / "service.yaml",
             """name: authelia
 composition:
@@ -465,12 +460,12 @@ composition:
                 output_dir,
             )
 
-    def test_base_missing_source_or_destination(self, tmp_path: Path) -> None:
+    def test_base_missing_source_or_destination(self, tmp_path: Path, write_file: Any) -> None:
         """Base definition missing source or destination raises error."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "service.yaml",
             """name: caddy-dmz
 composition:
@@ -482,7 +477,7 @@ composition:
 """,
         )
 
-        _write(
+        write_file(
             config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
             "{ }\n",
         )

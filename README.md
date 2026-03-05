@@ -82,21 +82,36 @@ Apply should:
 - No ad-hoc changes on hosts outside the GitOps flow
 - No secrets committed to the repo
 
+## Dependencies
+
+Runtime dependencies live in requirements.txt. Development tooling lives in requirements-dev.txt, which includes requirements.txt.
+
+- Runtime: install requirements.txt only for production or CI execution.
+- Development: use make install to set up the venv, install requirements-dev.txt, and register pre-commit hooks.
+
 ## Repository Layout
 
+- `abhaile/` - Python package implementation (CLI, renderers, validation, DNS, apply planning)
 - `config/` - authoritative intent (source of truth)
   - `mapping.yaml` - service-to-host assignments
   - `network.yaml` - VLANs, addresses, DNS zones/records
   - `hosts/` - host-specific overlays (common, phobos, deimos) with host.yaml
   - `services/` - per-service definitions and templates
   - `_templates/` - shared templates for rendering
+- `tests/` - unit and integration pytest suites
 - `docs/` - documentation and runbooks
   - `adr/` - architecture decision records for major changes
-- `scripts/` - render and apply pipeline scripts
+- `scripts/` - path/config support assets (for example `paths.ini`)
 - `out/` - generated artifacts and state (disposable, not source of truth; see Environment Paths section for structure)
   - `rendered/` - ephemeral desired-state artifacts (overwritten on each render)
   - `state/` - persistent metadata (manifests, commit tracking)
 - `policies/` - Vault policies for secret management
+
+## CLI Entrypoints
+
+- Primary CLI entrypoint: `abhaile-render`
+- Entry module: `abhaile.cli:main`
+- Current supported mode: render (`--host` or `--all`, with optional `--output`)
 
 **Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 

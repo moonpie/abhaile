@@ -1,17 +1,13 @@
 """Integration tests for quadlets rendering with actual config."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# Add lib/python to path for imports during tests
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent / "scripts" / "lib" / "python")
-)
+from abhaile.renderers.quadlets import render_service_quadlets
+from abhaile.utils.config import read_yaml
 
-from renderers.quadlets import render_service_quadlets
-from utils.config import read_yaml
+pytestmark = pytest.mark.integration
 
 
 class TestQuadretsIntegration:
@@ -141,31 +137,22 @@ class TestQuadretsIntegration:
 
         # Compare all rendered files
         container_file1 = (
-            output_dir1
-            / "services"
-            / "blocky"
-            / "etc/containers/systemd/blocky.container"
+            output_dir1 / "services" / "blocky" / "etc/containers/systemd/blocky.container"
         )
         container_file2 = (
-            output_dir2
-            / "services"
-            / "blocky"
-            / "etc/containers/systemd/blocky.container"
+            output_dir2 / "services" / "blocky" / "etc/containers/systemd/blocky.container"
         )
 
         assert container_file1.exists() and container_file2.exists()
         assert container_file1.read_text() == container_file2.read_text()
 
-        image_file1 = (
-            output_dir1 / "services" / "blocky" / "etc/containers/systemd/blocky.image"
-        )
-        image_file2 = (
-            output_dir2 / "services" / "blocky" / "etc/containers/systemd/blocky.image"
-        )
+        image_file1 = output_dir1 / "services" / "blocky" / "etc/containers/systemd/blocky.image"
+        image_file2 = output_dir2 / "services" / "blocky" / "etc/containers/systemd/blocky.image"
 
         assert image_file1.exists() and image_file2.exists()
         assert image_file1.read_text() == image_file2.read_text()
 
+    @pytest.mark.slow
     def test_render_all_podman_services(self, tmp_path: Path) -> None:
         """Test rendering all podman services in mapping."""
         repo_root = Path(__file__).parent.parent.parent
@@ -231,9 +218,7 @@ class TestQuadretsIntegration:
         )
 
         # Verify pod quadlet exists with correct naming
-        pod_file = (
-            output_dir / "authelia" / "etc/containers/systemd" / "authelia-app.pod"
-        )
+        pod_file = output_dir / "authelia" / "etc/containers/systemd" / "authelia-app.pod"
         assert pod_file.exists(), "Pod quadlet should be named authelia-app.pod"
 
         pod_content = pod_file.read_text()
@@ -242,10 +227,7 @@ class TestQuadretsIntegration:
 
         # Verify authelia container exists with correct naming
         authelia_container = (
-            output_dir
-            / "authelia"
-            / "etc/containers/systemd"
-            / "authelia-app-authelia.container"
+            output_dir / "authelia" / "etc/containers/systemd" / "authelia-app-authelia.container"
         )
         assert (
             authelia_container.exists()
@@ -257,21 +239,13 @@ class TestQuadretsIntegration:
 
         # Verify authelia image file
         authelia_image = (
-            output_dir
-            / "authelia"
-            / "etc/containers/systemd"
-            / "authelia-app-authelia.image"
+            output_dir / "authelia" / "etc/containers/systemd" / "authelia-app-authelia.image"
         )
-        assert (
-            authelia_image.exists()
-        ), "Image should be named authelia-app-authelia.image"
+        assert authelia_image.exists(), "Image should be named authelia-app-authelia.image"
 
         # Verify redis container exists with correct naming
         redis_container = (
-            output_dir
-            / "authelia"
-            / "etc/containers/systemd"
-            / "authelia-app-redis.container"
+            output_dir / "authelia" / "etc/containers/systemd" / "authelia-app-redis.container"
         )
         assert (
             redis_container.exists()
@@ -283,19 +257,12 @@ class TestQuadretsIntegration:
 
         # Verify redis image file
         redis_image = (
-            output_dir
-            / "authelia"
-            / "etc/containers/systemd"
-            / "authelia-app-redis.image"
+            output_dir / "authelia" / "etc/containers/systemd" / "authelia-app-redis.image"
         )
-        assert (
-            redis_image.exists()
-        ), "Redis image should be named authelia-app-redis.image"
+        assert redis_image.exists(), "Redis image should be named authelia-app-redis.image"
 
         # Verify volume files with correct naming pattern (service-app-container-volume)
-        volume_files = list(
-            (output_dir / "authelia" / "etc/containers/systemd").glob("*.volume")
-        )
+        volume_files = list((output_dir / "authelia" / "etc/containers/systemd").glob("*.volume"))
         assert len(volume_files) > 0, "Should have volume files for containers"
 
         # Check that volume names follow the pattern: authelia-app-{container}-{volume}.volume
@@ -309,11 +276,6 @@ class TestQuadretsIntegration:
 
         # Verify network quadlet
         network_file = (
-            output_dir
-            / "podman-networks"
-            / "etc/containers/systemd"
-            / "services.network"
+            output_dir / "podman-networks" / "etc/containers/systemd" / "services.network"
         )
-        assert (
-            network_file.exists()
-        ), "Network quadlet should be generated for pod's VLAN"
+        assert network_file.exists(), "Network quadlet should be generated for pod's VLAN"

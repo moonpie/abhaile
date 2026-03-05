@@ -1,15 +1,23 @@
 """Shared pytest fixtures for Abhaile render/apply tests."""
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 import yaml
 
-# Add lib/python to path for imports during tests
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts" / "lib" / "python"))
+
+@pytest.fixture
+def write_file():
+    """Write a file, creating parent directories when needed."""
+
+    def _write(path: Path, content: str) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        return path
+
+    return _write
 
 
 @pytest.fixture
@@ -122,9 +130,7 @@ def tmp_repo_with_config(tmp_repo):
         },
         "additionalProperties": False,
     }
-    (repo_root / "schemas" / "mapping.schema.json").write_text(
-        json.dumps(mapping_schema)
-    )
+    (repo_root / "schemas" / "mapping.schema.json").write_text(json.dumps(mapping_schema))
 
     network_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -136,9 +142,7 @@ def tmp_repo_with_config(tmp_repo):
             "services": {"type": "object"},
         },
     }
-    (repo_root / "schemas" / "network.schema.json").write_text(
-        json.dumps(network_schema)
-    )
+    (repo_root / "schemas" / "network.schema.json").write_text(json.dumps(network_schema))
 
     service_schema = {
         "$schema": "http://json-schema.org/draft-07/schema#",
@@ -151,9 +155,7 @@ def tmp_repo_with_config(tmp_repo):
             "network": {"type": "string"},
         },
     }
-    (repo_root / "schemas" / "service.schema.json").write_text(
-        json.dumps(service_schema)
-    )
+    (repo_root / "schemas" / "service.schema.json").write_text(json.dumps(service_schema))
 
     return repo_root
 

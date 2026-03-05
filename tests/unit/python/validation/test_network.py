@@ -1,18 +1,10 @@
 """Tests for scripts/lib/python/validation modules."""
 
-import sys
-from pathlib import Path
-
 import pytest
 import yaml
 
-# Add lib/python to path
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent.parent / "scripts" / "lib" / "python")
-)
-
-from utils.errors import RenderError
-from validation.network import validate_network_sanity, validate_host_physical_device
+from abhaile.utils.errors import RenderError
+from abhaile.validation.network import validate_network_sanity, validate_host_physical_device
 
 
 class TestNetworkSanity:
@@ -135,9 +127,7 @@ class TestHostPhysicalDevice:
 
         host_config = {"name": "unknown-host", "physical_device": "eth0"}
 
-        with pytest.raises(
-            RenderError, match="Host 'unknown-host' not found in network.yaml"
-        ):
+        with pytest.raises(RenderError, match="Host 'unknown-host' not found in network.yaml"):
             validate_host_physical_device("unknown-host", host_config, network)
 
     def test_error_message_includes_available_interfaces(self, tmp_repo_with_config):

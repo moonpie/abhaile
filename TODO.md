@@ -2,6 +2,12 @@
 
 ## Decision Log
 
+1. Decision: Keep the apply manifest module and implement drift detection in the apply pipeline; tracked in TODO items until implementation is complete.
+   Date: 2026-02-15
+   Rationale: Apply is required for the repo’s workflow, and drift detection is a core safety gate; keeping the module makes the planned responsibilities explicit and prevents ad hoc implementation later.
+   Scope: abhaile/apply/manifest.py and apply pipeline integration.
+   Confirmed by: user
+
 1. Decision: DNS reverse zones automatically generate PTR records from A/AAAA records marked with `ptr: true` in network.yaml; PTR records have reverse DNS notation name (final octets) and FQDN rdata with trailing dot; reverse zone identification uses smart IP-to-zone matching (172.20.20.10 belongs to 20.20.172.in-addr.arpa.); PTR records rendered inline during zone file generation; DNS serial validation compares rendered zone hash against network.yaml content_hash, computing expected serial from git HEAD (last commit) serial vs today's date, incrementing counter if same day or resetting to 00 if new day; validation reports only fields that differ between expected and current workspace values (serial.date, serial.counter, serial.content_hash).
    Date: 2026-02-08
    Rationale: PTR records enable reverse DNS lookups (IP → hostname) which are essential for service identification, logging correlation, and security policies; automatic generation from forward records (marked with ptr: true) maintains single source of truth and prevents manual sync errors; FQDN format with trailing dot ensures correct DNS resolution; smart zone matching handles /24 networks correctly (comparing first 3 octets); git HEAD comparison for serial increment prevents counter exhaustion during development iterations—serial only increments once per commit, not per render; differential reporting (only changed fields) reduces noise and makes fixes clearer; expected serial computation uses git HEAD date/counter (not workspace) to determine increment logic, ensuring predictable behavior across development cycles.
@@ -102,7 +108,7 @@
 
 ### Session Preface
 
-#### Pre-prompt
+#### Prompt Wrapping
 
 ```text
 You are my coding buddy for this repo. Follow .github/copilot-instructions.md.
@@ -110,11 +116,9 @@ Work only on the task below.
 Be explicit about files you read/write and keep changes minimal.
 Suggest alternatives when you see them, but ask for confirmation before deviating.
 Log any decisions in the Decision Log at the top of TODO.md if they’re not ADR-worthy.
-```
 
-#### Post-prompt
+<Prompt>
 
-```text
 Restate the task in your own words, list the files you will read/write, and call out any assumptions or ambiguities before you start.
 Do not proceed if there are any ambiguities - let me clarify them first
 If everything is clear - please provide a short plan (3–6 steps) before making changes.

@@ -1,15 +1,9 @@
 """Tests for scripts/lib/python/renderers modules."""
 
 import json
-import sys
 from pathlib import Path
 
-# Add lib/python to path
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent.parent / "scripts" / "lib" / "python")
-)
-
-from renderers.manifest import build_manifest, write_manifest
+from abhaile.renderers.manifest import build_manifest, write_manifest
 
 
 class TestBuildManifest:

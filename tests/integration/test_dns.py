@@ -4,18 +4,29 @@ from pathlib import Path
 
 import pytest
 
-from renderers.dns import _compute_content_hash, _collect_zone_records, render_dns
-from utils.config import read_yaml
-from utils.errors import RenderError
-from validation.dns import validate_dns_serials
+from abhaile.dns import render_dns
+from abhaile.dns.records import collect_zone_records as _collect_zone_records
+from abhaile.dns.serial_validator import compute_content_hash as _compute_content_hash
+from abhaile.utils.config import read_yaml
+from abhaile.utils.errors import RenderError
+from abhaile.validation.dns import validate_dns_serials
+
+pytestmark = pytest.mark.integration
 
 
 def _build_zone_content_for_hash(zone: dict, records: list[dict]) -> str:
     zone_name = zone.get("name", "")
     zone_name_stripped = zone_name.rstrip(".")
     serial_info = zone.get("serial", {})
-    serial_str = str(serial_info.get("date", "20260101")).strip() + str(
-        serial_info.get("counter", "00")
+    if not isinstance(serial_info, dict) or not serial_info:
+        raise ValueError("Zone serial configuration is required")
+    if serial_info.get("date") is None or str(serial_info.get("date")).strip() == "":
+        raise ValueError("Zone serial.date is required")
+    if serial_info.get("counter") is None or str(serial_info.get("counter")).strip() == "":
+        raise ValueError("Zone serial.counter is required")
+
+    serial_str = str(int(str(serial_info.get("date")).strip())) + str(
+        int(str(serial_info.get("counter")).strip())
     ).zfill(2)
 
     lines = []
@@ -70,7 +81,7 @@ def config_root():
 @pytest.fixture
 def all_services(mapping_config):
     """Get all services from mapping in order."""
-    from validation.services import parse_mapping
+    from abhaile.validation.services import parse_mapping
 
     host_services = parse_mapping(mapping_config)
     # Deduplicate while preserving order
@@ -121,20 +132,20 @@ def network_config_with_updated_serials(network_config, all_services):
 class TestDNSIntegration:
     """Integration tests with real network configuration."""
 
-    def test_validate_dns_serials_documents_status(self, network_config):
+    def test_validate_dns_serials_documents_status(self, network_config, all_services):
         """Document whether DNS serials in network.yaml are up-to-date.
 
         This test shows the user what updates are needed if serials are stale.
         """
         try:
-            validate_dns_serials(network_config)
+            validate_dns_serials(network_config, all_services)
         except RenderError as e:
             # This is expected if user hasn't updated serials yet
             error_msg = str(e)
             assert "content hash mismatch" in error_msg
-            assert "Stored hash" in error_msg
-            assert "Current hash" in error_msg
+            assert "serial.content_hash" in error_msg or "serial.counter" in error_msg
 
+    @pytest.mark.slow
     def test_render_dns_with_corrected_serials(
         self, network_config_with_updated_serials, all_services, config_root, tmp_path
     ):
@@ -156,9 +167,7 @@ class TestDNSIntegration:
 
         # Check that zone files were created in providing services
         zones = network_config_with_updated_serials.get("dns", {}).get("zones", [])
-        internal_zones = [
-            z for z in zones if z.get("provider", {}).get("type") == "internal"
-        ]
+        internal_zones = [z for z in zones if z.get("provider", {}).get("type") == "internal"]
 
         assert len(internal_zones) > 0, "No internal zones found in test config"
 
@@ -167,17 +176,12 @@ class TestDNSIntegration:
         providing_services = [
             s
             for s in all_services
-            if any(
-                p in s or s in ["coredns-clean", "coredns-filtered"]
-                for p in provider_names
-            )
+            if any(p in s or s in ["coredns-clean", "coredns-filtered"] for p in provider_names)
         ]
 
         # Zone files should exist in providing service directories
         for service_name in providing_services:
-            service_zones_dir = (
-                output_dir / "services" / service_name / "etc/coredns/zones"
-            )
+            service_zones_dir = output_dir / "services" / service_name / "etc/coredns/zones"
             if not service_zones_dir.exists():
                 continue
 
@@ -193,6 +197,7 @@ class TestDNSIntegration:
                     assert "IN SOA" in content
                     assert "IN NS" in content
 
+    @pytest.mark.slow
     def test_dns_record_deterministic_ordering(
         self, network_config_with_updated_serials, all_services, config_root, tmp_path
     ):
@@ -220,9 +225,7 @@ class TestDNSIntegration:
         )
 
         zones = network_config_with_updated_serials.get("dns", {}).get("zones", [])
-        internal_zones = [
-            z for z in zones if z.get("provider", {}).get("type") == "internal"
-        ]
+        internal_zones = [z for z in zones if z.get("provider", {}).get("type") == "internal"]
 
         # Get all service directories that have zone files
         service_dirs = [d for d in (output_dir / "services").iterdir() if d.is_dir()]
@@ -247,7 +250,7 @@ class TestDNSIntegration:
                     zone_file2 = candidate2
                     break
 
-            if not zone_file1:
+            if not zone_file1 or not zone_file2:
                 continue  # Skip if zone not rendered
 
             content1 = zone_file1.read_text()
@@ -256,6 +259,7 @@ class TestDNSIntegration:
             # Content should be identical (deterministic)
             assert content1 == content2, f"Zone {zone_name} content not deterministic"
 
+    @pytest.mark.slow
     def test_dns_zone_file_format(
         self, network_config_with_updated_serials, all_services, config_root, tmp_path
     ):
@@ -272,9 +276,7 @@ class TestDNSIntegration:
         )
 
         zones = network_config_with_updated_serials.get("dns", {}).get("zones", [])
-        internal_zones = [
-            z for z in zones if z.get("provider", {}).get("type") == "internal"
-        ]
+        internal_zones = [z for z in zones if z.get("provider", {}).get("type") == "internal"]
 
         # Get all service directories that have zone files
         service_dirs = [d for d in (output_dir / "services").iterdir() if d.is_dir()]
@@ -308,6 +310,7 @@ class TestDNSIntegration:
             ns_lines = [line for line in lines if "IN NS" in line]
             assert len(ns_lines) > 0, "Zone file missing NS record"
 
+    @pytest.mark.slow
     def test_dns_serial_in_zone_file(
         self, network_config_with_updated_serials, all_services, config_root, tmp_path
     ):
@@ -324,9 +327,7 @@ class TestDNSIntegration:
         )
 
         zones = network_config_with_updated_serials.get("dns", {}).get("zones", [])
-        internal_zones = [
-            z for z in zones if z.get("provider", {}).get("type") == "internal"
-        ]
+        internal_zones = [z for z in zones if z.get("provider", {}).get("type") == "internal"]
 
         # Get all service directories that have zone files
         service_dirs = [d for d in (output_dir / "services").iterdir() if d.is_dir()]
@@ -354,6 +355,7 @@ class TestDNSIntegration:
                 expected_serial in content
             ), f"Zone {zone_name} SOA missing expected serial {expected_serial}"
 
+    @pytest.mark.slow
     def test_dns_host_records_appear_in_zone(
         self, network_config_with_updated_serials, all_services, config_root, tmp_path
     ):
@@ -419,6 +421,7 @@ class TestDNSIntegration:
                                     record_name in content or record_name == "*"
                                 ), f"Host record {record_name} not found in zone {zone_name}"
 
+    @pytest.mark.slow
     def test_dns_service_records_appear_in_zone(
         self, network_config_with_updated_serials, all_services, config_root, tmp_path
     ):

@@ -3,6 +3,18 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Packaging/build artifacts
+*.egg-info/
+.eggs/
+build/
+dist/
 
 # Virtual environments
 .venv/

@@ -3,32 +3,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from renderers.networkd import (
+from abhaile.renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
 )
-from utils.errors import RenderError
-
-
-def _write(path: Path, content: str) -> None:
-    """Helper to write file with parent directory creation."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+from abhaile.utils.errors import RenderError
 
 
 class TestRenderNetworkdConfig:
     """Tests for render_networkd_config()."""
 
-    def test_render_static_files(self, tmp_path: Path) -> None:
+    def test_render_static_files(self, tmp_path: Path, write_file: Any) -> None:
         """Static files under /etc/systemd/network/ are copied to output."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output"
 
         # Create source file
-        _write(
+        write_file(
             config_root / "hosts" / "phobos" / "networkd" / "10-eth0.network",
             "[Match]\nName=eth0\n",
         )
@@ -58,13 +53,13 @@ class TestRenderNetworkdConfig:
         assert output_file.exists()
         assert output_file.read_text() == "[Match]\nName=eth0\n"
 
-    def test_render_templated_files(self, tmp_path: Path) -> None:
+    def test_render_templated_files(self, tmp_path: Path, write_file: Any) -> None:
         """Templated files are rendered with context."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output"
 
         # Create template file
-        _write(
+        write_file(
             config_root / "hosts" / "common" / "template.j2",
             "[Resolve]\nDNS={{ dns_server }}\n",
         )
@@ -103,9 +98,7 @@ class TestRenderNetworkdConfig:
         output_dir = tmp_path / "output"
 
         host_config = {
-            "composition": {
-                "config": [{"destination": "/etc/systemd/network/20-vlan.network.d/"}]
-            }
+            "composition": {"config": [{"destination": "/etc/systemd/network/20-vlan.network.d/"}]}
         }
 
         render_networkd_config(
@@ -120,17 +113,17 @@ class TestRenderNetworkdConfig:
         output_dir_path = output_dir / "etc/systemd/network/20-vlan.network.d"
         assert output_dir_path.is_dir()
 
-    def test_filters_networkd_entries_only(self, tmp_path: Path) -> None:
+    def test_filters_networkd_entries_only(self, tmp_path: Path, write_file: Any) -> None:
         """Only entries with /etc/systemd/network/ destination are processed."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output"
 
         # Create files for both networkd and resolved
-        _write(
+        write_file(
             config_root / "hosts" / "common" / "10-eth0.network",
             "[Match]\nName=eth0\n",
         )
-        _write(
+        write_file(
             config_root / "hosts" / "common" / "resolved.conf",
             "[Resolve]\nDNS=8.8.8.8\n",
         )
@@ -163,16 +156,16 @@ class TestRenderNetworkdConfig:
         assert (output_dir / "etc/systemd/network/10-eth0.network").exists()
         assert not (output_dir / "etc/systemd/resolved.conf").exists()
 
-    def test_common_and_host_configs_merged(self, tmp_path: Path) -> None:
+    def test_common_and_host_configs_merged(self, tmp_path: Path, write_file: Any) -> None:
         """Common and host-specific configs are both rendered."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output"
 
-        _write(
+        write_file(
             config_root / "hosts" / "common" / "common.network",
             "[Match]\nName=eth0\n",
         )
-        _write(
+        write_file(
             config_root / "hosts" / "phobos" / "phobos.network",
             "[Match]\nName=eth1\n",
         )
@@ -199,9 +192,7 @@ class TestRenderNetworkdConfig:
             }
         }
 
-        render_networkd_config(
-            "phobos", host_config, common_config, {}, config_root, output_dir
-        )
+        render_networkd_config("phobos", host_config, common_config, {}, config_root, output_dir)
 
         assert (output_dir / "etc/systemd/network/common.network").exists()
         assert (output_dir / "etc/systemd/network/phobos.network").exists()
@@ -265,26 +256,26 @@ class TestRenderNetworkdConfig:
 class TestRenderNetworkdDropins:
     """Tests for render_networkd_dropins()."""
 
-    def test_render_service_32_dropin(self, tmp_path: Path) -> None:
+    def test_render_service_32_dropin(self, tmp_path: Path, write_file: Any) -> None:
         """service-32 services get address drop-ins."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "etc/systemd/network"
 
         # Create base .network file
-        _write(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
+        write_file(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
 
         # Create drop-in directory
         dropin_dir = output_dir / "21-vlan.network.d"
         dropin_dir.mkdir(parents=True, exist_ok=True)
 
         # Create template
-        _write(
+        write_file(
             config_root / "_templates" / "hosts" / "service-addr.conf.j2",
             "[Network]\nAddress={{ service_address }}\n",
         )
 
         # Create service config
-        _write(
+        write_file(
             config_root / "services" / "caddy" / "service.yaml",
             "name: caddy\npodman:\n  user: root\n  network: service-32\n",
         )
@@ -307,26 +298,26 @@ class TestRenderNetworkdDropins:
         assert "[Network]" in dropin_file.read_text()
         assert "172.20.20.200" in dropin_file.read_text()
 
-    def test_render_ipvlan_l2_dropin(self, tmp_path: Path) -> None:
+    def test_render_ipvlan_l2_dropin(self, tmp_path: Path, write_file: Any) -> None:
         """ipvlan-l2 services get route drop-ins."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "etc/systemd/network"
 
         # Create base .network file
-        _write(output_dir / "21-ipvlan.network", "[Match]\nName=ipvlan-l2\n")
+        write_file(output_dir / "21-ipvlan.network", "[Match]\nName=ipvlan-l2\n")
 
         # Create drop-in directory
         dropin_dir = output_dir / "21-ipvlan.network.d"
         dropin_dir.mkdir(parents=True, exist_ok=True)
 
         # Create route template
-        _write(
+        write_file(
             config_root / "_templates" / "hosts" / "service-route.conf.j2",
             "[Route]\nDestination={{ service_address }}\n",
         )
 
         # Create service config
-        _write(
+        write_file(
             config_root / "services" / "blocky" / "service.yaml",
             "name: blocky\npodman:\n  user: root\n  network: ipvlan-l2\n",
         )
@@ -349,7 +340,7 @@ class TestRenderNetworkdDropins:
         assert "[Route]" in dropin_file.read_text()
         assert "172.20.30.234" in dropin_file.read_text()
 
-    def test_skips_non_networkd_services(self, tmp_path: Path) -> None:
+    def test_skips_non_networkd_services(self, tmp_path: Path, write_file: Any) -> None:
         """Services without networkd mode are skipped."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "etc/systemd/network"
@@ -357,10 +348,10 @@ class TestRenderNetworkdDropins:
         dropin_dir = output_dir / "21-vlan.network.d"
         dropin_dir.mkdir(parents=True, exist_ok=True)
 
-        _write(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
+        write_file(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
 
         # Service with no network metadata
-        _write(
+        write_file(
             config_root / "services" / "coredns-common" / "service.yaml",
             "name: coredns-common\ncomposition: {}\n",
         )
@@ -382,15 +373,15 @@ class TestRenderNetworkdDropins:
         # No drop-in should be created
         assert not list(dropin_dir.glob("*.conf"))
 
-    def test_missing_service_in_network_raises(self, tmp_path: Path) -> None:
+    def test_missing_service_in_network_raises(self, tmp_path: Path, write_file: Any) -> None:
         """RenderError raised if service not in network.yaml."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "etc/systemd/network"
 
-        _write(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
+        write_file(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
         (output_dir / "21-vlan.network.d").mkdir(parents=True, exist_ok=True)
 
-        _write(
+        write_file(
             config_root / "services" / "caddy" / "service.yaml",
             "name: caddy\npodman:\n  user: root\n  network: service-32\n",
         )
@@ -409,12 +400,12 @@ class TestRenderNetworkdDropins:
                 output_dir,
             )
 
-    def test_missing_dropin_dir_for_vlan_raises(self, tmp_path: Path) -> None:
+    def test_missing_dropin_dir_for_vlan_raises(self, tmp_path: Path, write_file: Any) -> None:
         """RenderError raised if VLAN has no drop-in directory."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "etc/systemd/network"
 
-        _write(
+        write_file(
             config_root / "services" / "caddy" / "service.yaml",
             "name: caddy\npodman:\n  user: root\n  network: service-32\n",
         )

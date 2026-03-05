@@ -1,15 +1,13 @@
 """End-to-end integration tests for render pipeline."""
 
 import json
-import sys
 from pathlib import Path
 
-# Add lib/python to path for imports during tests
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent / "scripts" / "lib" / "python")
-)
+import pytest
 
-from renderers.manifest import build_manifest, write_manifest
+from abhaile.renderers.manifest import build_manifest, write_manifest
+
+pytestmark = pytest.mark.integration
 
 
 class TestRenderE2E:
@@ -48,9 +46,7 @@ class TestRenderE2E:
         rel_paths = [a["rel_path"] for a in loaded["artifacts"]]
         assert rel_paths == sorted(rel_paths)
 
-    def test_render_all_hosts_separate_manifests(
-        self, tmp_repo_with_config, tmp_output
-    ):
+    def test_render_all_hosts_separate_manifests(self, tmp_repo_with_config, tmp_output):
         """Test rendering all hosts produces separate manifests per host."""
         # repo_root = tmp_repo_with_config
         output_dir = tmp_output
@@ -146,9 +142,7 @@ class TestRenderE2E:
         (rendered_dir / "systemd" / "system").mkdir(parents=True)
         (rendered_dir / "systemd-networkd" / "networks").mkdir(parents=True)
         (rendered_dir / "systemd" / "system" / "service.service").write_text("[Unit]\n")
-        (rendered_dir / "systemd-networkd" / "networks" / "eth0.network").write_text(
-            "[Match]\n"
-        )
+        (rendered_dir / "systemd-networkd" / "networks" / "eth0.network").write_text("[Match]\n")
 
         state_dir = tmp_output / "state"
         state_dir.mkdir(parents=True)
@@ -229,15 +223,8 @@ composition:
         )
 
         # Import and use the full render pipeline
-        import sys
-        from pathlib import Path as PathLib
-
-        sys.path.insert(
-            0,
-            str(PathLib(__file__).parent.parent.parent / "scripts" / "lib" / "python"),
-        )
-        from renderers.services import render_service_configs
-        from utils.config import read_yaml
+        from abhaile.renderers.services import render_service_configs
+        from abhaile.utils.config import read_yaml
 
         network = read_yaml(repo_root / "config" / "network.yaml")
         rendered_dir = output_dir / "rendered"

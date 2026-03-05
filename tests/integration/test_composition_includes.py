@@ -4,10 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from renderers.ingress import render_ingress_configs
-from renderers.quadlets import render_service_quadlets
-from renderers.vault_templates import render_vault_agent_configs
-from utils.config import read_yaml
+from abhaile.renderers.ingress import render_ingress_configs
+from abhaile.renderers.quadlets import render_service_quadlets
+from abhaile.renderers.vault_templates import render_vault_agent_configs
+from abhaile.utils.config import read_yaml
+
+pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
@@ -19,9 +21,8 @@ def config_root() -> Path:
 class TestCompositionIncludes:
     """Test that composition.include is honored by all renderers."""
 
-    def test_vault_agent_follows_includes(
-        self, tmp_path: Path, config_root: Path
-    ) -> None:
+    @pytest.mark.slow
+    def test_vault_agent_follows_includes(self, tmp_path: Path, config_root: Path) -> None:
         """Vault-agent renderer collects templates from included services."""
         output_dir = tmp_path / "output"
         network = read_yaml(config_root / "network.yaml")
@@ -39,10 +40,7 @@ class TestCompositionIncludes:
 
         # Verify coredns-omada template was copied
         template_file = (
-            output_dir
-            / "vault-agent"
-            / "srv/vault/agent/templates"
-            / "coredns-omada.env.ctmpl"
+            output_dir / "vault-agent" / "srv/vault/agent/templates" / "coredns-omada.env.ctmpl"
         )
         assert template_file.exists()
 
@@ -125,18 +123,14 @@ class TestCompositionIncludes:
 
         # Verify template from coredns-omada (nested include) was collected
         template_file = (
-            output_dir
-            / "vault-agent"
-            / "srv/vault/agent/templates"
-            / "coredns-omada.env.ctmpl"
+            output_dir / "vault-agent" / "srv/vault/agent/templates" / "coredns-omada.env.ctmpl"
         )
         assert template_file.exists()
 
     def test_include_cycle_detection(self, tmp_path: Path, config_root: Path) -> None:
         """Verify that include cycles are detected and reported."""
-        from utils.errors import RenderError
+        from abhaile.utils.errors import RenderError
 
-        output_dir = tmp_path / "output"
         services_root = tmp_path / "services"
 
         # Create a cycle: service-a -> service-b -> service-a
@@ -152,17 +146,9 @@ class TestCompositionIncludes:
 
         # Should raise RenderError about cycle
         with pytest.raises(RenderError, match="cycle detected"):
-            from renderers.vault_templates import (
-                _collect_service_vault_templates,
-            )
+            from abhaile.utils.composition import walk_service_includes
 
-            _collect_service_vault_templates(
-                service="service-a",
-                services_root=services_root,
-                output_dir=output_dir,
-                templates_host_root="/srv/vault/agent/templates",
-                templates_mount_root="/agent/templates",
-                out_mount_root="/agent/out",
-                visited=set(),
-                stack=[],
+            walk_service_includes(
+                "service-a",
+                config_root=tmp_path,
             )

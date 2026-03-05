@@ -1,22 +1,19 @@
 """Integration tests for vault templates rendering with actual config."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# Add lib/python to path for imports during tests
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent / "scripts" / "lib" / "python")
-)
+from abhaile.renderers.vault_templates import render_vault_agent_configs
+from abhaile.utils.config import read_yaml
 
-from renderers.vault_templates import render_vault_agent_configs
-from utils.config import read_yaml
+pytestmark = pytest.mark.integration
 
 
 class TestVaultTemplatesIntegration:
     """Integration tests using actual repository configuration."""
 
+    @pytest.mark.slow
     def test_render_actual_phobos_vault_templates(self, tmp_path: Path) -> None:
         """Test rendering vault-agent for phobos with actual config."""
         repo_root = Path(__file__).parent.parent.parent
@@ -83,11 +80,7 @@ class TestVaultTemplatesIntegration:
             for service in services_with_templates:
                 service_yaml = config_root / "services" / service / "service.yaml"
                 data = read_yaml(service_yaml)
-                templates = (
-                    data.get("composition", {})
-                    .get("vault_agent", {})
-                    .get("templates", [])
-                )
+                templates = data.get("composition", {}).get("vault_agent", {}).get("templates", [])
 
                 for template_def in templates:
                     source = template_def.get("source", "")
@@ -109,9 +102,7 @@ class TestVaultTemplatesIntegration:
 
                         # Verify template path in config
                         expected_path = f"/agent/templates/{template_filename}"
-                        assert (
-                            expected_path in content
-                        ), f"Config should reference {expected_path}"
+                        assert expected_path in content, f"Config should reference {expected_path}"
 
     def test_vault_templates_deterministic(self, tmp_path: Path) -> None:
         """Verify vault templates rendering is deterministic across runs."""
@@ -143,12 +134,8 @@ class TestVaultTemplatesIntegration:
         output_dir1 = tmp_path / "run1" / "services"
         output_dir2 = tmp_path / "run2" / "services"
 
-        render_vault_agent_configs(
-            "deimos", deimos_services, network, config_root, output_dir1
-        )
-        render_vault_agent_configs(
-            "deimos", deimos_services, network, config_root, output_dir2
-        )
+        render_vault_agent_configs("deimos", deimos_services, network, config_root, output_dir1)
+        render_vault_agent_configs("deimos", deimos_services, network, config_root, output_dir2)
 
         # Compare outputs
         config_file1 = output_dir1 / "vault-agent" / "srv/vault/agent/config.hcl"
@@ -159,6 +146,7 @@ class TestVaultTemplatesIntegration:
             config_file1.read_text() == config_file2.read_text()
         ), "Vault-agent config should be deterministic"
 
+    @pytest.mark.slow
     def test_authelia_templates_on_correct_host(self, tmp_path: Path) -> None:
         """Test that authelia vault templates only appear on host running authelia."""
         repo_root = Path(__file__).parent.parent.parent
@@ -177,9 +165,7 @@ class TestVaultTemplatesIntegration:
         # Check if authelia has vault_agent templates
         authelia_data = read_yaml(authelia_yaml)
         authelia_templates = (
-            authelia_data.get("composition", {})
-            .get("vault_agent", {})
-            .get("templates", [])
+            authelia_data.get("composition", {}).get("vault_agent", {}).get("templates", [])
         )
         if not authelia_templates:
             pytest.skip("authelia doesn't define vault_agent templates")
@@ -188,10 +174,12 @@ class TestVaultTemplatesIntegration:
         mapping = read_yaml(mapping_yaml)
         authelia_host = None
         other_host = None
-        host_services = {}
+        host_services: dict[str, list[str]] = {}
 
         for entries in mapping.get("abhaile", []):
             for host, services in entries.items():
+                if not isinstance(services, list):
+                    continue
                 host_services[host] = services
                 if "authelia" in services:
                     authelia_host = host
@@ -200,6 +188,9 @@ class TestVaultTemplatesIntegration:
 
         if not authelia_host or not other_host:
             pytest.skip("Need at least two hosts with vault-agent")
+
+        assert authelia_host is not None
+        assert other_host is not None
 
         network = read_yaml(network_yaml)
 

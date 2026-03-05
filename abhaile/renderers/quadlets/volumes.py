@@ -1,0 +1,192 @@
+"""Volume-related helpers for quadlet rendering."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, List
+
+from abhaile.renderers.quadlets.helpers import _validate_trailing_newline
+from abhaile.utils.errors import RenderError
+from abhaile.utils.templating import create_jinja_env
+
+HostPathRegistry = Dict[str, Dict[str, tuple[str, bool]]]
+
+
+def _register_host_path_usage(
+    host_path: str,
+    volume_filename: str,
+    host_paths_by_user: HostPathRegistry,
+    service: str,
+    container_name: str | None,
+    user: str,
+    shared: bool,
+) -> None:
+    """Register host path usage and enforce shared-volume reuse rules.
+
+    Args:
+        host_path: The host path to validate.
+        volume_filename: Computed quadlet volume filename.
+        host_paths_by_user: Dict tracking host paths by user.
+        service: Service name.
+        container_name: Container name (if applicable).
+        user: User name.
+        shared: Whether this is a shared volume.
+
+    Raises:
+        RenderError: If reuse rules are violated.
+    """
+    user_registry = host_paths_by_user.setdefault(user, {})
+    existing = user_registry.get(host_path)
+    if existing is None:
+        user_registry[host_path] = (volume_filename, shared)
+        return
+
+    existing_volume_filename, existing_shared = existing
+    location = (
+        f"service '{service}', container '{container_name}'"
+        if container_name
+        else f"service '{service}'"
+    )
+
+    if not shared or not existing_shared:
+        raise RenderError(
+            "Host path is mounted more than once for the same user and must be "
+            "declared with shared=true for all uses: "
+            f"{host_path} (user '{user}', {location})"
+        )
+
+    if volume_filename != existing_volume_filename:
+        raise RenderError(
+            "Host path is mounted more than once for the same user and must reuse "
+            "the same shared volume name: "
+            f"{host_path} (user '{user}', expected '{existing_volume_filename}', "
+            f"got '{volume_filename}')"
+        )
+
+
+def _quadlet_output_root(user: str) -> Path:
+    """Return the quadlet output root for the given user."""
+    if user == "root":
+        return Path("/etc/containers/systemd")
+    return Path(f"/home/{user}/.config/containers/systemd")
+
+
+def _render_named_volumes(
+    *,
+    service: str,
+    container_def: Dict[str, Any],
+    user: str,
+    output_root_relative: str,
+    output_dir: Path,
+    shared_output_dir: Path,
+    host_paths_by_user: HostPathRegistry,
+    config_root: Path,
+    container_name: str | None = None,
+    name_prefix: str | None = None,
+    shared_volume_is_global: bool,
+) -> List[str]:
+    """Render named volume quadlets and return container volume lines.
+
+    Args:
+        service: Service name.
+        container_def: Container definition with named_volumes.
+        user: User (root or username).
+        output_root_relative: Relative path to output root.
+        output_dir: Base output directory.
+        shared_output_dir: Shared output directory.
+        host_paths_by_user: Tracking dict for host path validation.
+        config_root: Path to config/ directory.
+        container_name: Optional container name (pod containers).
+        name_prefix: Prefix for non-shared volume names.
+        shared_volume_is_global: Flag for shared volume naming/validation behavior.
+
+    Returns:
+        List of volume lines for the container quadlet.
+
+    Raises:
+        RenderError: If validation fails.
+    """
+    named_volumes = container_def.get("named_volumes", []) or []
+    if not named_volumes:
+        return []
+
+    if name_prefix is None:
+        if container_name:
+            name_prefix = f"{service}-app-{container_name}-"
+        else:
+            name_prefix = f"{service}-"
+
+    volume_lines: List[str] = []
+    volume_template_path = config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2"
+    if not volume_template_path.exists():
+        raise RenderError(f"Missing volume template: {volume_template_path}")
+    _validate_trailing_newline(
+        volume_template_path,
+        context="quadlet volume template",
+    )
+
+    jinja_env = create_jinja_env(volume_template_path.parent)
+
+    for volume in named_volumes:
+        name = volume.get("name")
+        host_path = volume.get("host_path")
+        mount_path = volume.get("mount_path")
+        if not name or not host_path or not mount_path:
+            if container_name:
+                raise RenderError(f"Invalid named volume entry: {volume}")
+            raise RenderError(f"Invalid named volume for service '{service}': {volume}")
+
+        shared = bool(volume.get("shared", False))
+        volume_filename = f"{name}.volume" if shared else f"{name_prefix}{name}.volume"
+        output_base = (shared_output_dir if shared else output_dir / service) / output_root_relative
+        output_base.mkdir(parents=True, exist_ok=True)
+        volume_file_path = output_base / volume_filename
+
+        _register_host_path_usage(
+            host_path=host_path,
+            volume_filename=volume_filename,
+            host_paths_by_user=host_paths_by_user,
+            service=service,
+            container_name=container_name,
+            user=user,
+            shared=shared,
+        )
+
+        if shared and shared_volume_is_global and volume_file_path.exists():
+            volume_line = _format_volume_line(volume_filename, mount_path, volume.get("mode"))
+            volume_lines.append(volume_line)
+            continue
+
+        template = jinja_env.get_template(volume_template_path.name)
+        rendered_content = template.render(host_path=host_path)
+
+        volume_file_path.write_text(
+            rendered_content,
+            encoding="utf-8",
+            newline="\n",
+        )
+
+        volume_line = _format_volume_line(volume_filename, mount_path, volume.get("mode"))
+        volume_lines.append(volume_line)
+
+    return volume_lines
+
+
+def _build_mounted_file_lines(container_def: Dict[str, Any]) -> List[str]:
+    """Build Volume= lines for mounted files entries."""
+    mounted_files = container_def.get("mounted_files", []) or []
+    volume_lines: List[str] = []
+    for mount in mounted_files:
+        host_path = mount.get("host_path")
+        mount_path = mount.get("mount_path")
+        if not host_path or not mount_path:
+            raise RenderError(f"Invalid mounted file entry: {mount}")
+        mode = mount.get("mode")
+        volume_lines.append(_format_volume_line(host_path, mount_path, mode))
+    return volume_lines
+
+
+def _format_volume_line(source: str, target: str, mode: str | None) -> str:
+    """Format a quadlet Volume= line for the given mount."""
+    suffix = f":{mode}" if mode else ""
+    return f"Volume={source}:{target}{suffix}"

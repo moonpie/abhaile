@@ -1,22 +1,19 @@
 """Integration tests for ingress rendering with actual config."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
-# Add lib/python to path for imports during tests
-sys.path.insert(
-    0, str(Path(__file__).parent.parent.parent / "scripts" / "lib" / "python")
-)
+from abhaile.renderers.ingress import render_ingress_configs
+from abhaile.utils.config import read_yaml
 
-from renderers.ingress import render_ingress_configs
-from utils.config import read_yaml
+pytestmark = pytest.mark.integration
 
 
 class TestIngressIntegration:
     """Integration tests using actual repository configuration."""
 
+    @pytest.mark.slow
     def test_render_actual_phobos_ingress(self, tmp_path: Path) -> None:
         """Test rendering ingress for phobos with actual config."""
         repo_root = Path(__file__).parent.parent.parent
@@ -81,9 +78,7 @@ class TestIngressIntegration:
                 assert "Aggregated Ingress Blocks" in content
 
         # Verify caddy-internal output
-        caddy_internal_file = (
-            output_dir / "caddy-internal" / "srv/caddy/internal/Caddyfile"
-        )
+        caddy_internal_file = output_dir / "caddy-internal" / "srv/caddy/internal/Caddyfile"
         if caddy_internal_file.exists():
             content = caddy_internal_file.read_text()
 
@@ -114,6 +109,7 @@ class TestIngressIntegration:
                         assert "# --- authelia ---" in content
                         assert "authelia" in content.lower()
 
+    @pytest.mark.slow
     def test_ingress_blocks_deterministic(self, tmp_path: Path) -> None:
         """Verify ingress rendering is deterministic across runs."""
         repo_root = Path(__file__).parent.parent.parent
@@ -149,12 +145,8 @@ class TestIngressIntegration:
                 phobos_services = entries["phobos"]
                 break
 
-        render_ingress_configs(
-            "phobos", phobos_services, all_services, config_root, output_dir1
-        )
-        render_ingress_configs(
-            "phobos", phobos_services, all_services, config_root, output_dir2
-        )
+        render_ingress_configs("phobos", phobos_services, all_services, config_root, output_dir1)
+        render_ingress_configs("phobos", phobos_services, all_services, config_root, output_dir2)
 
         # Compare outputs
         for caddy_service in ["caddy-dmz", "caddy-internal"]:
@@ -178,6 +170,7 @@ class TestIngressIntegration:
                     file1.read_text() == file2.read_text()
                 ), f"Ingress output for {caddy_service} should be deterministic"
 
+    @pytest.mark.slow
     def test_omada_multi_zone_blocks(self, tmp_path: Path) -> None:
         """Test that omada-controller blocks appear in both zones."""
         repo_root = Path(__file__).parent.parent.parent
@@ -230,9 +223,7 @@ class TestIngressIntegration:
                 assert "# --- omada-controller ---" in content
 
         if has_internal:
-            internal_file = (
-                output_dir / "caddy-internal" / "srv/caddy/internal/Caddyfile"
-            )
+            internal_file = output_dir / "caddy-internal" / "srv/caddy/internal/Caddyfile"
             if internal_file.exists():
                 content = internal_file.read_text()
                 assert "# --- omada-controller ---" in content
