@@ -40,18 +40,22 @@
       "properties": {
         "packages": {
           "type": "array",
+          "uniqueItems": true,
           "items": {"type": "string"}
         },
         "downloads": {
           "type": "array",
+          "uniqueItems": true,
           "items": {"type": "string"}
         },
         "builds": {
           "type": "array",
+          "uniqueItems": true,
           "items": {"type": "string"}
         },
         "commands": {
           "type": "array",
+          "uniqueItems": true,
           "items": {"type": "string"}
         }
       },
@@ -59,6 +63,7 @@
     },
     "userManagement": {
       "type": "object",
+      "description": "User/group definitions merge across composition.include by name; scalar fields must match if redefined, list fields are unioned.",
       "properties": {
         "users": {
           "type": "object",
@@ -79,6 +84,7 @@
       "type": "object",
       "properties": {
         "uid": {"type": "integer"},
+        "system": {"type": "boolean"},
         "primary_group": {"type": "string"},
         "additional_groups": {
           "type": "array",
@@ -86,7 +92,7 @@
         },
         "home": {"type": "string"},
         "shell": {"type": "string"},
-        "description": {"type": "string"},
+        "gecos": {"type": "string"},
         "ssh_authorized_keys": {
           "type": "array",
           "items": {"type": "string"}

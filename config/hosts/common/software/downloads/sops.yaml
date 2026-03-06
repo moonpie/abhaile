@@ -1,3 +1,4 @@
+id: sops
 name: "Install latest SOPS binary"
 description: "Download the newest SOPS release from GitHub and install it into /usr/local/bin"
 commands:

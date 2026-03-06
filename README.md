@@ -32,7 +32,7 @@ Abhaile follows a reconciliation pattern: the desired state lives in git, the cu
 Render should be structured into clear functions:
 
 - Host networking (systemd-networkd, VLANs, ipvlan-l2)
-- Host packaging and base system settings
+- Host software and base system settings
 - Host users and access controls
 - Service quadlets for containers (& pods) (rootful & rootless)
 - Service-specific configs (DNS, ingress, secrets, app configs)
@@ -40,7 +40,7 @@ Render should be structured into clear functions:
 ## Render Stage Interfaces
 
 - Networking: inputs `config/network.yaml`, outputs networkd units/drop-ins
-- Packaging: inputs host `host.yaml` composition.software config, outputs package/command directives
+- Software: inputs host `host.yaml` composition.software config, outputs merged package list and per-entry software specs
 - Users: inputs host `host.yaml` composition.user_management config, outputs user/group and SSH config
 - Quadlets: inputs per-service config, outputs network/volume/image/build/container/pod units
 - Service configs: inputs per-service config and network data, outputs DNS, ingress, and templates
@@ -48,7 +48,7 @@ Render should be structured into clear functions:
 ## Expected Artifacts
 
 - systemd-networkd units and drop-ins (interfaces, VLANs, ipvlan-l2)
-- Host packaging and base system configuration (packages, kernel modules, sysctl, etc.)
+- Host software and base system configuration (packages, kernel modules, sysctl, etc.)
 - Host users and access configuration (accounts, groups, sudo, SSH)
 - Podman quadlets (as applicable)
   - networks
@@ -116,6 +116,17 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 **Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 
 Abhaile keeps the configuration declarative and the deployment steps explicit, so changes remain auditable and reversible.
+
+## User Management Merge Semantics
+
+User definitions are merged across `composition.include` by name (includes first, then host):
+
+- Scalar fields (`uid`, `system`, `primary_group`, `home`, `shell`, `gecos`) must match if redefined; mismatches are validation errors.
+- List fields (`additional_groups`, `ssh_authorized_keys`) are unioned deterministically.
+- Group definitions are merged by name; duplicate `gid` values across different group names are validation errors.
+- Duplicate `uid` values across different user names are validation errors.
+
+This keeps common defaults (for example `system: false`) centralized while allowing per-host additions like extra groups.
 
 ## Environment Paths
 

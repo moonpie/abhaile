@@ -1,6 +1,7 @@
 """Unit tests for DNS provider resolution logic."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -15,22 +16,21 @@ from abhaile.utils.errors import RenderError
 def _write_service(
     config_root: Path,
     name: str,
-    composition: dict | None = None,
-    dns_config: dict | None = None,
+    composition: dict[str, Any] | None = None,
+    dns_config: dict[str, Any] | None = None,
 ) -> None:
     """Write a service.yaml file to the config root."""
     service_dir = config_root / "services" / name
     service_dir.mkdir(parents=True, exist_ok=True)
 
-    service_data: dict[str, object] = {
-        "name": name,
-        "composition": composition or {},
-    }
-
+    composition_data: dict[str, Any] = dict(composition or {})
     if dns_config is not None:
-        composition_dict = service_data["composition"]
-        assert isinstance(composition_dict, dict)
-        composition_dict["dns"] = dns_config
+        composition_data = {**composition_data, "dns": dns_config}
+
+    service_data: dict[str, Any] = {
+        "name": name,
+        "composition": composition_data,
+    }
 
     (service_dir / "service.yaml").write_text(yaml.safe_dump(service_data))
 

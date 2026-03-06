@@ -1,3 +1,4 @@
+id: netavark-dhcp-proxy
 name: "Enable netavark DHCP proxy"
 description: "Start the Podman netavark DHCP proxy socket for ipvlan networks"
 commands:

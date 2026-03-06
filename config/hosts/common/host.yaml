@@ -37,10 +37,11 @@ composition:
     users:
       abhaile:
         uid: 1001
+        system: false
         primary_group: abhaile
         home: /home/abhaile
         shell: /bin/bash
-        description: "Abhaile service account"
+        gecos: "Abhaile service account"
         ssh_authorized_keys: []
         # SSH public keys for remote management
         # Format: "ssh-rsa AAAA... user@host" or "ssh-ed25519 AAAA... user@host"

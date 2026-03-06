@@ -53,10 +53,13 @@ Use `--output <dir>` to set a local output root.
     │   │   ├── etc/systemd/resolved.conf
     │   │   └── etc/systemd/system/
     │   ├── software/
-    │   │   ├── install-packages.sh
-    │   │   ├── downloads.sh
-    │   │   ├── builds.sh
-    │   │   └── commands.sh
+    │   │   ├── packages.txt
+    │   │   ├── downloads/
+    │   │   │   └── <id>.yaml
+    │   │   ├── builds/
+    │   │   │   └── <id>.yaml
+    │   │   └── commands/
+    │   │       └── <id>.yaml
     │   ├── users/
     │   │   ├── setup-users.sh
     │   │   └── etc/sudoers.d/abhaile

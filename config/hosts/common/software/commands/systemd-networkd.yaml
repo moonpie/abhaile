@@ -1,3 +1,4 @@
+id: systemd-networkd
 name: "Switch host networking to systemd-networkd"
 description: "Disable legacy /etc/network/interfaces and enable systemd-networkd"
 commands:

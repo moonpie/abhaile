@@ -1,3 +1,4 @@
+id: systemd-resolved
 name: "Enable systemd-resolved"
 description: "Use systemd-resolved stub resolver and manage resolv.conf"
 commands:

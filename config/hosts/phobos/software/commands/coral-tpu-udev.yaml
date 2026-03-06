@@ -1,3 +1,4 @@
+id: coral-tpu-udev
 name: "Install Coral TPU udev rules"
 description: "Configure udev rules for Google Coral TPU device access (phobos-specific)"
 commands:

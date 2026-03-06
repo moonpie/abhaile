@@ -1,3 +1,4 @@
+id: coral-tpu-modules
 name: "Load Coral TPU kernel modules"
 description: "Load gasket and apex modules for Google Coral TPU (phobos-specific)"
 commands:

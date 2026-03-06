@@ -61,6 +61,11 @@ repos:
         files: ^config/services/.*/service\.yaml$
         types: [yaml]
         args: ["--schemafile", "schemas/service.schema.json"]
+      - id: check-jsonschema
+        name: Validate Host Software .yaml Files Against Schema
+        files: ^config/hosts/.*/software/(builds|commands|downloads)/.*\.yaml$
+        types: [yaml]
+        args: ["--schemafile", "schemas/software-action.schema.json"]
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.38.0
     hooks:

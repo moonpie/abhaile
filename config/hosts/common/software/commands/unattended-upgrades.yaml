@@ -1,3 +1,4 @@
+id: unattended-upgrades
 name: "Enable unattended upgrades"
 description: "Configure Debian to automatically apply security updates"
 commands:

@@ -124,7 +124,7 @@ def render_dns(
 
                 # Write zone file
                 zone_file = zone_output_dir / Path(actual_dest).name
-                zone_file.write_text(zone_content, encoding="utf-8", newline="\n")
+                zone_file.write_text(zone_content, encoding="utf-8")
 
 
 def build_provider_mapping(

@@ -15,6 +15,7 @@ from abhaile.utils.paths import get_repo_root, load_paths, resolve_output_root
 from abhaile.utils.config import clear_config_cache, read_json, read_yaml_mapping
 from abhaile.validation.schema import validate_schema
 from abhaile.validation.network import validate_network_sanity, validate_host_physical_device
+from abhaile.validation.users import validate_user_management_ids
 from abhaile.validation.dns import validate_dns_serials
 from abhaile.validation.services import (
     parse_mapping,
@@ -24,6 +25,8 @@ from abhaile.validation.services import (
 )
 from abhaile.renderers.manifest import build_manifest, write_manifest
 from abhaile.renderers.host import render_host_config
+from abhaile.renderers.software import render_software_artifacts
+from abhaile.renderers.users import render_users_artifacts
 from abhaile.renderers.services import render_service_configs
 from abhaile.renderers.quadlets import render_service_quadlets
 from abhaile.renderers.ingress import render_ingress_configs
@@ -164,6 +167,7 @@ def _validate_hosts(
                 roots.schemas_root / "host.schema.json",
             )
             validate_host_physical_device(host, host_data, cast(dict[str, Any], network))
+            validate_user_management_ids(host, roots.config_root)
     return host_services
 
 
@@ -222,7 +226,9 @@ def render_host(
     config_root = repo_root / paths["config_root"]
 
     host_config, common_config = _load_host_configs(host, config_root, paths)
-    system_dir, services_output_dir = _prepare_host_artifact_dirs(rendered_dir, paths)
+    system_dir, software_dir, users_dir, services_output_dir = _prepare_host_artifact_dirs(
+        rendered_dir, paths
+    )
 
     _render_host_system(
         host,
@@ -233,6 +239,9 @@ def render_host(
         system_dir,
         host_services.get(host, []),
     )
+
+    _render_host_software(host, config_root, software_dir)
+    _render_host_users(host, config_root, users_dir)
 
     all_services = get_all_services_in_order(cast(dict[str, Any], mapping))
     _render_host_services(
@@ -272,8 +281,10 @@ def _load_host_configs(host: str, config_root: Path, paths: dict[str, str]) -> t
     return host_config, common_config
 
 
-def _prepare_host_artifact_dirs(rendered_dir: Path, paths: dict[str, str]) -> tuple[Path, Path]:
-    """Create system and services output directories for a host."""
+def _prepare_host_artifact_dirs(
+    rendered_dir: Path, paths: dict[str, str]
+) -> tuple[Path, Path, Path, Path]:
+    """Create system, software, and services output directories for a host."""
     system_dir = rendered_dir / paths["system_dir_name"]
     system_dir.mkdir(parents=True, exist_ok=True)
 
@@ -286,7 +297,17 @@ def _prepare_host_artifact_dirs(rendered_dir: Path, paths: dict[str, str]) -> tu
     services_output_dir = rendered_dir / paths["services_dir_name"]
     services_output_dir.mkdir(parents=True, exist_ok=True)
 
-    return system_dir, services_output_dir
+    return system_dir, software_dir, users_dir, services_output_dir
+
+
+def _render_host_software(host: str, config_root: Path, software_dir: Path) -> None:
+    """Render software package/install artifacts for a host."""
+    render_software_artifacts(host, config_root, software_dir)
+
+
+def _render_host_users(host: str, config_root: Path, users_dir: Path) -> None:
+    """Render user management artifacts for a host."""
+    render_users_artifacts(host, config_root, users_dir)
 
 
 def _render_host_system(

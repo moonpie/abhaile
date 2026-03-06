@@ -1,3 +1,4 @@
+id: ddclient
 name: "Enable ddclient"
 description: "Ensure ddclient is enabled and running so dynamic DNS updates occur"
 commands:

@@ -130,8 +130,7 @@ class TestValidateZoneSerialCollect:
 
         zones = [zone]
         errors = _validate_zone_serial_collect(zones, network, [])
-        assert len(errors) == 0
-        assert len(errors) == 0
+        assert errors == []
 
     def test_collect_multiple_mismatched_zones(self):
         """Test that all mismatched zones are collected."""

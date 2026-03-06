@@ -1,3 +1,4 @@
+id: kernel-modules
 name: "Load required kernel modules"
 description: "Ensure VLAN and sensor modules are loaded and set to persist across reboots"
 commands:

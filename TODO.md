@@ -2,6 +2,36 @@
 
 ## Decision Log
 
+1. Decision: Align user management schema with sysusers by renaming `description` to `gecos`, adding a boolean `system` flag on users, and validating uid/gid conflicts across host include chains.
+   Date: 2026-03-06
+   Rationale: Sysusers uses the GECOS field name and benefits from explicit system/login user intent; static ids are preferred, so validating duplicate uid/gid values avoids ambiguous user/group definitions across includes.
+   Scope: schemas/host.schema.json, config/hosts/\*/host.yaml, abhaile/validation/users.py, abhaile/cli.py.
+   Confirmed by: user
+
+1. Decision: User management merges across host composition includes by name; scalar fields must match if redefined while list fields are unioned; uid/gid conflicts across different names are validation errors.
+   Date: 2026-03-06
+   Rationale: Reduce duplication (common defaults stay centralized) while preventing ambiguous overrides and id collisions.
+   Scope: README.md (documentation), schemas/host.schema.json (description), users renderer and validation behavior.
+   Confirmed by: user
+
+1. Decision: User management renderer outputs systemd-sysusers config plus sudoers drop-in instead of a monolithic setup script, keeping drift/apply declarative and idempotent.
+   Date: 2026-03-06
+   Rationale: Sysusers provides native, declarative user/group reconciliation and minimizes imperative scripting while aligning with drift-driven apply.
+   Scope: abhaile/renderers/users.py, CLI render pipeline, users render outputs under rendered/users/etc/.
+   Confirmed by: user
+
+1. Decision: Software renderer comment style and import conventions match project patterns: concise docstrings (no verbose "Output contract" sections), direct module imports in CLI (no package-level exports), simplified function documentation matching other renderers.
+   Date: 2026-03-05
+   Rationale: Consistency with existing renderer modules (host.py, services.py, networkd.py) improves code readability and maintainability; direct imports from specific modules are more explicit than package-level exports; concise docstrings reduce noise without losing essential information.
+   Scope: `abhaile/renderers/software.py` (docstring simplification), `tests/unit/python/renderers/test_software.py` (import fix from `abhaile.renderers` to `abhaile.renderers.software`).
+   Confirmed by: user (after reviewing inconsistencies with project conventions)
+
+1. Decision: Software render output uses mixed granularity: a single merged `packages.txt` artifact for apt-managed packages, and one rendered spec file per entry for `downloads`, `builds`, and `commands`; duplicate software ids across host include chains are treated as render errors; host software spec files include explicit `id` and are schema-validated.
+   Date: 2026-03-05
+   Rationale: apt handles idempotency for already-installed packages, so a single package list remains safe and simple; entry-level files for downloads/builds/commands preserve declarative drift granularity so apply can target only added/changed specs; duplicate ids are unexpected and should fail fast to avoid ambiguous behavior; explicit ids and schema checks improve determinism and config safety.
+   Scope: `abhaile/renderers/software.py`, CLI integration, `schemas/software-action.schema.json`, host software spec YAML files, pre-commit schema hooks.
+   Confirmed by: user
+
 1. Decision: Keep the apply manifest module and implement drift detection in the apply pipeline; tracked in TODO items until implementation is complete.
    Date: 2026-02-15
    Rationale: Apply is required for the repo’s workflow, and drift detection is a core safety gate; keeping the module makes the planned responsibilities explicit and prevents ad hoc implementation later.
@@ -158,10 +188,13 @@ Artifacts are organized under `<output>/rendered/` by apply method:
 │   ├── etc/systemd/resolved.conf
 │   └── etc/systemd/system/
 ├── software/                    (execution required)
-│   ├── install-packages.sh
-│   ├── downloads.sh
-│   ├── builds.sh
-│   └── commands.sh
+│   ├── packages.txt
+│   ├── downloads/
+│   │   └── <id>.yaml
+│   ├── builds/
+│   │   └── <id>.yaml
+│   └── commands/
+│       └── <id>.yaml
 ├── users/                       (execution required)
 │   ├── setup-users.sh
 │   └── etc/sudoers.d/abhaile
@@ -184,7 +217,7 @@ This organization makes it easy to identify which artifacts require execution vs
 - Quadlets for containers/pods: `.container`, `.pod`, `.network`, `.volume`, `.image`, `.build`.
 - Service configs: static configs and rendered templates (Caddy, blocky, CoreDNS, ddclient, etc.).
 - Vault agent templates: `.ctmpl` rendered outputs with strict perms (no secrets committed).
-- Package/install manifest: merged `packages`, `downloads`, `builds`, `commands` per host.
+- Software artifacts: merged `packages.txt` and per-entry `downloads|builds|commands` specs per host.
 - DNS zone artifacts: rendered zone files and serial tracking for `coredns-common`.
 - Apply manifest: deterministic inventory with hashes for drift detection and safe apply.
 
@@ -256,8 +289,8 @@ This organization makes it easy to identify which artifacts require execution vs
 | --- | --- | --- | --- | --- |
 | [x] | Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `<output>/rendered/` (default: `/var/lib/abhaile/rendered/` on hosts). | Running the tool renders a host tree with a manifest in `<output>/state/manifest.json`. | Define config schema |
 | [x] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/system/etc/systemd/network/` and resolved files present. | Renderer CLI |
-| [ ] | Packaging renderer | Merge `packages`, `downloads`, `builds`, and `commands` from `config/hosts/**/host.yaml` (composition.software) across host/common. | Per-host package manifest and command plan rendered under `<output>/rendered/`. | Renderer CLI |
-| [ ] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/host.yaml` (user_management). | User/group/sudoers files generated under `<output>/rendered/` with deterministic ordering. | Renderer CLI |
+| [x] | Software renderer | Merge `packages`, `downloads`, `builds`, and `commands` from `config/hosts/**/host.yaml` (composition.software) across host/common. | Per-host software artifacts rendered under `<output>/rendered/software/` with deterministic package list and per-entry specs. | Renderer CLI |
+| [x] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/host.yaml` (user_management). | Sysusers, sudoers, and SSH authorized_keys files generated under `<output>/rendered/users/` with deterministic ordering. | Renderer CLI |
 | [x] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/services/<service>`. | Renderer CLI |
 | [x] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
 | [x] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
@@ -284,12 +317,12 @@ This organization makes it easy to identify which artifacts require execution vs
 - Constraints: templates fail fast on missing network data.
 - Dependencies: Renderer CLI.
 
-#### Session Prompt (Packaging renderer)
+#### Session Prompt (Software renderer)
 
-- Phase/Task: Render Pipeline / Packaging renderer.
+- Phase/Task: Render Pipeline / Software renderer.
 - Required inputs: `config/hosts/**/host.yaml` (composition.software), `config/hosts/common/host.yaml`.
-- Outputs to produce: `<output>/rendered/software/install-packages.sh`; `<output>/rendered/software/downloads.sh`; `<output>/rendered/software/builds.sh`; `<output>/rendered/software/commands.sh`.
-- Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host.
+- Outputs to produce: `<output>/rendered/software/packages.txt`; `<output>/rendered/software/downloads/<id>.yaml`; `<output>/rendered/software/builds/<id>.yaml`; `<output>/rendered/software/commands/<id>.yaml`.
+- Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host; duplicates fail fast; software entry specs are schema-validated.
 - Constraints: deterministic ordering; no network access.
 - Dependencies: Renderer CLI.
 
@@ -297,8 +330,8 @@ This organization makes it easy to identify which artifacts require execution vs
 
 - Phase/Task: Render Pipeline / Users renderer.
 - Required inputs: `config/hosts/**/host.yaml` (user_management), `config/hosts/common/host.yaml`.
-- Outputs to produce: `<output>/rendered/users/setup-users.sh`; `<output>/rendered/users/etc/sudoers.d/abhaile`.
-- Acceptance: user/group/sudo data is deterministic and sorted; no duplicates.
+- Outputs to produce: `<output>/rendered/users/etc/sysusers.d/abhaile.conf`; `<output>/rendered/users/etc/sudoers.d/abhaile`; `<output>/rendered/users/<home>/.ssh/authorized_keys`.
+- Acceptance: user/group/sudo data is deterministic and sorted; no duplicates; SSH keys rendered when provided.
 - Constraints: no secrets; read-only from `config/`.
 - Dependencies: Renderer CLI.
 

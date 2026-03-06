@@ -1,3 +1,4 @@
+id: gasket-dkms
 name: "Build and install gasket-dkms"
 description: "Prepare Google's Coral EdgeTPU repo, build gasket-dkms, and ensure apex devices have the right permissions"
 commands:
