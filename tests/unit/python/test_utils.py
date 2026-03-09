@@ -1,4 +1,4 @@
-"""Tests for scripts/lib/python/utils modules."""
+"""Tests for path and utility modules."""
 
 from pathlib import Path
 
@@ -34,18 +34,14 @@ class TestLoadPaths:
 
     def test_load_paths_missing_section(self, tmp_path):
         """Test error when [paths] section is missing."""
-        scripts_dir = tmp_path / "scripts"
-        scripts_dir.mkdir()
-        (scripts_dir / "paths.ini").write_text("")
+        (tmp_path / "paths.ini").write_text("")
 
         with pytest.raises(RenderError, match="Missing \\[paths\\] section"):
             load_paths(tmp_path)
 
     def test_load_paths_missing_keys(self, tmp_path):
         """Test error when required keys are missing."""
-        scripts_dir = tmp_path / "scripts"
-        scripts_dir.mkdir()
-        (scripts_dir / "paths.ini").write_text("[paths]\noutput_root_default = /tmp\n")
+        (tmp_path / "paths.ini").write_text("[paths]\noutput_root_default = /tmp\n")
 
         with pytest.raises(RenderError, match="missing required keys"):
             load_paths(tmp_path)

@@ -27,19 +27,27 @@ REQUIRED_PATH_KEYS = {
 def get_repo_root(script_file: Path) -> Path:
     """Calculate repository root from a script file path.
 
-    Assumes script is in scripts/ directory at repo root.
+    Walks up parent directories until pyproject.toml is found.
 
     Args:
         script_file: Path to the calling script (typically __file__).
 
     Returns:
         Path to repository root.
+
+    Raises:
+        RenderError: If repository root cannot be determined.
     """
-    return script_file.resolve().parents[1]
+    for candidate in [script_file.resolve(), *script_file.resolve().parents]:
+        check_dir = candidate if candidate.is_dir() else candidate.parent
+        if (check_dir / "pyproject.toml").exists():
+            return check_dir
+
+    raise RenderError(f"Could not determine repository root from path: {script_file}")
 
 
 def load_paths(repo_root: Path) -> Dict[str, str]:
-    """Load paths from scripts/paths.ini (required).
+    """Load paths from repo-root paths.ini (required).
 
     Args:
         repo_root: Root of the repository.
@@ -50,7 +58,7 @@ def load_paths(repo_root: Path) -> Dict[str, str]:
     Raises:
         RenderError: If paths.ini is missing or incomplete.
     """
-    paths_ini = repo_root / "scripts" / "paths.ini"
+    paths_ini = repo_root / "paths.ini"
     if not paths_ini.exists():
         raise RenderError(f"Missing required paths file: {paths_ini}")
 

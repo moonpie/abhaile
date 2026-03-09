@@ -27,10 +27,8 @@ class TestRenderE2E:
         (rendered_dir / "quadlet.container").write_text("[Container]\n")
 
         # Build and write manifest
-        manifest = build_manifest(rendered_dir, target_root=Path("/"))
-        state_dir = output_dir / "state"
-        state_dir.mkdir(parents=True)
-        manifest_path = state_dir / "manifest.json"
+        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        manifest_path = rendered_dir / "manifest.json"
         write_manifest(manifest, manifest_path)
 
         # Verify manifest exists and is valid JSON
@@ -38,12 +36,13 @@ class TestRenderE2E:
         with open(manifest_path) as f:
             loaded = json.load(f)
 
+        assert loaded["host"] == "testhost"
         assert "rendered_at" in loaded
-        assert "artifacts" in loaded
-        assert len(loaded["artifacts"]) == 2
+        assert "entries" in loaded
+        assert len(loaded["entries"]) == 2
 
-        # Verify artifacts are sorted by rel_path
-        rel_paths = [a["rel_path"] for a in loaded["artifacts"]]
+        # Verify entries are sorted by rel_path
+        rel_paths = [e["rel_path"] for e in loaded["entries"]]
         assert rel_paths == sorted(rel_paths)
 
     def test_render_all_hosts_separate_manifests(self, tmp_repo_with_config, tmp_output):
@@ -59,60 +58,60 @@ class TestRenderE2E:
             # Create sample host-specific files
             (rendered_dir / f"{host}-network.conf").write_text("# Config\n")
 
-            state_dir = output_dir / host / "state"
-            state_dir.mkdir(parents=True)
-
-            manifest = build_manifest(rendered_dir, target_root=Path("/"))
-            manifest_path = state_dir / "manifest.json"
+            manifest = build_manifest(host, rendered_dir, target_root=Path("/"))
+            manifest_path = rendered_dir / "manifest.json"
             write_manifest(manifest, manifest_path)
 
             assert manifest_path.exists()
 
         # Verify both manifests exist and are independent
         phobos_manifest = json.loads(
-            (output_dir / "phobos" / "state" / "manifest.json").read_text()
+            (output_dir / "phobos" / "rendered" / "manifest.json").read_text()
         )
         deimos_manifest = json.loads(
-            (output_dir / "deimos" / "state" / "manifest.json").read_text()
+            (output_dir / "deimos" / "rendered" / "manifest.json").read_text()
         )
 
-        assert phobos_manifest["artifacts"][0]["rel_path"] == "phobos-network.conf"
-        assert deimos_manifest["artifacts"][0]["rel_path"] == "deimos-network.conf"
+        assert phobos_manifest["host"] == "phobos"
+        assert deimos_manifest["host"] == "deimos"
+        assert "rendered_at" in phobos_manifest
+        assert "rendered_at" in deimos_manifest
+        # Verify host-specific files are in correct manifests
+        phobos_paths = [e["target_path"] for e in phobos_manifest["entries"]]
+        deimos_paths = [e["target_path"] for e in deimos_manifest["entries"]]
+        assert any("phobos-network.conf" in p for p in phobos_paths)
+        assert any("deimos-network.conf" in p for p in deimos_paths)
 
     def test_render_empty_dir_produces_empty_manifest(self, tmp_output):
         """Test that rendering an empty directory produces valid empty manifest."""
         rendered_dir = tmp_output / "rendered"
         rendered_dir.mkdir(parents=True)
 
-        state_dir = tmp_output / "state"
-        state_dir.mkdir(parents=True)
-
-        manifest = build_manifest(rendered_dir, target_root=Path("/"))
-        manifest_path = state_dir / "manifest.json"
+        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        manifest_path = rendered_dir / "manifest.json"
         write_manifest(manifest, manifest_path)
 
         assert manifest_path.exists()
         loaded = json.loads(manifest_path.read_text())
-        assert loaded["artifacts"] == []
+        assert loaded["entries"] == []
 
-    def test_manifest_preserves_file_permissions(self, tmp_output):
-        """Test that manifest records file permissions correctly."""
+    def test_manifest_contains_hashes(self, tmp_output):
+        """Test that manifest records file hashes correctly."""
         rendered_dir = tmp_output / "rendered"
         rendered_dir.mkdir(parents=True)
 
-        # Create a file with specific permissions
+        # Create a file
         test_file = rendered_dir / "script.sh"
         test_file.write_text("#!/bin/bash\necho hello\n")
         test_file.chmod(0o755)
 
         # Build manifest
-        manifest = build_manifest(rendered_dir, target_root=Path("/"))
+        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
 
-        # Verify mode is recorded (as octal string)
-        artifact = manifest["artifacts"][0]
-        assert "mode" in artifact
-        # Mode should be recorded as octal string (e.g., "0755")
-        assert artifact["mode"] == "0755"
+        # Verify hash is recorded
+        entry = manifest["entries"][0]
+        assert "sha256" in entry
+        assert len(entry["sha256"]) == 64  # SHA256 is 64 hex chars
 
     def test_manifest_contains_valid_sha256_hashes(self, tmp_output):
         """Test that manifest contains valid SHA256 hashes."""
@@ -127,12 +126,12 @@ class TestRenderE2E:
         test_file.write_text(content)
 
         # Build manifest
-        manifest = build_manifest(rendered_dir, target_root=Path("/"))
+        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
 
         # Verify hash matches
-        artifact = manifest["artifacts"][0]
+        entry = manifest["entries"][0]
         expected_hash = hashlib.sha256(content.encode()).hexdigest()
-        assert artifact["sha256"] == expected_hash
+        assert entry["sha256"] == expected_hash
 
     def test_render_with_nested_directories(self, tmp_output):
         """Test rendering nested directory structures preserves paths."""
@@ -144,20 +143,17 @@ class TestRenderE2E:
         (rendered_dir / "systemd" / "system" / "service.service").write_text("[Unit]\n")
         (rendered_dir / "systemd-networkd" / "networks" / "eth0.network").write_text("[Match]\n")
 
-        state_dir = tmp_output / "state"
-        state_dir.mkdir(parents=True)
-
         # Build and write manifest
-        manifest = build_manifest(rendered_dir, target_root=Path("/"))
-        manifest_path = state_dir / "manifest.json"
+        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        manifest_path = rendered_dir / "manifest.json"
         write_manifest(manifest, manifest_path)
 
         # Verify nested paths are preserved in manifest
         loaded = json.loads(manifest_path.read_text())
-        rel_paths = {a["rel_path"] for a in loaded["artifacts"]}
+        target_paths = {e["target_path"] for e in loaded["entries"]}
 
-        assert "systemd/system/service.service" in rel_paths
-        assert "systemd-networkd/networks/eth0.network" in rel_paths
+        assert "/systemd/system/service.service" in target_paths
+        assert "/systemd-networkd/networks/eth0.network" in target_paths
 
     def test_manifest_determinism_multiple_runs(self, tmp_output):
         """Test that rendering same content multiple times produces identical manifest."""
@@ -168,26 +164,23 @@ class TestRenderE2E:
         (rendered_dir / "config1.yaml").write_text("config: 1\n")
         (rendered_dir / "config2.yaml").write_text("config: 2\n")
 
-        state_dir = tmp_output / "state"
-        state_dir.mkdir(parents=True)
+        # Generate manifest twice; write outside rendered_dir to avoid polluting entries
+        manifest1 = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        write_manifest(manifest1, tmp_output / "manifest1.json")
 
-        # Generate manifest twice
-        manifest1 = build_manifest(rendered_dir, target_root=Path("/"))
-        write_manifest(manifest1, state_dir / "manifest1.json")
-
-        manifest2 = build_manifest(rendered_dir, target_root=Path("/"))
-        write_manifest(manifest2, state_dir / "manifest2.json")
+        manifest2 = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        write_manifest(manifest2, tmp_output / "manifest2.json")
 
         # Load both manifests and verify they're identical
-        m1_content = (state_dir / "manifest1.json").read_text()
-        m2_content = (state_dir / "manifest2.json").read_text()
+        m1_content = (tmp_output / "manifest1.json").read_text()
+        m2_content = (tmp_output / "manifest2.json").read_text()
 
-        # Parse to compare (timestamps will be close but might differ slightly)
+        # Parse to compare
         m1 = json.loads(m1_content)
         m2 = json.loads(m2_content)
 
-        # Artifacts should be identical
-        assert m1["artifacts"] == m2["artifacts"]
+        # Entries should be identical
+        assert m1["entries"] == m2["entries"]
 
     def test_render_services_configs(self, tmp_repo_with_config, tmp_output):
         """Test that service configs are rendered correctly for mapped services."""

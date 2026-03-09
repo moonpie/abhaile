@@ -54,6 +54,31 @@ def _build_zone_content_for_hash(zone: dict, records: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _build_zone_content_from_renderer_template(
+    zone: dict,
+    records: list[dict],
+    config_root: Path,
+) -> str:
+    from abhaile.dns.renderer import get_zone_files_config, render_zone_template
+
+    provider_name = zone.get("provider", {}).get("name")
+    if not provider_name:
+        return _build_zone_content_for_hash(zone, records)
+
+    zone_files = get_zone_files_config(provider_name, config_root)
+    zone_name = zone.get("name", "")
+
+    for entry in zone_files:
+        pattern = entry.get("zone", "")
+        if pattern != "*" and zone_name != pattern:
+            continue
+        template_path = entry.get("file", {}).get("source", {}).get("template")
+        if template_path:
+            return render_zone_template(template_path, zone, records, config_root)
+
+    return _build_zone_content_for_hash(zone, records)
+
+
 @pytest.fixture
 def network_config():
     """Load network.yaml for integration tests."""
@@ -96,7 +121,7 @@ def all_services(mapping_config):
 
 
 @pytest.fixture
-def network_config_with_updated_serials(network_config, all_services):
+def network_config_with_updated_serials(network_config, all_services, config_root):
     """Return network config with updated DNS serials for rendering tests.
 
     This fixture computes and updates serials to match current zone content,
@@ -123,7 +148,7 @@ def network_config_with_updated_serials(network_config, all_services):
         serial_info["counter"] = 0
 
         records = _collect_zone_records(zone, network_config, all_services)
-        content = _build_zone_content_for_hash(zone, records)
+        content = _build_zone_content_from_renderer_template(zone, records, config_root)
         zone["serial"]["content_hash"] = _compute_content_hash(content)
 
     return network_config
@@ -132,13 +157,13 @@ def network_config_with_updated_serials(network_config, all_services):
 class TestDNSIntegration:
     """Integration tests with real network configuration."""
 
-    def test_validate_dns_serials_documents_status(self, network_config, all_services):
+    def test_validate_dns_serials_documents_status(self, network_config, all_services, config_root):
         """Document whether DNS serials in network.yaml are up-to-date.
 
         This test shows the user what updates are needed if serials are stale.
         """
         try:
-            validate_dns_serials(network_config, all_services)
+            validate_dns_serials(network_config, all_services, config_root=config_root)
         except RenderError as e:
             # This is expected if user hasn't updated serials yet
             error_msg = str(e)

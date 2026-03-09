@@ -22,7 +22,7 @@ dns:
       serial:
         date: 20260208
         counter: 00
-        content_hash: 21ba53492270687177a1a61a54e5ed8c3fa109233764a11956785ac9eecc9cf2
+        content_hash: 1f30b95d34bed91f57d99bb18591d72c4efe7a9cc648ee4d388959b1dcc71012
     - name: abhaile.home.arpa.
       provider:
         type: internal
@@ -30,7 +30,7 @@ dns:
       serial:
         date: 20260208
         counter: 00
-        content_hash: ce81a9b6e0829f4496af3479a82645e69b73be69f4a4bba8d0a0a36659cfd847
+        content_hash: 55f4784e31149cd2580b7666bff64abf49838c2410cdd75e76234babb9bc1748
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
@@ -38,7 +38,7 @@ dns:
       serial:
         date: 20260208
         counter: 00
-        content_hash: 2cd3e36f9eea22d8dd6216bbda39a023a03e107f826c8679b9ef30eb80c2b6ed
+        content_hash: 771916af8f56aa367ad39d1618e5d79a21ea5b706a69939173771bac5e1c0fe9
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
@@ -46,7 +46,7 @@ dns:
       serial:
         date: 20260208
         counter: 00
-        content_hash: e22f96f38ccab0b38e96a07f4821698516c61fb11b7069155a6bdef1fcea8fa2
+        content_hash: 4b0d98ea561ac53aa7a52f0261bb9b23cca2ea4455920387f39097d0c47e073b
 hosts:
   phobos:
     interfaces:

@@ -43,15 +43,15 @@ install: $(VENV)
 
 lint: $(VENV)
 	$(VENV)/bin/pre-commit run --all-files
-	$(VENV)/bin/mypy abhaile
+	$(VENV)/bin/mypy src/abhaile
 	$(VENV)/bin/mypy tests
-	$(VENV)/bin/interrogate abhaile
+	$(VENV)/bin/interrogate src/abhaile
 
 doccheck: $(VENV)
-	$(VENV)/bin/interrogate -v abhaile
+	$(VENV)/bin/interrogate -v src/abhaile
 
 typecheck: $(VENV)
-	$(VENV)/bin/mypy abhaile
+	$(VENV)/bin/mypy src/abhaile
 	$(VENV)/bin/mypy tests
 
 test: $(VENV)

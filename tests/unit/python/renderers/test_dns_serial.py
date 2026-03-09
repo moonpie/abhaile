@@ -1,6 +1,7 @@
 """Unit tests for DNS serial validation."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict
 
 import pytest
@@ -12,13 +13,53 @@ from abhaile.dns.serial_validator import (
     validate_zone_serial_collect as _validate_zone_serial_collect,
 )
 from abhaile.utils.errors import RenderError
-from tests.unit.python.renderers.dns_helpers import build_zone_content_for_hash
+
+
+@pytest.fixture
+def minimal_config_root(tmp_path: Path) -> Path:
+    """Create minimal config_root with coredns-common service and zone template."""
+    config_root = tmp_path / "config"
+    template_dir = config_root / "services" / "coredns-common" / "config" / "zones"
+    template_dir.mkdir(parents=True)
+
+    (config_root / "services" / "coredns-common" / "service.yaml").write_text(
+        """
+name: coredns-common
+composition:
+  dns:
+    zone_files:
+      - zone: '*'
+        file:
+          source:
+            template: coredns-common/config/zones/zone.zone.j2
+          destination: /etc/coredns/zones/zone.zone
+""".strip() + "\n",
+        encoding="utf-8",
+    )
+
+    # Match the legacy formatter's single-line SOA and simpler structure
+    (template_dir / "zone.zone.j2").write_text(
+        "$ORIGIN {{ zone.name }}\n"
+        "\n"
+        "{% set zone_name_stripped = zone.name.rstrip('.') %}"
+        "{{ zone_name_stripped }}. 3600 IN SOA ns1.{{ zone_name_stripped }}. "
+        "hostmaster.{{ zone_name_stripped }}. {{ zone.serial }} 3600 1800 604800 86400\n"
+        "{{ zone_name_stripped }}. 3600 IN NS ns1.{{ zone_name_stripped }}.\n"
+        "\n"
+        "{% for record in zone.records %}"
+        "{{ record.name.rstrip('.') }} {{ record.ttl }} IN {{ record.type.upper() }} {{ record.rdata }}\n"
+        "{% endfor %}"
+        "\n",
+        encoding="utf-8",
+    )
+
+    return config_root
 
 
 class TestValidateZoneSerial:
     """Tests for _validate_zone_serial."""
 
-    def test_serial_valid_no_content_change(self):
+    def test_serial_valid_no_content_change(self, minimal_config_root: Path) -> None:
         """Test that validation passes when content hash matches."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -26,6 +67,7 @@ class TestValidateZoneSerial:
         }
         zone: Dict[str, Any] = {
             "name": "example.com.",
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": "20260208",
                 "counter": "00",
@@ -33,16 +75,23 @@ class TestValidateZoneSerial:
             },
         }
 
-        # First compute what the hash should be
+        # First compute what the hash should be using renderer
+        from abhaile.dns.renderer import render_zone_template
+
         records = _collect_zone_records(zone, network, [])
-        zone_content = build_zone_content_for_hash(zone, records)
+        zone_content = render_zone_template(
+            "coredns-common/config/zones/zone.zone.j2",
+            zone,
+            records,
+            minimal_config_root,
+        )
         expected_hash = _compute_content_hash(zone_content)
         zone["serial"]["content_hash"] = expected_hash
 
         # This should not raise
-        _validate_zone_serial(zone, network, [])
+        _validate_zone_serial(zone, network, [], config_root=minimal_config_root)
 
-    def test_serial_invalid_content_changed(self):
+    def test_serial_invalid_content_changed(self, minimal_config_root: Path) -> None:
         """Test that validation fails when content hash mismatches."""
         network: Dict[str, Any] = {
             "hosts": {
@@ -67,6 +116,7 @@ class TestValidateZoneSerial:
         today = datetime.now().strftime("%Y%m%d")
         zone: Dict[str, Any] = {
             "name": "example.com.",
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": today,
                 "counter": "00",
@@ -75,14 +125,14 @@ class TestValidateZoneSerial:
         }
 
         with pytest.raises(RenderError) as exc_info:
-            _validate_zone_serial(zone, network, [])
+            _validate_zone_serial(zone, network, [], config_root=minimal_config_root)
 
         error_msg = str(exc_info.value)
         assert "content hash mismatch" in error_msg
         # Should show at least the content_hash field that differs
         assert "serial.content_hash" in error_msg or "serial.counter" in error_msg
 
-    def test_serial_missing_content_hash_fails(self):
+    def test_serial_missing_content_hash_fails(self, minimal_config_root: Path) -> None:
         """Test that validation fails if content_hash is missing."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -90,6 +140,7 @@ class TestValidateZoneSerial:
         }
         zone: Dict[str, Any] = {
             "name": "example.com.",
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": "20260208",
                 "counter": "00",
@@ -97,7 +148,7 @@ class TestValidateZoneSerial:
         }
 
         with pytest.raises(RenderError) as exc_info:
-            _validate_zone_serial(zone, network, [])
+            _validate_zone_serial(zone, network, [], config_root=minimal_config_root)
 
         error_msg = str(exc_info.value)
         assert "missing content_hash" in error_msg
@@ -106,7 +157,7 @@ class TestValidateZoneSerial:
 class TestValidateZoneSerialCollect:
     """Tests for _validate_zone_serial_collect."""
 
-    def test_collect_single_valid_zone(self):
+    def test_collect_single_valid_zone(self, minimal_config_root: Path) -> None:
         """Test that valid zones don't generate errors."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -114,7 +165,7 @@ class TestValidateZoneSerialCollect:
         }
         zone: Dict[str, Any] = {
             "name": "example.com.",
-            "provider": {"type": "internal", "name": "coredns"},
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": "20260208",
                 "counter": "00",
@@ -122,17 +173,24 @@ class TestValidateZoneSerialCollect:
             },
         }
 
-        # Pre-compute the expected hash
+        # Pre-compute the expected hash using renderer
+        from abhaile.dns.renderer import render_zone_template
+
         records = _collect_zone_records(zone, network, [])
-        zone_content = build_zone_content_for_hash(zone, records)
+        zone_content = render_zone_template(
+            "coredns-common/config/zones/zone.zone.j2",
+            zone,
+            records,
+            minimal_config_root,
+        )
         expected_hash = _compute_content_hash(zone_content)
         zone["serial"]["content_hash"] = expected_hash
 
         zones = [zone]
-        errors = _validate_zone_serial_collect(zones, network, [])
+        errors = _validate_zone_serial_collect(zones, network, [], config_root=minimal_config_root)
         assert errors == []
 
-    def test_collect_multiple_mismatched_zones(self):
+    def test_collect_multiple_mismatched_zones(self, minimal_config_root: Path) -> None:
         """Test that all mismatched zones are collected."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -142,7 +200,7 @@ class TestValidateZoneSerialCollect:
         zones = [
             {
                 "name": "zone1.com.",
-                "provider": {"type": "internal", "name": "coredns"},
+                "provider": {"type": "internal", "name": "coredns-common"},
                 "serial": {
                     "date": today,
                     "counter": "00",
@@ -151,7 +209,7 @@ class TestValidateZoneSerialCollect:
             },
             {
                 "name": "zone2.com.",
-                "provider": {"type": "internal", "name": "coredns"},
+                "provider": {"type": "internal", "name": "coredns-common"},
                 "serial": {
                     "date": today,
                     "counter": "05",
@@ -160,7 +218,7 @@ class TestValidateZoneSerialCollect:
             },
         ]
 
-        errors = _validate_zone_serial_collect(zones, network, [])
+        errors = _validate_zone_serial_collect(zones, network, [], config_root=minimal_config_root)
 
         # Should have errors for both zones
         assert len(errors) == 2
@@ -169,7 +227,7 @@ class TestValidateZoneSerialCollect:
         assert "content hash mismatch" in errors[0]
         assert "content hash mismatch" in errors[1]
 
-    def test_collect_mixed_valid_and_invalid(self):
+    def test_collect_mixed_valid_and_invalid(self, minimal_config_root: Path) -> None:
         """Test collecting from mix of valid and invalid zones."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -180,21 +238,29 @@ class TestValidateZoneSerialCollect:
         # Valid zone
         zone1: Dict[str, Any] = {
             "name": "valid.com.",
-            "provider": {"type": "internal", "name": "coredns"},
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": today,
                 "counter": "00",
                 "content_hash": None,
             },
         }
+
+        from abhaile.dns.renderer import render_zone_template
+
         records = _collect_zone_records(zone1, network, [])
-        zone_content = build_zone_content_for_hash(zone1, records)
+        zone_content = render_zone_template(
+            "coredns-common/config/zones/zone.zone.j2",
+            zone1,
+            records,
+            minimal_config_root,
+        )
         zone1["serial"]["content_hash"] = _compute_content_hash(zone_content)
 
         # Invalid zone
         zone2: Dict[str, Any] = {
             "name": "invalid.com.",
-            "provider": {"type": "internal", "name": "coredns"},
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": today,
                 "counter": "00",
@@ -203,13 +269,13 @@ class TestValidateZoneSerialCollect:
         }
 
         zones = [zone1, zone2]
-        errors = _validate_zone_serial_collect(zones, network, [])
+        errors = _validate_zone_serial_collect(zones, network, [], config_root=minimal_config_root)
 
         # Should have error only for zone2
         assert len(errors) == 1
         assert "invalid.com." in errors[0]
 
-    def test_collect_skips_external_zones(self):
+    def test_collect_skips_external_zones(self, minimal_config_root: Path) -> None:
         """Test that external zones are skipped."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -222,10 +288,12 @@ class TestValidateZoneSerialCollect:
             }
         ]
 
-        errors = _validate_zone_serial_collect(zones, network, [])
+        errors = _validate_zone_serial_collect(zones, network, [], config_root=minimal_config_root)
         assert errors == []
 
-    def test_serial_includes_service_records_in_mapping_order(self):
+    def test_serial_includes_service_records_in_mapping_order(
+        self, minimal_config_root: Path
+    ) -> None:
         """Test that service records are hashed in mapping order."""
         network: Dict[str, Any] = {
             "hosts": {},
@@ -264,6 +332,7 @@ class TestValidateZoneSerialCollect:
         }
         zone: Dict[str, Any] = {
             "name": "example.com.",
+            "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
                 "date": "20260208",
                 "counter": "00",
@@ -271,10 +340,17 @@ class TestValidateZoneSerialCollect:
             },
         }
 
+        from abhaile.dns.renderer import render_zone_template
+
         deployed_services = ["svc-b", "svc-a"]
         records = _collect_zone_records(zone, network, deployed_services)
-        zone_content = build_zone_content_for_hash(zone, records)
+        zone_content = render_zone_template(
+            "coredns-common/config/zones/zone.zone.j2",
+            zone,
+            records,
+            minimal_config_root,
+        )
         expected_hash = _compute_content_hash(zone_content)
         zone["serial"]["content_hash"] = expected_hash
 
-        _validate_zone_serial(zone, network, deployed_services)
+        _validate_zone_serial(zone, network, deployed_services, config_root=minimal_config_root)

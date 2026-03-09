@@ -61,7 +61,7 @@ tests/
 Creates a minimal temporary repository structure with paths.ini.
 
 - Creates minimal config/schema/script paths used by tests
-- Generates valid `scripts/paths.ini` with all required keys
+- Generates valid repo-root `paths.ini` with all required keys
 
 ### `tmp_repo_with_config`
 
@@ -107,7 +107,7 @@ pytest tests/integration -v
 pytest tests/unit/python/test_utils.py::TestLoadPaths -v
 
 # Run with coverage
-pytest tests/ --cov=abhaile --cov-report=html
+pytest tests/ --cov=src/abhaile --cov-report=html
 
 # Equivalent Make targets
 make test
@@ -192,4 +192,4 @@ python -m pytest tests/ -v --tb=short --junit-xml=test-results.xml
 - Add tests for new renderers in `tests/unit/python/renderers/test_<renderer>.py`
 - Add integration tests for new end-to-end scenarios
 - Keep test data in conftest.py fixtures aligned with actual config schema
-- Keep this document aligned with active CLI/package paths (`abhaile/`, not legacy script paths)
+- Keep this document aligned with active CLI/package paths (`src/abhaile/`, not legacy script paths)

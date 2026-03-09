@@ -28,21 +28,39 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build_manifest(rendered_dir: Path, target_root: Path) -> Dict[str, Any]:
+def _map_target_path(rel_path: str, target_root: Path) -> str:
+    """Map rendered relative path to live host target path."""
+    parts = Path(rel_path).parts
+    if not parts:
+        return target_root.as_posix()
+
+    if parts[0] == "system" and len(parts) > 1:
+        mapped = Path(*parts[1:])
+    elif parts[0] == "users" and len(parts) > 1:
+        mapped = Path(*parts[1:])
+    elif parts[0] == "services" and len(parts) > 2:
+        mapped = Path(*parts[2:])
+    else:
+        mapped = Path(*parts)
+
+    return (target_root / mapped).as_posix()
+
+
+def build_manifest(host: str, rendered_dir: Path, target_root: Path) -> Dict[str, Any]:
     """Build manifest from rendered artifacts.
 
-    Manifest includes SHA256, size, mode, uid, gid for each file.
-    Artifacts are sorted deterministically by rel_path.
+    Manifest includes host identity, render timestamp, and file entries.
 
     Args:
+        host: Hostname for manifest safety checks.
         rendered_dir: Path to rendered output directory.
         target_root: Live target root (typically /).
 
     Returns:
-        Manifest dictionary with rendered_at timestamp and artifacts list.
+        Manifest dictionary with host, rendered_at, and entries list.
     """
 
-    artifacts: List[Dict[str, Any]] = []
+    entries: List[Dict[str, Any]] = []
     if rendered_dir.exists():
         for root, _, files in os.walk(rendered_dir):
             for name in files:
@@ -50,22 +68,20 @@ def build_manifest(rendered_dir: Path, target_root: Path) -> Dict[str, Any]:
                 if file_path.is_symlink():
                     continue
                 rel_path = file_path.relative_to(rendered_dir).as_posix()
-                stat = file_path.stat()
-                artifacts.append(
+                target_path = _map_target_path(rel_path, target_root)
+                entries.append(
                     {
-                        "target_path": (target_root / rel_path).as_posix(),
                         "rel_path": rel_path,
+                        "target_path": target_path,
                         "sha256": sha256_file(file_path),
-                        "size": stat.st_size,
-                        "mode": f"{stat.st_mode & 0o7777:04o}",
-                        "uid": stat.st_uid,
-                        "gid": stat.st_gid,
+                        "size": file_path.stat().st_size,
                     }
                 )
-    artifacts.sort(key=lambda item: item["rel_path"])
+    entries.sort(key=lambda item: item["rel_path"])
     return {
+        "host": host,
         "rendered_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "artifacts": artifacts,
+        "entries": entries,
     }
 
 

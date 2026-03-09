@@ -29,10 +29,10 @@ def tmp_repo():
         # Create directory structure
         (repo_root / "config" / "services").mkdir(parents=True)
         (repo_root / "schemas").mkdir(parents=True)
-        (repo_root / "scripts" / "lib" / "python").mkdir(parents=True)
+        (repo_root / "scripts" / "lib" / "bash").mkdir(parents=True)
 
         # Create paths.ini
-        paths_ini = repo_root / "scripts" / "paths.ini"
+        paths_ini = repo_root / "paths.ini"
         paths_ini.write_text(
             "[paths]\n"
             "output_root_default = /var/lib/abhaile\n"

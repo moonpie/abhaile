@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -89,6 +90,7 @@ def validate_zone_serial(
     zone: dict[str, Any],
     network: dict[str, Any],
     deployed_services: list[str],
+    config_root: Path,
 ) -> None:
     """Validate a single zone serial, fails fast on first mismatch.
 
@@ -96,6 +98,7 @@ def validate_zone_serial(
         zone: Zone dict to validate.
         network: Network configuration (for record content hash).
         deployed_services: Services from mapping.yaml in mapping order.
+        config_root: Config root path for resolving zone templates.
 
     Raises:
         RenderError: If serial is invalid (content hash mismatch).
@@ -116,34 +119,7 @@ def validate_zone_serial(
     # Get current serial values from workspace
     current_date_str, current_date, current_counter = _parse_serial_fields(serial_info, zone_name)
 
-    # Build zone content for hashing with current serial
-    records = collect_zone_records(zone, network, deployed_services)
-    zone_name_stripped = zone_name.rstrip(".")
-    serial_str = f"{current_date_str}{current_counter:02d}"
-
-    lines = []
-    lines.append(f"$ORIGIN {zone_name}")
-    lines.append("")
-    lines.append(
-        f"{zone_name_stripped}. 3600 IN SOA ns1.{zone_name_stripped}. "
-        f"hostmaster.{zone_name_stripped}. {serial_str} 3600 1800 604800 86400"
-    )
-    lines.append(f"{zone_name_stripped}. 3600 IN NS ns1.{zone_name_stripped}.")
-    lines.append("")
-
-    for record in records:
-        record_name = record.get("name", "").rstrip(".")
-        record_type = record.get("type", "").upper()
-        rdata = record.get("rdata", "").strip()
-        ttl = record.get("ttl", 3600)
-
-        if not record_type or not rdata:
-            continue
-
-        lines.append(f"{record_name} {ttl} IN {record_type} {rdata}")
-
-    lines.append("")
-    zone_content = "\n".join(lines)
+    zone_content = _render_zone_content_for_hash(zone, network, deployed_services, config_root)
     computed_hash = compute_content_hash(zone_content)
 
     # Check if content hash matches
@@ -180,15 +156,16 @@ def validate_zone_serial(
         expected_date_str = today_str
         expected_counter = 0
 
-    expected_serial_str = f"{expected_date_str}{expected_counter:02d}"
-
-    # Compute expected hash with expected serial
-    expected_lines = list(lines)
-    expected_lines[2] = (
-        f"{zone_name_stripped}. 3600 IN SOA ns1.{zone_name_stripped}. "
-        f"hostmaster.{zone_name_stripped}. {expected_serial_str} 3600 1800 604800 86400"
+    expected_zone = deepcopy(zone)
+    expected_zone.setdefault("serial", {})
+    expected_zone["serial"]["date"] = int(expected_date_str)
+    expected_zone["serial"]["counter"] = expected_counter
+    expected_content = _render_zone_content_for_hash(
+        expected_zone,
+        network,
+        deployed_services,
+        config_root,
     )
-    expected_content = "\n".join(expected_lines)
     expected_hash = compute_content_hash(expected_content)
 
     # Compare expected vs current workspace values and collect differences
@@ -216,6 +193,7 @@ def validate_zone_serial_collect(
     zones: list[dict[str, Any]],
     network: dict[str, Any],
     deployed_services: list[str],
+    config_root: Path,
 ) -> list[str]:
     """Validate all zone serials, collecting all errors.
 
@@ -223,6 +201,7 @@ def validate_zone_serial_collect(
         zones: List of zone dicts to validate.
         network: Network configuration (for record content hash).
         deployed_services: Services from mapping.yaml in mapping order.
+        config_root: Config root path for resolving zone templates.
 
     Returns:
         List of error messages (empty if all zones are valid).
@@ -234,7 +213,7 @@ def validate_zone_serial_collect(
             continue  # Skip external zones
 
         try:
-            validate_zone_serial(zone, network, deployed_services)
+            validate_zone_serial(zone, network, deployed_services, config_root=config_root)
         except RenderError as e:
             errors.append(str(e))
 
@@ -280,3 +259,50 @@ def _parse_serial_fields(
         raise RenderError(f"Zone '{zone_name}' invalid serial.counter: {counter_raw}") from exc
 
     return str(date_int), date_int, counter_int
+
+
+def _render_zone_content_for_hash(
+    zone: dict[str, Any],
+    network: dict[str, Any],
+    deployed_services: list[str],
+    config_root: Path,
+) -> str:
+    """Render canonical zone content for content-hash validation.
+
+    Uses the same zone template resolution path as DNS rendering to ensure
+    validation hashes match actual rendered output.
+
+    Args:
+        zone: Zone dict to render.
+        network: Network configuration.
+        deployed_services: Services from mapping.yaml in mapping order.
+        config_root: Config root path for resolving zone templates.
+
+    Returns:
+        Rendered zone content string.
+    """
+    from abhaile.dns.renderer import get_zone_files_config, render_zone_template
+
+    records = collect_zone_records(zone, network, deployed_services)
+    zone_name = str(zone.get("name", ""))
+
+    provider = zone.get("provider", {}) or {}
+    provider_name = provider.get("name")
+    if not provider_name:
+        raise RenderError(f"Zone '{zone_name}' missing provider.name")
+
+    zone_files = get_zone_files_config(str(provider_name), config_root)
+    for zone_file_entry in zone_files:
+        zone_pattern = str(zone_file_entry.get("zone", ""))
+        if zone_pattern != "*" and zone_name != zone_pattern:
+            continue
+
+        file_config = zone_file_entry.get("file", {}) or {}
+        source_config = file_config.get("source", {}) or {}
+        template_path = source_config.get("template")
+        if isinstance(template_path, str) and template_path:
+            return render_zone_template(template_path, zone, records, config_root)
+
+    raise RenderError(
+        f"Zone '{zone_name}' provider '{provider_name}' has no matching zone_files template"
+    )

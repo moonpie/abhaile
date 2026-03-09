@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,7 +37,7 @@ from abhaile.renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
 )
-from abhaile.types.config import MappingConfig, NetworkConfig, ServiceConfig
+from abhaile.models.config import MappingConfig, NetworkConfig, ServiceConfig
 
 LOG = logging.getLogger(__name__)
 
@@ -222,7 +223,7 @@ def render_host(
         Path to manifest.json.
     """
     output_root = resolve_output_root(host, output_override, paths, all_mode)
-    rendered_dir, state_dir = _prepare_output_dirs(output_root, paths)
+    rendered_dir = _prepare_output_dirs(output_root, paths)
     config_root = repo_root / paths["config_root"]
 
     host_config, common_config = _load_host_configs(host, config_root, paths)
@@ -254,21 +255,24 @@ def render_host(
         rendered_dir,
     )
 
-    manifest_path = _write_manifest(rendered_dir, state_dir, paths)
+    manifest_path = _write_manifest(host, rendered_dir, paths)
 
     # Validate DNS serials after rendering so artifacts exist for troubleshooting
-    validate_dns_serials(cast(dict[str, Any], network), all_services)
+    validate_dns_serials(cast(dict[str, Any], network), all_services, config_root=config_root)
 
     return manifest_path
 
 
-def _prepare_output_dirs(output_root: Path, paths: dict[str, str]) -> tuple[Path, Path]:
-    """Create rendered and state output directories."""
+def _prepare_output_dirs(output_root: Path, paths: dict[str, str]) -> Path:
+    """Wipe and recreate rendered output directory.
+
+    render owns rendered/ entirely; state/ is created and managed by apply.
+    """
     rendered_dir = output_root / paths["rendered_dir_name"]
-    state_dir = output_root / paths["state_dir_name"]
-    rendered_dir.mkdir(parents=True, exist_ok=True)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return rendered_dir, state_dir
+    if rendered_dir.exists():
+        shutil.rmtree(rendered_dir)
+    rendered_dir.mkdir(parents=True)
+    return rendered_dir
 
 
 def _load_host_configs(host: str, config_root: Path, paths: dict[str, str]) -> tuple[dict, dict]:
@@ -380,11 +384,11 @@ def _render_host_services(
     render_dns(cast(dict[str, Any], network), rendered_dir, services, all_services, config_root)
 
 
-def _write_manifest(rendered_dir: Path, state_dir: Path, paths: dict[str, str]) -> Path:
-    """Build and write the render manifest to state."""
+def _write_manifest(host: str, rendered_dir: Path, paths: dict[str, str]) -> Path:
+    """Build and write the render manifest into the rendered directory."""
     target_root = Path(paths["target_root"])
-    manifest = build_manifest(rendered_dir, target_root)
-    manifest_path = state_dir / "manifest.json"
+    manifest = build_manifest(host, rendered_dir, target_root)
+    manifest_path = rendered_dir / "manifest.json"
     write_manifest(manifest, manifest_path)
     return manifest_path
 

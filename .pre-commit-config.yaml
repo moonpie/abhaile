@@ -36,7 +36,7 @@ repos:
       - id: mypy
         name: Type Check Python (mypy)
         pass_filenames: false
-        args: ["--config-file=pyproject.toml", "abhaile", "tests"]
+        args: ["--config-file=pyproject.toml", "src/abhaile", "tests"]
         additional_dependencies: ["types-PyYAML>=6.0", "types-jsonschema>=4.23.0", "types-Jinja2>=2.11.9", "pytest>=7.4.0"]
   - repo: https://github.com/python-jsonschema/check-jsonschema
     rev: 0.36.1

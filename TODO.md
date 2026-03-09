@@ -2,6 +2,78 @@
 
 ## Decision Log
 
+1. Decision: Renamed internal package path from `src/abhaile/types/` to `src/abhaile/models/` to avoid collision with Python stdlib module `types` during direct file execution patterns (e.g., `python src/abhaile/cli.py ...`).
+   Date: 2026-03-13
+   Rationale: `src` layout made direct execution place `src/abhaile` first on `sys.path`, allowing `types` import shadowing; renaming eliminates the collision class without runtime `sys.path` mutation.
+   Scope: `src/abhaile/models/` module path, imports (`abhaile.models.config`), and package move from `types` -> `models`.
+   Confirmed by: user
+
+1. Decision: Python source layout uses `src/abhaile/` as the canonical package path; apply/diff/render logic lives under `src/abhaile/` and CLI entrypoints are registered from that source tree.
+   Date: 2026-03-13
+   Rationale: Standard Python `src/` layout reduces accidental local import masking, keeps packaging/tooling conventions clear, and separates installable code from repo assets.
+   Scope: Package/module references in TODO/docs (`abhaile/...` -> `src/abhaile/...`) and upcoming source migration.
+   Confirmed by: user
+
+1. Decision: Tooling path configuration file is repo-root `paths.ini` (not `scripts/paths.ini`); `scripts/` is reserved for executable shell utilities/wrappers.
+   Date: 2026-03-13
+   Rationale: `paths.ini` is cross-tool project configuration used by Python and shell code, so it belongs with root project config files rather than inside an executable scripts directory.
+   Scope: TODO/docs references to path config location and upcoming file move.
+   Confirmed by: user
+
+1. Decision: Apply and diff are Python console entrypoints (`abhaile-apply`, `abhaile-diff`) registered in `pyproject.toml`, with all logic in `src/abhaile/apply/`; `scripts/` retains shell utilities/wrappers (e.g., gitops-runner wrapper); no shell scripts for apply or diff business logic.
+   Date: 2026-03-13
+   Rationale: Python gives testability, structured error handling, and reuse of existing `src/abhaile/` modules (manifest, validation, types); shell adds no value over `subprocess` for the OS operations apply triggers; aligning with `abhaile-render` pattern keeps CLI consistent.
+   Scope: `src/abhaile/apply/` module, `pyproject.toml` entrypoints, `abhaile-apply` and `abhaile-diff` CLI commands; all TODO Apply Pipeline and Ops Tooling session prompts updated to reflect entrypoint names.
+   Confirmed by: user
+
+1. Decision: Apply state history is written to `<output>/state/history/manifest-<timestamp>.json` on each successful apply; the last 10 entries are retained and older files pruned automatically; `state/manifest.json` and `state/manifest.previous.json` are plain files (no symlinks) updated by rotation.
+   Date: 2026-03-13
+   Rationale: History enables audit trail and arbitrary rollback without unbounded disk growth; plain files for current/previous are simpler than symlinks and avoid link breakage when history is pruned; 10 entries provides reasonable coverage without complexity.
+   Scope: Apply CLI state write/rotation logic, `state/history/` directory management.
+   Confirmed by: user
+
+1. Decision: Output layout is: `<output>/rendered/` is entirely ephemeral — render wipes it before each run and writes the desired manifest inside it as `<output>/rendered/manifest.json`; `<output>/state/` is entirely durable and owned by apply — contains `manifest.json` (last applied), `manifest.previous.json` (prior applied), and `history/` (timestamped archive).
+   Date: 2026-03-13
+   Rationale: Clean ownership boundaries — render owns `rendered/`, apply owns `state/`; desired manifest lives in the ephemeral render tree so it is always fresh and never confused with applied state; wiping `rendered/` as a pre-render step (inside the render CLI itself) ensures stale artifacts never persist across renders.
+   Scope: Render CLI (pre-render wipe of `rendered/`), apply CLI (state read/write paths), README and ADR path documentation.
+   Confirmed by: user
+
+1. Decision: Apply removal behavior uses guarded pruning with two explicit modes: `--prune` deletes only files that were in last-applied state, are absent from desired manifest, and are unchanged on host since last apply (`live_hash == last_applied_hash`); `--force-prune` additionally allows deleting those removal candidates even when host content has drifted (`live_hash != last_applied_hash`).
+   Date: 2026-03-13
+   Rationale: Prevent destructive deletion of locally modified files by default while still supporting explicit reconciliation of decommissioned artifacts; this addresses apply deltas between desired manifest, last-applied state, and live host state.
+   Scope: Apply CLI prune planning/execution semantics, dry-run reporting, and safety gates for removal candidates.
+   Confirmed by: user
+
+1. Decision: Manifest now includes `rendered_at` and per-entry `rel_path`; `target_path` is mapped to the actual host destination path (instead of mirroring rendered tree paths with a leading slash).
+   Date: 2026-03-11
+   Rationale: `rendered_at` is useful for auditing/debugging render runs; `rel_path` should describe the artifact path relative to `<output>/rendered/`; `target_path` must represent where apply will reconcile on the host.
+   Scope: `abhaile/renderers/manifest.py` (added `rendered_at`, added `rel_path`, mapped target paths from `system/`, `users/`, and `services/<service>/` prefixes), unit/integration manifest tests.
+   Confirmed by: user
+
+1. Decision: Manifest simplified to drift-only fields: manifest-level `host` string, per-entry `target_path`, `sha256`, and `size`; apply-specific fields (mode, uid, gid, kind, source, rel_path) and manifest-level timestamp (rendered_at) deferred until apply implementation.
+   Date: 2026-03-09
+   Rationale: Drift detection only requires content hash and target location; minimal schema reduces coupling and simplifies initial implementation; apply-specific metadata (permissions, ownership, artifact classification) can be added later when apply command is developed; removing timestamp improves determinism.
+   Scope: `abhaile/renderers/manifest.py` (removed \_classify_artifact helper, simplified build_manifest signature to require host parameter, reduced entry fields), `tests/unit/python/renderers/test_manifest.py` (updated all tests for new schema).
+   Confirmed by: user
+
+1. Decision: Removed backward compatibility fallback in DNS serial validation - config_root parameter is now required (Path, not Optional[Path]); legacy synthetic hash format was deleted.
+   Date: 2026-03-09
+   Rationale: Legacy fallback caused maintenance burden, inconsistent behavior between tests with/without config_root, and was never used in production (CLI always passes config_root); making config_root required simplifies the codebase and ensures validation always uses the exact template-rendered zone format.
+   Scope: `abhaile/dns/serial_validator.py` (removed \_build_legacy_zone_content_for_hash, made config_root required in validate_zone_serial and validate_zone_serial_collect), `abhaile/validation/dns.py` (made config_root required in validate_dns_serials), test fixtures updated to provide minimal config_root with coredns-common service template.
+   Confirmed by: user
+
+1. Decision: DNS serial validation computes `serial.content_hash` from the same zone template rendering path as DNS renderer (provider `dns.zone_files` template resolution) when config root is available; this avoids false serial drift caused by legacy synthetic hash formatting differences.
+   Date: 2026-03-09
+   Rationale: Serial validation must reflect actual rendered zone content; hashing a different canonical string than renderer output caused spurious prompts to update `serial.date`/`serial.counter`/`serial.content_hash` even when records were unchanged.
+   Scope: `abhaile/dns/serial_validator.py`, `abhaile/validation/dns.py`, CLI DNS validation call path, DNS integration/unit tests.
+   Confirmed by: user
+
+1. Decision: Manifest writer records only regular files (no directories/symlinks), adds `kind` and `source` fields, and maps `target_path` by stripping `system/`, `users/`, and `services/<service>/` prefixes while leaving `software/` as a logical namespace; `rendered_at` remains a manifest-level timestamp and apply is responsible for creating any required directories.
+   Date: 2026-03-08
+   Rationale: Apply needs stable file inventory without directory noise; `kind`/`source` allow apply to route execution-required artifacts; logical paths for software avoid coupling to output overrides; per-file timestamps would break determinism, while a single manifest timestamp remains useful for auditing.
+   Scope: abhaile/renderers/manifest.py, tests/unit/python/renderers/test_manifest.py, apply pipeline planning.
+   Confirmed by: user
+
 1. Decision: Align user management schema with sysusers by renaming `description` to `gecos`, adding a boolean `system` flag on users, and validating uid/gid conflicts across host include chains.
    Date: 2026-03-06
    Rationale: Sysusers uses the GECOS field name and benefits from explicit system/login user intent; static ids are preferred, so validating duplicate uid/gid values avoids ambiguous user/group definitions across includes.
@@ -35,7 +107,7 @@
 1. Decision: Keep the apply manifest module and implement drift detection in the apply pipeline; tracked in TODO items until implementation is complete.
    Date: 2026-02-15
    Rationale: Apply is required for the repo’s workflow, and drift detection is a core safety gate; keeping the module makes the planned responsibilities explicit and prevents ad hoc implementation later.
-   Scope: abhaile/apply/manifest.py and apply pipeline integration.
+   Scope: src/abhaile/apply/manifest.py and apply pipeline integration.
    Confirmed by: user
 
 1. Decision: DNS reverse zones automatically generate PTR records from A/AAAA records marked with `ptr: true` in network.yaml; PTR records have reverse DNS notation name (final octets) and FQDN rdata with trailing dot; reverse zone identification uses smart IP-to-zone matching (172.20.20.10 belongs to 20.20.172.in-addr.arpa.); PTR records rendered inline during zone file generation; DNS serial validation compares rendered zone hash against network.yaml content_hash, computing expected serial from git HEAD (last commit) serial vs today's date, incrementing counter if same day or resetting to 00 if new day; validation reports only fields that differ between expected and current workspace values (serial.date, serial.counter, serial.content_hash).
@@ -92,10 +164,10 @@
    Scope: Networking renderer drop-in selection and validation logic.
    Confirmed by: user
 
-1. Decision: Centralize tooling paths in scripts/paths.ini for consistent path resolution.
+1. Decision: Centralize tooling paths in repo-root `paths.ini` for consistent path resolution.
    Date: 2026-02-01
-   Rationale: Single source of truth for defaults across scripts in any language.
-   Scope: scripts and tooling path resolution.
+   Rationale: Single source of truth for defaults across tooling in any language.
+   Scope: root-level project config and tooling path resolution.
    Confirmed by: user
 
 1. Decision: Suggestions and alternatives are allowed, but must be confirmed before deviating from the task prompt.
@@ -224,7 +296,7 @@ This organization makes it easy to identify which artifacts require execution vs
 ### State/Drift Tracking Expectations
 
 - Render outputs are deterministic and include a per-host manifest with SHA256 for each artifact.
-- Apply stores last-applied manifest on the host (e.g., `/var/lib/abhaile/state.json`) and compares for drift.
+- Apply stores last-applied manifest on the host (e.g., `/var/lib/abhaile/state/manifest.json`) and compares for drift.
 - Drift detection is read-only by default; apply requires explicit confirmation for destructive changes.
 - Any changes outside the render tree are reported but not overwritten unless flagged.
 - Rendered output is never committed to the git repo.
@@ -246,157 +318,13 @@ This organization makes it easy to identify which artifacts require execution vs
 
 ### Phase: Foundations
 
-**Status:** Complete
-
-| Status | Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- | --- |
-| [x] | Define repo layout | Establish folder structure for `render/`, `docs/`, `docs/adr/`, and `scripts/`. | Layout documented in `README.md` and directories created. | None |
-| [x] | Define environment paths | Specify workstation/CI vs host paths for rendered output, state, and live targets; define detection logic. | Paths documented in `README.md` and ADRs; hash-based drift model defined. | Define repo layout |
-| [x] | Define config schema | Write a lightweight schema or validation rules for `config/` (mapping, network, hosts, services). | Schema rules documented; validator stub exists. | Define repo layout |
-
-#### Session Prompt (Define repo layout)
-
-- Phase/Task: Foundations / Define repo layout.
-- Required inputs: `TODO.md`, `README.md`.
-- Outputs to produce: create `docs/`, `docs/adr/`, `scripts/`, `out/`, `out/rendered/`, `out/state/`; update `README.md` to document layout and output paths.
-- Acceptance: directories exist; `README.md` includes layout and `out/` usage; no other files required.
-- Constraints: `config/` is source of truth; no secrets in repo.
-- Dependencies: none.
-
-#### Session Prompt (Define environment paths)
-
-- Phase/Task: Foundations / Define environment paths.
-- Required inputs: `README.md`, `docs/adr/` if present.
-- Outputs to produce: update `README.md` with workstation vs host paths; ADR in `docs/adr/` describing environment detection and root path selection.
-- Acceptance: paths for render output, state, and live target roots are explicit for both environments.
-- Constraints: no rendered output committed to git; no secrets.
-- Dependencies: Define repo layout.
-
-#### Session Prompt (Define config schema)
-
-- Phase/Task: Foundations / Define config schema.
-- Required inputs: `TODO.md`, `config/mapping.yaml`, `config/network.yaml`, `config/services/*/service.yaml`.
-- Outputs to produce: schema files in `schemas/`; schema validation handled by `check-jsonschema` hooks in pre-commit.
-- Acceptance: schema covers mapping/network/service yaml files.
-- Constraints: schema matches existing `config/` shape; no network access; no secrets.
-- Dependencies: Define repo layout.
+**Status:** ✅ Complete
 
 ### Phase: Render Pipeline
 
-**Status:** In progress
+**Status:** ✅ Complete
 
-| Status | Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- | --- |
-| [x] | Renderer CLI | Implement a `scripts/render` tool that reads `config/` and emits `<output>/rendered/` (default: `/var/lib/abhaile/rendered/` on hosts). | Running the tool renders a host tree with a manifest in `<output>/state/manifest.json`. | Define config schema |
-| [x] | Networking renderer | Render systemd-networkd configs and resolved config from host templates and `config/network.yaml`. | `<output>/rendered/system/etc/systemd/network/` and resolved files present. | Renderer CLI |
-| [x] | Software renderer | Merge `packages`, `downloads`, `builds`, and `commands` from `config/hosts/**/host.yaml` (composition.software) across host/common. | Per-host software artifacts rendered under `<output>/rendered/software/` with deterministic package list and per-entry specs. | Renderer CLI |
-| [x] | Users renderer | Render user/group/sudoers artifacts from `config/hosts/**/host.yaml` (user_management). | Sysusers, sudoers, and SSH authorized_keys files generated under `<output>/rendered/users/` with deterministic ordering. | Renderer CLI |
-| [x] | Service configs renderer | Copy static configs and render templates for each mapped service. | All configs referenced by service.yaml are rendered under `<output>/rendered/services/<service>`. | Renderer CLI |
-| [x] | Quadlets renderer (containers) | Render `.container`, `.image`, `.network`, `.volume` for container services. | Quadlet files generated under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
-| [x] | Quadlets renderer (pods) | Render `.pod` and per-container `.container` for pod services. | Pod quadlets rendered under `<output>/rendered/services/<service>` per mapped service. | Renderer CLI |
-| [x] | Ingress renderer | Aggregate ingress blocks with base into Caddy configuration. | Caddyfiles rendered under `<output>/rendered/services/<service>` for `<service>` that defines the base ingress definition. | Service configs renderer |
-| [x] | Vault Templates renderer | Aggregate vault_agent templates with base into per-host vault-agent configuration. | vault-agent configuration rendered under `<output>/rendered/services/vault-agent` as per definition. | Service configs renderer |
-| [x] | DNS renderer | Render CoreDNS zone files and serials from `config/network.yaml` for `composition.dns` found in `service.yaml` files. | Zone files and serial metadata rendered deterministically under `<output>/rendered/services/<service>` as per definition. | Renderer CLI |
-| [-] | Manifest writer | Produce `<output>/state/manifest.json` with hashes and metadata. | Manifest is complete and stable across reruns. | Renderer CLI |
-
-#### Session Prompt (Renderer CLI)
-
-- Phase/Task: Render Pipeline / Renderer CLI.
-- Required inputs: `TODO.md`, `README.md`, `config/` tree, `docs/adr/` if present.
-- Outputs to produce: `scripts/render`; output tree under `<output>/rendered/` and `<output>/state/` (see ADR 0001 for path defaults and overrides).
-- Acceptance: `scripts/render --host <host>` creates `<output>/rendered/` and `<output>/state/manifest.json`; exits non-zero on render errors.
-- Constraints: unprivileged render only; `config/` is the only input source; no secrets materialized.
-- Dependencies: Define config schema.
-
-#### Session Prompt (Networking renderer)
-
-- Phase/Task: Render Pipeline / Networking renderer.
-- Required inputs: `config/network.yaml`, `config/hosts/**`, `config/_templates/hosts/**`.
-- Outputs to produce: `<output>/rendered/system/etc/systemd/network/*.network` and `.netdev`; `<output>/rendered/system/etc/systemd/resolved.conf`.
-- Acceptance: generated files are deterministic and include VLANs, ipvlan-l2, and host interfaces.
-- Constraints: templates fail fast on missing network data.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Software renderer)
-
-- Phase/Task: Render Pipeline / Software renderer.
-- Required inputs: `config/hosts/**/host.yaml` (composition.software), `config/hosts/common/host.yaml`.
-- Outputs to produce: `<output>/rendered/software/packages.txt`; `<output>/rendered/software/downloads/<id>.yaml`; `<output>/rendered/software/builds/<id>.yaml`; `<output>/rendered/software/commands/<id>.yaml`.
-- Acceptance: manifests include merged `packages`, `downloads`, `builds`, `commands` per host; duplicates fail fast; software entry specs are schema-validated.
-- Constraints: deterministic ordering; no network access.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Users renderer)
-
-- Phase/Task: Render Pipeline / Users renderer.
-- Required inputs: `config/hosts/**/host.yaml` (user_management), `config/hosts/common/host.yaml`.
-- Outputs to produce: `<output>/rendered/users/etc/sysusers.d/abhaile.conf`; `<output>/rendered/users/etc/sudoers.d/abhaile`; `<output>/rendered/users/<home>/.ssh/authorized_keys`.
-- Acceptance: user/group/sudo data is deterministic and sorted; no duplicates; SSH keys rendered when provided.
-- Constraints: no secrets; read-only from `config/`.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Service configs renderer)
-
-- Phase/Task: Render Pipeline / Service configs renderer.
-- Required inputs: `config/services/**`, `config/_templates/services/**`, `config/network.yaml`.
-- Outputs to produce: `<output>/rendered/services/<service>/...` with configs and rendered templates.
-- Acceptance: all configs referenced by service.yaml are rendered; template errors fail the render.
-- Constraints: templates must not materialize secrets.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Quadlets renderer - containers)
-
-- Phase/Task: Render Pipeline / Quadlets renderer (containers).
-- Required inputs: `config/services/**`, `config/_templates/services/quadlets/**`, `config/mapping.yaml`.
-- Outputs to produce: `<output>/rendered/services/<service>/etc/containers/systemd/*.container`, `.image`, `.network`, `.volume`, `.build`.
-- Acceptance: quadlets generated for all mapped container services; files are deterministic.
-- Constraints: no secrets; rootful/rootless modes follow service config.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Quadlets renderer - pods)
-
-- Phase/Task: Render Pipeline / Quadlets renderer (pods).
-- Required inputs: `config/services/**`, `config/_templates/services/quadlets/**`, `config/mapping.yaml`.
-- Outputs to produce: `<output>/rendered/services/<service>/etc/containers/systemd/*.pod` and related `.container` units.
-- Acceptance: pod quadlets generated for all mapped pod services; dependencies are explicit.
-- Constraints: no secrets; pod definitions derived from service config.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Ingress renderer)
-
-- Phase/Task: Render Pipeline / Ingress renderer.
-- Required inputs: `config/services/**`, `config/network.yaml`.
-- Outputs to produce: `<output>/rendered/services/{caddy-dmz,caddy-internal}/`.
-- Acceptance: host ingress fragments are aggregated and deterministic.
-- Constraints: no secrets; only mapped services included.
-- Dependencies: Service configs renderer.
-
-#### Session Prompt (Vault Templates renderer)
-
-- Phase/Task: Render Pipeline / Vault Templates renderer.
-- Required inputs: `config/services/**`, `config/network.yaml`.
-- Outputs to produce: `<output>/rendered/services/vault-agent/`.
-- Acceptance: vault-agent config is aggregated and deterministic.
-- Constraints: no secrets; only mapped services included.
-- Dependencies: Service configs renderer.
-
-#### Session Prompt (DNS renderer)
-
-- Phase/Task: Render Pipeline / DNS renderer.
-- Required inputs: `config/network.yaml`, `config/services/**`, `config/_templates/services/**`.
-- Outputs to produce: `<output>/rendered/services/<service>/etc/coredns/zones/*`; `<output>/state/dns-serials.json`.
-- Acceptance: zones render deterministically with stable serials and correct records.
-- Constraints: no secrets; zone rendering is pure function of `config/network.yaml`.
-- Dependencies: Renderer CLI.
-
-#### Session Prompt (Manifest writer)
-
-- Phase/Task: Render Pipeline / Manifest writer.
-- Required inputs: `<output>/rendered/`.
-- Outputs to produce: `<output>/state/manifest.json` with a stable schema.
-- Acceptance: manifest lists every rendered file with fields: `target_path`, `rel_path`, `sha256`, `size`, `mode`, `uid`, `gid`, `kind`, `source`, `rendered_at`.
-- Constraints: deterministic ordering; no secrets in manifest.
-- Dependencies: Renderer CLI.
+All renderer tasks implemented and tested. Manifest writer simplified to drift-only fields (see Decision Log entry from 2026-03-09).
 
 ### Phase: Apply Pipeline
 
@@ -404,7 +332,7 @@ This organization makes it easy to identify which artifacts require execution vs
 
 | Status | Task | Description | Completion Criteria | Dependencies |
 | --- | --- | --- | --- | --- |
-| [ ] | Apply CLI | Implement `scripts/apply` to sync `<output>/rendered/` to the host via SSH/SFTP/rsync. | Dry-run and apply modes functional for a host. | Manifest writer |
+| [ ] | Apply CLI | Implement `abhaile-apply` to sync `<output>/rendered/` to the host via local copy on target. | Dry-run and apply modes functional for a host. | Manifest writer |
 | [ ] | Drift detection | Compare render manifest with host state and report differences. | Apply prints drift summary before changes. | Apply CLI |
 | [ ] | Safe systemd reload | Only reload/restart units and quadlets when artifacts changed. | Changed services restart; unchanged services stay running. | Apply CLI |
 | [ ] | Host safety gate | Enforce hostname and SSH host key checks before apply. | Apply aborts on mismatch. | Apply CLI |
@@ -413,46 +341,46 @@ This organization makes it easy to identify which artifacts require execution vs
 #### Session Prompt (Apply CLI)
 
 - Phase/Task: Apply Pipeline / Apply CLI.
-- Required inputs: `TODO.md`, `README.md`, `<output>/rendered/`, `<output>/state/manifest.json`.
-- Outputs to produce: `scripts/apply`; document host state file path in `README.md` (e.g., `/var/lib/abhaile/state/manifest.json`).
-- Acceptance: dry-run mode shows planned changes; apply mode syncs `<output>/rendered/` to host.
-- Constraints: apply runs with sudo on target; no secrets written; render/apply boundary enforced.
+- Required inputs: `TODO.md`, `README.md`, `<output>/rendered/manifest.json`, `<output>/state/manifest.json` (last applied).
+- Outputs to produce: `abhaile-apply` console entrypoint (`src/abhaile/apply/` module); document host state paths in `README.md` (`/var/lib/abhaile/state/manifest.json`, `/var/lib/abhaile/state/manifest.previous.json`, `/var/lib/abhaile/state/history/`).
+- Acceptance: dry-run mode shows planned add/change/remove actions; apply mode copies files atomically to target paths, sets permissions, runs reload_actions, updates state.
+- Constraints: apply runs with sudo on target; no secrets written; render/apply boundary enforced; `rendered/` owned by render, `state/` owned by apply.
 - Dependencies: Manifest writer.
 
 #### Session Prompt (Drift detection)
 
 - Phase/Task: Apply Pipeline / Drift detection.
-- Required inputs: `<output>/state/manifest.json`, host state file (last-applied).
-- Outputs to produce: drift summary output in `scripts/apply` (or `scripts/diff` if already exists).
-- Acceptance: drift summary compares `target_path` + `sha256` and reports added/changed/removed files.
+- Required inputs: `<output>/rendered/manifest.json` (desired), `<output>/state/manifest.json` (last applied), live filesystem.
+- Outputs to produce: drift summary inside `abhaile-apply`; standalone two-manifest comparison in `abhaile-diff`.
+- Acceptance: drift summary compares `target_path` + `sha256` and reports added/changed/removed files; prune candidates identified via 3-way comparison (desired vs applied vs live).
 - Constraints: read-only by default; destructive actions require explicit confirmation.
 - Dependencies: Apply CLI.
 
 #### Session Prompt (Safe systemd reload)
 
 - Phase/Task: Apply Pipeline / Safe systemd reload.
-- Required inputs: `<output>/state/manifest.json`, drift summary.
-- Outputs to produce: reload/restart logic inside `scripts/apply`.
-- Acceptance: only changed units/quadlets are restarted; unchanged services remain running.
+- Required inputs: `<output>/rendered/manifest.json` (`reload_actions` block), drift summary.
+- Outputs to produce: reload/restart logic inside `abhaile-apply` (`src/abhaile/apply/` module).
+- Acceptance: only changed units/quadlets are restarted; unchanged services remain running; `daemon-reload` runs before unit restarts.
 - Constraints: minimize disruption; log each restarted unit.
 - Dependencies: Apply CLI.
 
 #### Session Prompt (Host safety gate)
 
 - Phase/Task: Apply Pipeline / Host safety gate.
-- Required inputs: `config/mapping.yaml`, target host identity (hostname/SSH host key).
-- Outputs to produce: host identity validation logic inside `scripts/apply`.
-- Acceptance: apply aborts on hostname or host key mismatch.
+- Required inputs: `<output>/rendered/manifest.json` (`host` field), live `hostname` on target.
+- Outputs to produce: host identity validation logic inside `abhaile-apply` (`src/abhaile/apply/` module).
+- Acceptance: apply aborts if manifest `host` does not match live `hostname`.
 - Constraints: fail closed; no bypass without explicit flag.
 - Dependencies: Apply CLI.
 
 #### Session Prompt (Rollback strategy)
 
 - Phase/Task: Apply Pipeline / Rollback strategy.
-- Required inputs: host state file, `<output>/state/manifest.json`.
-- Outputs to produce: snapshot/rollback logic; document usage in `README.md`.
-- Acceptance: previous manifest and artifacts can be restored safely on host.
-- Constraints: rollback is explicit; no automatic destructive changes.
+- Required inputs: `<output>/state/manifest.previous.json`, `<output>/state/history/`.
+- Outputs to produce: rollback subcommand or flag in `abhaile-apply`; document usage in `README.md`.
+- Acceptance: previous manifest and rendered artifacts can be re-applied safely; rollback is explicit only.
+- Constraints: rollback is explicit; no automatic destructive changes; state history retained for last 10 applies.
 - Dependencies: Apply CLI.
 
 ### Phase: Secrets
@@ -494,41 +422,9 @@ This organization makes it easy to identify which artifacts require execution vs
 
 ### Phase: Validation and Testing
 
-**Status:** In progress
+**Status:** ✅ Complete
 
-| Status | Task | Description | Completion Criteria | Dependencies |
-| --- | --- | --- | --- | --- |
-| [x] | Config validation | Implement validation for IP uniqueness, VLAN sanity, and mapping integrity. | Validation fails on invalid config and passes on current. | Define config schema |
-| [-] | Render determinism | Add tests or checks for stable render output hashes. | Re-render yields identical manifests. | Manifest writer |
-| [-] | Unit and integration test suite | Comprehensive pytest suite covering utils, validation, renderers, and end-to-end flow. | 32 tests (25 unit + 7 integration) all passing; docs/TESTING.md. | Manifest writer |
-| [-] | Linting hooks | Add a basic lint/check workflow for YAML and templates. | Lint script runs locally without network access. | Define repo layout |
-
-#### Session Prompt (Config validation)
-
-- Phase/Task: Validation and Testing / Config validation.
-- Required inputs: `config/`, `docs/schema.md` if present.
-- Outputs to produce: `scripts/validate` checks for IP uniqueness, VLAN sanity, mapping integrity.
-- Acceptance: invalid config returns non-zero and prints actionable errors.
-- Constraints: offline; no secrets.
-- Dependencies: Define config schema.
-
-#### Session Prompt (Render determinism)
-
-- Phase/Task: Validation and Testing / Render determinism.
-- Required inputs: `scripts/render`, `<output>/rendered/`, `<output>/state/manifest.json`.
-- Outputs to produce: determinism check script or mode in `scripts/validate`.
-- Acceptance: rerun render produces identical manifest hashes for unchanged inputs.
-- Constraints: offline; no network access.
-- Dependencies: Manifest writer.
-
-#### Session Prompt (Linting hooks)
-
-- Phase/Task: Validation and Testing / Linting hooks.
-- Required inputs: `config/`, `scripts/`, `docs/schema.md`.
-- Outputs to produce: `scripts/lint` or `scripts/check`; update `README.md` with usage.
-- Acceptance: lint/check runs locally without network access and fails on malformed YAML/templates.
-- Constraints: no network access; no secrets.
-- Dependencies: Define repo layout.
+All validation (config/IP/VLAN/mapping), linting (pre-commit), and test suite (160 tests) implemented and passing.
 
 ### Phase: Ops Tooling
 
@@ -538,7 +434,7 @@ This organization makes it easy to identify which artifacts require execution vs
 | --- | --- | --- | --- | --- |
 | [ ] | Make targets | Add `make render`, `make apply`, `make validate`. | Targets call scripts and return non-zero on failure. | Renderer CLI |
 | [ ] | Host inventory view | Provide a command to list services per host from `config/mapping.yaml`. | Output shows host -> services mapping. | Renderer CLI |
-| [ ] | Diff tool | Provide `scripts/diff` to compare render vs host state. | Diff reports file-level differences. | Drift detection |
+| [ ] | Diff tool | Provide `abhaile-diff` to compare any two manifest files. | Diff reports added/changed/removed files with paths and hashes. | Drift detection |
 
 #### Session Prompt (Make targets)
 
@@ -561,10 +457,10 @@ This organization makes it easy to identify which artifacts require execution vs
 #### Session Prompt (Diff tool)
 
 - Phase/Task: Ops Tooling / Diff tool.
-- Required inputs: `<output>/state/manifest.json`, host state file, `scripts/apply`.
-- Outputs to produce: `scripts/diff` that compares rendered manifest with host state.
-- Acceptance: diff shows added/changed/removed files with paths and hashes.
-- Constraints: read-only; no secrets.
+- Required inputs: any two manifest JSON files (e.g., desired vs applied, applied vs history entry).
+- Outputs to produce: `abhaile-diff` console entrypoint in `src/abhaile/apply/` module.
+- Acceptance: diff shows added/changed/removed entries with `target_path` and `sha256`; accepts two manifest paths as positional arguments.
+- Constraints: read-only; no secrets; no host access required.
 - Dependencies: Drift detection.
 
 ### Phase: Documentation

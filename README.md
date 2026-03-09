@@ -91,7 +91,7 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 
 ## Repository Layout
 
-- `abhaile/` - Python package implementation (CLI, renderers, validation, DNS, apply planning)
+- `src/abhaile/` - Python package implementation (CLI, renderers, validation, DNS, apply planning)
 - `config/` - authoritative intent (source of truth)
   - `mapping.yaml` - service-to-host assignments
   - `network.yaml` - VLANs, addresses, DNS zones/records
@@ -101,7 +101,8 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 - `tests/` - unit and integration pytest suites
 - `docs/` - documentation and runbooks
   - `adr/` - architecture decision records for major changes
-- `scripts/` - path/config support assets (for example `paths.ini`)
+- `scripts/` - executable shell utilities/wrappers
+- `paths.ini` - project-wide tooling path configuration
 - `out/` - generated artifacts and state (disposable, not source of truth; see Environment Paths section for structure)
   - `rendered/` - ephemeral desired-state artifacts (overwritten on each render)
   - `state/` - persistent metadata (manifests, commit tracking)
@@ -132,7 +133,7 @@ This keeps common defaults (for example `system: false`) centralized while allow
 
 Abhaile is host-first in production and supports flexible paths for workstation/CI.
 
-All tooling reads path configuration from scripts/paths.ini (required).
+All tooling reads path configuration from repo-root paths.ini (required).
 
 ### Host Default
 
@@ -186,10 +187,10 @@ The `<host>` subdirectory avoids collisions when rendering multiple hosts into o
 
 Apply uses hash-based drift detection to compare desired state (manifest) against live system:
 
-1. **Render** produces desired-state artifacts in `<output>/rendered/` organized by type (system/software/users/services), and writes a manifest to `<output>/state/manifest.json`
-1. **Manifest** contains SHA256 hashes, sizes, permissions, and ownership for each file
-1. **Apply** compares manifest hashes against live filesystem to detect changes
-1. **Sync** copies changed/added files from `rendered/` to `/` and updates manifest
+1. **Render** produces desired-state artifacts in `<output>/rendered/` organized by type (system/software/users/services), and writes desired manifest `<output>/rendered/manifest.json`
+1. **Apply state** stores durable host reconciliation metadata in `<output>/state/`: current applied manifest `<output>/state/manifest.json`, previous applied manifest `<output>/state/manifest.previous.json`, and history archive `<output>/state/history/manifest-<timestamp>.json` (retained, bounded)
+1. **Apply** compares desired manifest and applied manifest against live filesystem to detect add/change/remove drift
+1. **Sync** copies changed/added files from `rendered/` to `/`, runs scoped reload actions, and then updates state manifests on success
 
 Artifacts are organized under `rendered/` by apply method:
 
