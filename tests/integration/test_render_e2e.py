@@ -6,8 +6,30 @@ from pathlib import Path
 import pytest
 
 from abhaile.renderers.manifest import build_manifest, write_manifest
+from abhaile.utils.artifact_collector import ArtifactCollector
 
 pytestmark = pytest.mark.integration
+
+
+def _collect_metadata_from_rendered(rendered_dir: Path) -> ArtifactCollector:
+    """Collect rendered files as generic artifacts for integration tests."""
+    collector = ArtifactCollector()
+
+    for file_path in sorted(rendered_dir.rglob("*")):
+        if not file_path.is_file() or file_path.is_symlink():
+            continue
+
+        render_path = file_path.relative_to(rendered_dir).as_posix()
+        collector.register_artifact(
+            render_path=render_path,
+            target_path=f"/{render_path}",
+            kind="service.config",
+            owner_ref="service:test",
+            content=file_path.read_bytes(),
+        )
+
+    collector.compute_hashes_and_sizes(rendered_dir)
+    return collector
 
 
 class TestRenderE2E:
@@ -27,7 +49,8 @@ class TestRenderE2E:
         (rendered_dir / "quadlet.container").write_text("[Container]\n")
 
         # Build and write manifest
-        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector = _collect_metadata_from_rendered(rendered_dir)
+        manifest = build_manifest("testhost", collector.get_metadata())
         manifest_path = rendered_dir / "manifest.json"
         write_manifest(manifest, manifest_path)
 
@@ -37,13 +60,14 @@ class TestRenderE2E:
             loaded = json.load(f)
 
         assert loaded["host"] == "testhost"
+        assert loaded["version"] == "1"
         assert "rendered_at" in loaded
         assert "entries" in loaded
         assert len(loaded["entries"]) == 2
 
-        # Verify entries are sorted by rel_path
-        rel_paths = [e["rel_path"] for e in loaded["entries"]]
-        assert rel_paths == sorted(rel_paths)
+        # Verify entries are sorted by render_path
+        render_paths = [e["render_path"] for e in loaded["entries"]]
+        assert render_paths == sorted(render_paths)
 
     def test_render_all_hosts_separate_manifests(self, tmp_repo_with_config, tmp_output):
         """Test rendering all hosts produces separate manifests per host."""
@@ -58,7 +82,8 @@ class TestRenderE2E:
             # Create sample host-specific files
             (rendered_dir / f"{host}-network.conf").write_text("# Config\n")
 
-            manifest = build_manifest(host, rendered_dir, target_root=Path("/"))
+            collector = _collect_metadata_from_rendered(rendered_dir)
+            manifest = build_manifest(host, collector.get_metadata())
             manifest_path = rendered_dir / "manifest.json"
             write_manifest(manifest, manifest_path)
 
@@ -87,7 +112,8 @@ class TestRenderE2E:
         rendered_dir = tmp_output / "rendered"
         rendered_dir.mkdir(parents=True)
 
-        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector = _collect_metadata_from_rendered(rendered_dir)
+        manifest = build_manifest("testhost", collector.get_metadata())
         manifest_path = rendered_dir / "manifest.json"
         write_manifest(manifest, manifest_path)
 
@@ -106,7 +132,8 @@ class TestRenderE2E:
         test_file.chmod(0o755)
 
         # Build manifest
-        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector = _collect_metadata_from_rendered(rendered_dir)
+        manifest = build_manifest("testhost", collector.get_metadata())
 
         # Verify hash is recorded
         entry = manifest["entries"][0]
@@ -126,7 +153,8 @@ class TestRenderE2E:
         test_file.write_text(content)
 
         # Build manifest
-        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector = _collect_metadata_from_rendered(rendered_dir)
+        manifest = build_manifest("testhost", collector.get_metadata())
 
         # Verify hash matches
         entry = manifest["entries"][0]
@@ -144,7 +172,8 @@ class TestRenderE2E:
         (rendered_dir / "systemd-networkd" / "networks" / "eth0.network").write_text("[Match]\n")
 
         # Build and write manifest
-        manifest = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector = _collect_metadata_from_rendered(rendered_dir)
+        manifest = build_manifest("testhost", collector.get_metadata())
         manifest_path = rendered_dir / "manifest.json"
         write_manifest(manifest, manifest_path)
 
@@ -165,10 +194,12 @@ class TestRenderE2E:
         (rendered_dir / "config2.yaml").write_text("config: 2\n")
 
         # Generate manifest twice; write outside rendered_dir to avoid polluting entries
-        manifest1 = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector1 = _collect_metadata_from_rendered(rendered_dir)
+        manifest1 = build_manifest("testhost", collector1.get_metadata())
         write_manifest(manifest1, tmp_output / "manifest1.json")
 
-        manifest2 = build_manifest("testhost", rendered_dir, target_root=Path("/"))
+        collector2 = _collect_metadata_from_rendered(rendered_dir)
+        manifest2 = build_manifest("testhost", collector2.get_metadata())
         write_manifest(manifest2, tmp_output / "manifest2.json")
 
         # Load both manifests and verify they're identical

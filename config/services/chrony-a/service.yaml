@@ -1,6 +1,8 @@
 name: chrony-a
 systemd:
   network: service-32
+apply:
+  restart_unit: chrony.service
 composition:
   config:
     - source:

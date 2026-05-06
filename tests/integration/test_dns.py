@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from abhaile.dns import render_dns
+from abhaile.dns.renderer import render_dns
 from abhaile.dns.records import collect_zone_records as _collect_zone_records
 from abhaile.dns.serial_validator import compute_content_hash as _compute_content_hash
 from abhaile.utils.config import read_yaml

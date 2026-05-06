@@ -131,7 +131,7 @@ Tests verify RenderError exceptions are raised for:
 
 Multiple test cases verify deterministic behavior:
 
-- Artifact ordering by rel_path
+- Artifact ordering by render_path
 - Consistent SHA256 hashes
 - Identical manifests from identical content
 

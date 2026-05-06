@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from abhaile.renderers.services import render_service_configs
+from abhaile.utils.artifact_collector import ArtifactCollector
 
 
 class TestRenderServiceConfigs:
@@ -198,7 +199,7 @@ composition:
         assert not output_dir.exists() or list(output_dir.iterdir()) == []
 
     def test_service_with_no_config_entries(self, tmp_path: Path, write_file: Any) -> None:
-        """Service with no config entries creates no output."""
+        """Service with no config or systemd entries creates no output."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
@@ -222,6 +223,38 @@ composition:
 
         # Service directory not created if no configs
         assert not (output_dir / "test-service").exists()
+
+    def test_service_with_only_systemd_entries_renders_output(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Service with only composition.systemd entries still renders artifacts."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output" / "services"
+
+        write_file(
+            config_root / "services" / "test-service" / "service.yaml",
+            """name: test-service
+composition:
+  systemd:
+    - source: test-service/systemd/example.service
+      destination: /etc/systemd/system/example.service
+      enable: true
+""",
+        )
+        write_file(
+            config_root / "services" / "test-service" / "systemd" / "example.service",
+            "[Unit]\nDescription=Example\n",
+        )
+
+        render_service_configs(
+            "phobos",
+            ["test-service"],
+            {},
+            config_root,
+            output_dir,
+        )
+
+        assert (output_dir / "test-service" / "etc/systemd/system/example.service").exists()
 
     def test_multiple_services_render_independently(self, tmp_path: Path, write_file: Any) -> None:
         """Multiple services render to separate directories."""
@@ -257,3 +290,306 @@ composition:
         # Both services should have independent output
         assert (output_dir / "service-a" / "etc/app/app.conf").read_text() == "service-a=true\n"
         assert (output_dir / "service-b" / "etc/app/app.conf").read_text() == "service-b=true\n"
+
+    def test_container_service_config_emits_restart_hints(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Container-backed service config entries should emit derived restart hints."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "blocky" / "service.yaml",
+            """name: blocky
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  container: {}
+  config:
+    - source: blocky/config/app.conf
+      destination: /srv/blocky/config.yml
+""",
+        )
+        write_file(
+            config_root / "services" / "blocky" / "config" / "app.conf",
+            "upstream: 1.1.1.1\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["blocky"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.config"]
+        assert len(artifacts) == 1
+        assert artifacts[0].apply_hints == {
+            "restart_unit": "blocky.service",
+            "rootless": False,
+        }
+
+    def test_host_daemon_service_config_emits_explicit_restart_hint(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Host-daemon services should use explicit apply.restart_unit hint."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "chrony-a" / "service.yaml",
+            """name: chrony-a
+systemd:
+  network: service-32
+apply:
+  restart_unit: chrony.service
+composition:
+  config:
+    - source: chrony-a/config/chrony.conf
+      destination: /etc/chrony/chrony.conf
+""",
+        )
+        write_file(
+            config_root / "services" / "chrony-a" / "config" / "chrony.conf",
+            "pool pool.ntp.org iburst\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["chrony-a"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.config"]
+        assert len(artifacts) == 1
+        assert artifacts[0].apply_hints == {"restart_unit": "chrony.service"}
+
+    def test_pod_service_config_emits_app_restart_hint(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Pod-backed service config entries should emit -app.service restart hint."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "authelia" / "service.yaml",
+            """name: authelia
+podman:
+  user: abhaile
+  network: ipvlan-l2
+  rootless: true
+composition:
+  pod: {}
+  config:
+    - source: authelia/config/config.yml
+      destination: /srv/authelia/config.yml
+""",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "config" / "config.yml",
+            "default_2fa_method: totp\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["authelia"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.config"]
+        assert len(artifacts) == 1
+        hints = artifacts[0].apply_hints
+        assert hints is not None
+        assert hints.get("restart_unit") == "authelia-app.service"
+        assert hints.get("rootless") is True
+
+    def test_static_data_service_config_emits_null_restart_unit(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Static-data-only service config entries should emit null restart_unit."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "static-certs" / "service.yaml",
+            """name: static-certs
+composition:
+  config:
+    - source: static-certs/config/cert.pem
+      destination: /etc/ssl/cert.pem
+""",
+        )
+        write_file(
+            config_root / "services" / "static-certs" / "config" / "cert.pem",
+            "-----BEGIN CERTIFICATE-----\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["static-certs"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.config"]
+        assert len(artifacts) == 1
+        hints = artifacts[0].apply_hints
+        assert hints is None or hints.get("restart_unit") is None
+
+    def test_service_directory_emits_owner_group_mode_hints(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Directory-only config entries should emit owner/group/mode apply hints."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "authelia" / "service.yaml",
+            """name: authelia
+podman:
+  user: abhaile
+  network: ipvlan-l2
+composition:
+  config:
+    - destination: /srv/authelia/config
+""",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["authelia"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.directory"]
+        assert len(artifacts) == 1
+        hints = artifacts[0].apply_hints
+        assert hints is not None
+        assert hints.get("owner") == "abhaile"
+        assert hints.get("group") == "abhaile"
+        assert hints.get("mode") == "0750"
+
+    def test_service_directory_authored_metadata_overrides_defaults(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Directory metadata authored on config entries overrides service defaults."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "authelia" / "service.yaml",
+            """name: authelia
+podman:
+  user: abhaile
+  network: ipvlan-l2
+composition:
+  config:
+    - destination: /srv/authelia/config
+      owner: root
+      group: root
+      mode: '0700'
+""",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["authelia"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.directory"]
+        assert len(artifacts) == 1
+        hints = artifacts[0].apply_hints
+        assert hints is not None
+        assert hints.get("owner") == "root"
+        assert hints.get("group") == "root"
+        assert hints.get("mode") == "0700"
+
+    def test_systemd_entries_emit_systemd_kinds_and_apply_hints(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """composition.systemd entries emit systemd artifact kinds and mapped hints."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "demo" / "service.yaml",
+            """name: demo
+composition:
+  systemd:
+    - source: demo/systemd/demo.path
+      destination: /etc/systemd/system/demo.path
+      enable: true
+      start: true
+    - source: demo/systemd/demo.service
+      destination: /etc/systemd/system/demo.service
+""",
+        )
+        write_file(
+            config_root / "services" / "demo" / "systemd" / "demo.path",
+            "[Path]\nPathExists=/tmp/demo\n",
+        )
+        write_file(
+            config_root / "services" / "demo" / "systemd" / "demo.service",
+            "[Service]\nType=oneshot\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["demo"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = sorted(
+            [a for a in collector.get_all_artifacts() if a.kind == "systemd.unit"],
+            key=lambda artifact: artifact.target_path,
+        )
+        assert len(artifacts) == 2
+        assert artifacts[0].owner_ref == "unit:demo.path"
+        assert artifacts[0].apply_hints == {
+            "enable_mode": "enable",
+            "activation_mode": "start",
+        }
+        assert artifacts[1].owner_ref == "unit:demo.service"
+        assert artifacts[1].apply_hints is None

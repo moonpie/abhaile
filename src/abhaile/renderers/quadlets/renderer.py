@@ -21,6 +21,7 @@ from abhaile.renderers.quadlets.volumes import (
     _quadlet_output_root,
     _render_named_volumes,
 )
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
 
@@ -31,6 +32,9 @@ def render_service_quadlets(
     network: Dict[str, Any],
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render quadlet files for container-based services.
 
@@ -40,6 +44,8 @@ def render_service_quadlets(
         network: Network configuration from network.yaml.
         config_root: Path to config/ directory.
         output_dir: Path to rendered services root (rendered/services).
+        collector: Optional artifact collector for metadata registration.
+        rendered_root: Rendered output root; required when collector is set.
 
     Raises:
         RenderError: If rendering fails or validation errors occur.
@@ -94,6 +100,8 @@ def render_service_quadlets(
                 config_root=config_root,
                 host_paths_by_user=host_paths_by_user,
                 used_vlans=used_vlans,
+                collector=collector,
+                rendered_root=rendered_root,
             )
             continue
 
@@ -118,7 +126,7 @@ def render_service_quadlets(
             service=service,
         )
 
-        volume_lines = _render_named_volumes(
+        volume_lines, volume_owner_refs = _render_named_volumes(
             service=service,
             container_def=container_def,
             user=user,
@@ -129,12 +137,22 @@ def render_service_quadlets(
             config_root=config_root,
             name_prefix=f"{service}-",
             shared_volume_is_global=False,
+            collector=collector,
+            rendered_root=rendered_root,
         )
         volume_lines.extend(_build_mounted_file_lines(container_def))
+
+        container_owner_requires = list(volume_owner_refs)
 
         if podman.get("network") == "ipvlan-l2":
             vlan = _lookup_service_vlan(service, network)
             used_vlans.add(vlan)
+            container_owner_requires.append(f"unit:{vlan}-network.service")
+
+        if image_filename is not None:
+            container_owner_requires.append(f"unit:{Path(image_filename).stem}-image.service")
+        if build_filename is not None:
+            container_owner_requires.append(f"unit:{Path(build_filename).stem}-build.service")
 
         _render_service_quadlet_files(
             service=service,
@@ -145,6 +163,10 @@ def render_service_quadlets(
             volume_lines=volume_lines,
             build_filename=build_filename,
             image_filename=image_filename,
+            output_root=output_root,
+            collector=collector,
+            rendered_root=rendered_root,
+            container_owner_requires=sorted(set(container_owner_requires)),
         )
 
     if used_vlans:
@@ -154,4 +176,6 @@ def render_service_quadlets(
             vlans=sorted(used_vlans),
             output_dir=networks_output_dir,
             config_root=config_root,
+            collector=collector,
+            rendered_root=rendered_root,
         )

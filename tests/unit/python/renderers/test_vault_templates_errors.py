@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from abhaile.renderers.vault_templates import render_vault_agent_configs
+from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
 from abhaile.utils.errors import RenderError
 
 

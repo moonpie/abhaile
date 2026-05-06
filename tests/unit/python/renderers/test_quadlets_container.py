@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
-from abhaile.renderers.quadlets import render_service_quadlets
+from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
+from abhaile.utils.artifact_collector import ArtifactCollector
 
 
 class TestRenderServiceQuadlets:
@@ -676,3 +677,82 @@ composition:
                 config_root,
                 output_dir,
             )
+
+    def test_registers_container_metadata(self, tmp_path: Path, write_file: Any) -> None:
+        """Container quadlet files are registered with correct kind and owner_ref."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "blocky" / "service.yaml",
+            """name: blocky
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  container:
+    named_volumes: []
+    mounted_files: []
+""",
+        )
+        write_file(
+            config_root / "services" / "blocky" / "quadlets" / "image.image",
+            "[Image]\nImage=blocky:latest\n",
+        )
+        write_file(
+            config_root / "services" / "blocky" / "quadlets" / "container.container.j2",
+            "[Container]\nImage={{ image }}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "network.network.j2",
+            "[Network]\nDriver=ipvlan\n",
+        )
+
+        network: dict[str, Any] = {
+            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "services": {"blocky": {"vlan": "services", "address": "172.20.20.10/32"}},
+        }
+
+        collector = ArtifactCollector()
+        render_service_quadlets(
+            "phobos",
+            ["blocky"],
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = {a.render_path: a for a in collector.get_all_artifacts()}
+        owners = collector.get_all_owners()
+
+        container_key = next(k for k in artifacts if k.endswith("blocky.container"))
+        container_art = artifacts[container_key]
+        assert container_art.kind == "quadlet.container"
+        assert container_art.owner_ref == "unit:blocky.service"
+        assert container_art.target_path == "/etc/containers/systemd/blocky.container"
+
+        image_key = next(k for k in artifacts if k.endswith("blocky.image"))
+        image_art = artifacts[image_key]
+        assert image_art.kind == "quadlet.image"
+        assert image_art.owner_ref == "unit:blocky-image.service"
+
+        network_key = next(k for k in artifacts if k.endswith("services.network"))
+        network_art = artifacts[network_key]
+        assert network_art.kind == "quadlet.network"
+        assert network_art.owner_ref == "unit:services-network.service"
+        assert network_art.apply_hints == {"rootless": False, "shared": True}
+        assert owners["unit:services-network.service"].apply_hints == {
+            "rootless": False,
+            "shared": True,
+        }
+        assert owners["unit:blocky.service"].requires == [
+            "unit:blocky-image.service",
+            "unit:services-network.service",
+        ]
+
+        assert "unit:blocky.service" in owners
+        assert "unit:blocky-image.service" in owners
+        assert "unit:services-network.service" in owners

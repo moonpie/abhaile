@@ -2,11 +2,13 @@ name: ddclient
 systemd:
   network: host
 composition:
-  config:
+  systemd:
     - source: ddclient/systemd/ddclient-conf.service
       destination: /etc/systemd/system/ddclient-conf.service
     - source: ddclient/systemd/ddclient-conf.path
       destination: /etc/systemd/system/ddclient-conf.path
+      enable: true
+      start: true
   vault_agent:
     templates:
       - source: ddclient/templates/ddclient.conf.ctmpl

@@ -9,6 +9,7 @@ from abhaile.renderers.config import (
     filter_config_entries_by_destination_prefix,
     render_config_entries,
 )
+from abhaile.utils.artifact_collector import ArtifactCollector
 
 
 def render_host_config(
@@ -18,6 +19,9 @@ def render_host_config(
     network: Dict[str, Any],
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render host configuration files (systemd units, resolved, etc).
 
@@ -60,6 +64,9 @@ def render_host_config(
         config_root / "hosts",
         output_dir,
         context,
+        collector=collector,
+        rendered_root=rendered_root,
+        default_owner_ref=f"host:{host}",
     )
 
     # Process host-specific (overrides/adds to common)
@@ -76,4 +83,7 @@ def render_host_config(
         config_root / "hosts",
         output_dir,
         context,
+        collector=collector,
+        rendered_root=rendered_root,
+        default_owner_ref=f"host:{host}",
     )

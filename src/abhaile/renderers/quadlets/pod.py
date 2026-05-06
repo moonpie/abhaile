@@ -6,8 +6,13 @@ from pathlib import Path
 from typing import Any, Dict, Set, Tuple
 
 from abhaile.renderers.quadlets.container import _validate_template_variables
-from abhaile.renderers.quadlets.helpers import _validate_trailing_newline
-from abhaile.renderers.quadlets.helpers import _discover_build_image_files
+from abhaile.renderers.quadlets.helpers import (
+    _discover_build_image_files,
+    _quadlet_kind_from_filename,
+    _quadlet_unit_name,
+    _register_quadlet_artifact,
+    _validate_trailing_newline,
+)
 from abhaile.renderers.quadlets.network import _lookup_service_vlan
 from abhaile.renderers.quadlets.volumes import (
     HostPathRegistry,
@@ -15,6 +20,7 @@ from abhaile.renderers.quadlets.volumes import (
     _quadlet_output_root,
     _render_named_volumes,
 )
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.composition import resolve_composition
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
@@ -66,6 +72,9 @@ def _render_pod_quadlets(
     config_root: Path,
     host_paths_by_user: HostPathRegistry,
     used_vlans: Set[str],
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render quadlet files for a pod service.
 
@@ -81,6 +90,8 @@ def _render_pod_quadlets(
         config_root: Path to config/ directory.
         host_paths_by_user: Tracking dict for host path validation.
         used_vlans: Set to track used VLANs.
+        collector: Optional artifact collector for metadata registration.
+        rendered_root: Rendered output root; required when collector is set.
 
     Raises:
         RenderError: If rendering fails.
@@ -97,6 +108,13 @@ def _render_pod_quadlets(
     output_root_relative = output_root.as_posix().lstrip("/")
     service_output_dir = output_dir / service / output_root_relative
     service_output_dir.mkdir(parents=True, exist_ok=True)
+
+    _is_rootless = user != "root"
+    _apply_hints: Dict[str, Any] = {"rootless": _is_rootless}
+    if _is_rootless:
+        _apply_hints["podman_user"] = user
+
+    pod_owner_requires: list[str] = []
 
     # Render pod quadlet
     pod_template_path = quadlets_dir / "pod.pod.j2"
@@ -122,11 +140,27 @@ def _render_pod_quadlets(
         encoding="utf-8",
         newline="\n",
     )
-
     # Track VLAN for network quadlet generation
     if podman.get("network") == "ipvlan-l2":
         vlan = _lookup_service_vlan(service, network)
         used_vlans.add(vlan)
+        pod_owner_requires.append(f"unit:{vlan}-network.service")
+
+    if collector is not None and rendered_root is not None:
+        _register_quadlet_artifact(
+            collector=collector,
+            rendered_root=rendered_root,
+            output_path=service_output_dir / pod_name,
+            target_path=str(output_root / pod_name),
+            kind=_quadlet_kind_from_filename(pod_name),
+            owner_ref=f"unit:{_quadlet_unit_name(pod_name)}",
+            content=pod_rendered,
+            apply_hints=_apply_hints,
+            owner_apply_hints=_apply_hints,
+            owner_requires=pod_owner_requires,
+        )
+
+    pod_owner_ref = f"unit:{_quadlet_unit_name(pod_name)}"
 
     # Render containers in the pod
     containers = pod_def.get("containers", []) or []
@@ -148,7 +182,7 @@ def _render_pod_quadlets(
             )
 
         # Render volumes for this container
-        volume_lines = _render_named_volumes(
+        volume_lines, volume_owner_refs = _render_named_volumes(
             service=service,
             container_name=container_name,
             container_def=container_def,
@@ -160,6 +194,8 @@ def _render_pod_quadlets(
             config_root=config_root,
             name_prefix=f"{service}-app-{container_name}-",
             shared_volume_is_global=True,
+            collector=collector,
+            rendered_root=rendered_root,
         )
         volume_lines.extend(_build_mounted_file_lines(container_def))
 
@@ -212,6 +248,25 @@ def _render_pod_quadlets(
             encoding="utf-8",
             newline="\n",
         )
+        if collector is not None and rendered_root is not None:
+            container_owner = f"unit:{_quadlet_unit_name(container_output_name)}"
+            container_owner_requires = [pod_owner_ref, *volume_owner_refs]
+            if image_filename is not None:
+                container_owner_requires.append(f"unit:{Path(image_filename).stem}-image.service")
+            if build_filename is not None:
+                container_owner_requires.append(f"unit:{Path(build_filename).stem}-build.service")
+            _register_quadlet_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=service_output_dir / container_output_name,
+                target_path=str(output_root / container_output_name),
+                kind=_quadlet_kind_from_filename(container_output_name),
+                owner_ref=container_owner,
+                content=container_rendered,
+                apply_hints=_apply_hints,
+                owner_apply_hints=_apply_hints,
+                owner_requires=sorted(set(container_owner_requires)),
+            )
 
         # Copy build and image files
         if build_path:
@@ -223,6 +278,18 @@ def _render_pod_quadlets(
             target = service_output_dir / build_filename
             content = build_path.read_text(encoding="utf-8")
             target.write_text(content, encoding="utf-8", newline="\n")
+            if collector is not None and rendered_root is not None:
+                _register_quadlet_artifact(
+                    collector=collector,
+                    rendered_root=rendered_root,
+                    output_path=target,
+                    target_path=str(output_root / build_filename),
+                    kind=_quadlet_kind_from_filename(build_filename),
+                    owner_ref=f"unit:{_quadlet_unit_name(build_filename)}",
+                    content=content,
+                    apply_hints=_apply_hints,
+                    owner_apply_hints=_apply_hints,
+                )
 
         if image_path:
             assert image_filename is not None
@@ -233,3 +300,15 @@ def _render_pod_quadlets(
             target = service_output_dir / image_filename
             content = image_path.read_text(encoding="utf-8")
             target.write_text(content, encoding="utf-8", newline="\n")
+            if collector is not None and rendered_root is not None:
+                _register_quadlet_artifact(
+                    collector=collector,
+                    rendered_root=rendered_root,
+                    output_path=target,
+                    target_path=str(output_root / image_filename),
+                    kind=_quadlet_kind_from_filename(image_filename),
+                    owner_ref=f"unit:{_quadlet_unit_name(image_filename)}",
+                    content=content,
+                    apply_hints=_apply_hints,
+                    owner_apply_hints=_apply_hints,
+                )

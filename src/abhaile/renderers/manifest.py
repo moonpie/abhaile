@@ -1,15 +1,17 @@
-"""Manifest generation: file hashing, deterministic inventory."""
+"""Manifest generation: deterministic serialization from collected metadata."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
+from abhaile.models.artifact import OwnerMetadata, RenderMetadata, RenderedArtifact
 from abhaile.utils.errors import RenderError
+
+MANIFEST_VERSION = "1"
 
 
 def sha256_file(path: Path) -> str:
@@ -28,61 +30,86 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _map_target_path(rel_path: str, target_root: Path) -> str:
-    """Map rendered relative path to live host target path."""
-    parts = Path(rel_path).parts
-    if not parts:
-        return target_root.as_posix()
-
-    if parts[0] == "system" and len(parts) > 1:
-        mapped = Path(*parts[1:])
-    elif parts[0] == "users" and len(parts) > 1:
-        mapped = Path(*parts[1:])
-    elif parts[0] == "services" and len(parts) > 2:
-        mapped = Path(*parts[2:])
-    else:
-        mapped = Path(*parts)
-
-    return (target_root / mapped).as_posix()
-
-
-def build_manifest(host: str, rendered_dir: Path, target_root: Path) -> Dict[str, Any]:
-    """Build manifest from rendered artifacts.
-
-    Manifest includes host identity, render timestamp, and file entries.
+def build_manifest(host: str, metadata: RenderMetadata) -> Dict[str, Any]:
+    """Build enriched manifest from collector metadata.
 
     Args:
         host: Hostname for manifest safety checks.
-        rendered_dir: Path to rendered output directory.
-        target_root: Live target root (typically /).
+        metadata: Collected render metadata with populated hashes/sizes.
 
     Returns:
-        Manifest dictionary with host, rendered_at, and entries list.
+        Manifest dictionary with version, host, rendered_at, entries, and owners.
     """
+    entries = _serialize_entries(metadata)
+    owners = _serialize_owners(metadata)
 
-    entries: List[Dict[str, Any]] = []
-    if rendered_dir.exists():
-        for root, _, files in os.walk(rendered_dir):
-            for name in files:
-                file_path = Path(root) / name
-                if file_path.is_symlink():
-                    continue
-                rel_path = file_path.relative_to(rendered_dir).as_posix()
-                target_path = _map_target_path(rel_path, target_root)
-                entries.append(
-                    {
-                        "rel_path": rel_path,
-                        "target_path": target_path,
-                        "sha256": sha256_file(file_path),
-                        "size": file_path.stat().st_size,
-                    }
-                )
-    entries.sort(key=lambda item: item["rel_path"])
-    return {
+    manifest: dict[str, Any] = {
+        "version": MANIFEST_VERSION,
         "host": host,
         "rendered_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "entries": entries,
     }
+    if owners:
+        manifest["owners"] = owners
+    return manifest
+
+
+def _serialize_entries(metadata: RenderMetadata) -> List[Dict[str, Any]]:
+    """Serialize artifact entries in deterministic render_path order."""
+    entries: list[dict[str, Any]] = []
+    artifacts: list[RenderedArtifact] = sorted(
+        metadata.artifacts.values(),
+        key=lambda artifact: artifact.render_path,
+    )
+
+    for artifact in artifacts:
+        if artifact.hash is None or artifact.size is None:
+            raise RenderError(
+                "Artifact metadata missing hash/size before manifest serialization: "
+                f"{artifact.render_path}"
+            )
+
+        entry: dict[str, Any] = {
+            "render_path": artifact.render_path,
+            "target_path": artifact.target_path,
+            "kind": artifact.kind,
+            "owner_ref": artifact.owner_ref,
+            "sha256": artifact.hash,
+            "size": artifact.size,
+        }
+
+        if artifact.contributor_ref:
+            entry["contributor_ref"] = artifact.contributor_ref
+        if artifact.apply_hints:
+            entry["apply_hints"] = artifact.apply_hints
+
+        entries.append(entry)
+
+    return entries
+
+
+def _serialize_owners(metadata: RenderMetadata) -> Dict[str, Dict[str, Any]]:
+    """Serialize owners in deterministic key order, omitting empty optional fields."""
+    serialized: dict[str, dict[str, Any]] = {}
+    owners: list[OwnerMetadata] = sorted(
+        metadata.owners.values(),
+        key=lambda owner: owner.name,
+    )
+
+    for owner in owners:
+        owner_entry: dict[str, Any] = {
+            "name": owner.name,
+        }
+        if owner.description:
+            owner_entry["description"] = owner.description
+        if owner.requires:
+            owner_entry["requires"] = sorted(set(owner.requires))
+        if owner.apply_hints:
+            owner_entry["apply_hints"] = owner.apply_hints
+
+        serialized[owner.name] = owner_entry
+
+    return serialized
 
 
 def write_manifest(manifest: Dict[str, Any], manifest_path: Path) -> None:

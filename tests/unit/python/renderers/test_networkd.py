@@ -11,6 +11,7 @@ from abhaile.renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
 )
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 
@@ -252,6 +253,104 @@ class TestRenderNetworkdConfig:
                 output_dir,
             )
 
+    def test_registers_iface_owner_dependencies(self, tmp_path: Path, write_file: Any) -> None:
+        """Networkd artifacts register iface owners with dotted-interface dependencies."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "hosts" / "phobos" / "networkd" / "10-enp0s31f6.100.network",
+            "[Match]\nName=enp0s31f6.100\n",
+        )
+
+        host_config = {
+            "composition": {
+                "config": [
+                    {
+                        "source": "phobos/networkd/10-enp0s31f6.100.network",
+                        "destination": "/etc/systemd/network/10-enp0s31f6.100.network",
+                    }
+                ]
+            }
+        }
+
+        render_networkd_config(
+            "phobos",
+            host_config,
+            {"composition": {"config": []}},
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=output_dir,
+        )
+
+        owners = collector.get_all_owners()
+        assert "iface:enp0s31f6.100" in owners
+        assert owners["iface:enp0s31f6.100"].requires == ["iface:enp0s31f6"]
+
+    def test_registers_ipvlan_iface_owner_dependencies(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Networkd artifacts register ipvlan owners with physical/vlan dependencies."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "hosts" / "phobos" / "networkd" / "20-ipvlan-l2.netdev",
+            "[NetDev]\nName=ipvlan-l2\nKind=ipvlan\n",
+        )
+        write_file(
+            config_root / "hosts" / "phobos" / "networkd" / "40-ipvlan-l2.100.netdev",
+            "[NetDev]\nName=ipvlan-l2.100\nKind=ipvlan\n",
+        )
+
+        host_config = {
+            "physical_device": "enp0s31f6",
+            "composition": {
+                "config": [
+                    {
+                        "source": "phobos/networkd/20-ipvlan-l2.netdev",
+                        "destination": "/etc/systemd/network/20-ipvlan-l2.netdev",
+                    },
+                    {
+                        "source": "phobos/networkd/40-ipvlan-l2.100.netdev",
+                        "destination": "/etc/systemd/network/40-ipvlan-l2.100.netdev",
+                    },
+                ]
+            },
+        }
+
+        network = {
+            "hosts": {
+                "phobos": {
+                    "interfaces": {
+                        "enp0s31f6": {"vlan": "services"},
+                        "enp0s31f6.100": {"vlan": "dmz"},
+                        "ipvlan-l2": {"vlan": "services"},
+                        "ipvlan-l2.100": {"vlan": "dmz"},
+                    }
+                }
+            }
+        }
+
+        render_networkd_config(
+            "phobos",
+            host_config,
+            {"composition": {"config": []}},
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=output_dir,
+        )
+
+        owners = collector.get_all_owners()
+        assert owners["iface:ipvlan-l2"].requires == ["iface:enp0s31f6"]
+        assert owners["iface:ipvlan-l2.100"].requires == ["iface:enp0s31f6.100"]
+
 
 class TestRenderNetworkdDropins:
     """Tests for render_networkd_dropins()."""
@@ -442,3 +541,45 @@ class TestRenderNetworkdDropins:
             config_root,
             output_dir,
         )
+
+    def test_dropin_owner_ref_uses_match_interface(self, tmp_path: Path, write_file: Any) -> None:
+        """Drop-in metadata uses iface owner from [Match] Name rather than filename stem."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "output"
+        output_dir = rendered_root / "etc/systemd/network"
+        collector = ArtifactCollector()
+
+        write_file(output_dir / "21-vlan.network", "[Match]\nName=vlan0\n")
+
+        dropin_dir = output_dir / "21-vlan.network.d"
+        dropin_dir.mkdir(parents=True, exist_ok=True)
+
+        write_file(
+            config_root / "_templates" / "hosts" / "service-addr.conf.j2",
+            "[Network]\nAddress={{ service_address }}\n",
+        )
+
+        write_file(
+            config_root / "services" / "caddy" / "service.yaml",
+            "name: caddy\npodman:\n  user: root\n  network: service-32\n",
+        )
+
+        network = {
+            "hosts": {"phobos": {"interfaces": {"vlan0": {"vlan": "services"}}}},
+            "services": {"caddy": {"vlan": "services", "address": "172.20.20.200/32"}},
+        }
+
+        render_networkd_dropins(
+            "phobos",
+            ["caddy"],
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = collector.get_artifacts_by_owner("iface:vlan0")
+        assert len(artifacts) == 1
+        assert artifacts[0].kind == "networkd.dropin"
+        assert artifacts[0].target_path == "/etc/systemd/network/21-vlan.network.d/200-caddy.conf"

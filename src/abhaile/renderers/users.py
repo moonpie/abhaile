@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Set
 
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
@@ -12,7 +13,14 @@ USER_SCALAR_FIELDS = ("uid", "system", "primary_group", "home", "shell", "gecos"
 USER_LIST_FIELDS = ("additional_groups", "ssh_authorized_keys")
 
 
-def render_users_artifacts(host: str, config_root: Path, output_dir: Path) -> None:
+def render_users_artifacts(
+    host: str,
+    config_root: Path,
+    output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
+) -> None:
     """Render sysusers and sudoers artifacts for a host."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -27,8 +35,47 @@ def render_users_artifacts(host: str, config_root: Path, output_dir: Path) -> No
     sudoers_path = output_dir / "etc" / "sudoers.d" / "abhaile"
 
     _write_sysusers_file(users, groups, sysusers_path)
+    _register_users_artifact(
+        collector=collector,
+        rendered_root=rendered_root,
+        output_path=sysusers_path,
+        target_path="/etc/sysusers.d/abhaile.conf",
+        kind="host.sysusers",
+        owner_ref=f"host-users:{host}",
+        content=sysusers_path.read_text(encoding="utf-8"),
+        owner_description=f"host user database for {host}",
+        apply_hints={
+            "owner_user": "root",
+            "owner_group": "root",
+            "mode": "0644",
+        },
+    )
+
     _write_sudoers_file(sudoers, sudoers_path)
-    _write_authorized_keys(users, output_dir)
+    _register_users_artifact(
+        collector=collector,
+        rendered_root=rendered_root,
+        output_path=sudoers_path,
+        target_path="/etc/sudoers.d/abhaile",
+        kind="host.sudoers",
+        owner_ref=f"host-sudoers:{host}",
+        content=sudoers_path.read_text(encoding="utf-8"),
+        owner_description=f"host sudo policy for {host}",
+        owner_requires=[f"host-users:{host}"],
+        apply_hints={
+            "owner_user": "root",
+            "owner_group": "root",
+            "mode": "0440",
+        },
+    )
+
+    _write_authorized_keys(
+        users,
+        output_dir,
+        host=host,
+        collector=collector,
+        rendered_root=rendered_root,
+    )
 
 
 def _merge_user_management(host: str, config_root: Path) -> Dict[str, Any]:
@@ -206,7 +253,14 @@ def _write_sudoers_file(sudoers: Dict[str, List[str]], destination: Path) -> Non
     destination.write_text("".join(lines), encoding="utf-8", newline="\n")
 
 
-def _write_authorized_keys(users: Dict[str, Dict[str, Any]], output_dir: Path) -> None:
+def _write_authorized_keys(
+    users: Dict[str, Dict[str, Any]],
+    output_dir: Path,
+    *,
+    host: str,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+) -> None:
     """Write authorized_keys files for users with SSH keys."""
     for user_name in sorted(users.keys()):
         user = users[user_name]
@@ -221,6 +275,24 @@ def _write_authorized_keys(users: Dict[str, Dict[str, Any]], output_dir: Path) -
         lines = ["# Managed by Abhaile. Do not edit.\n"]
         lines.extend(f"{key}\n" for key in keys)
         authorized_keys_path.write_text("".join(lines), encoding="utf-8", newline="\n")
+
+        _register_users_artifact(
+            collector=collector,
+            rendered_root=rendered_root,
+            output_path=authorized_keys_path,
+            target_path=f"{home.rstrip('/')}/.ssh/authorized_keys",
+            kind="host.authorized_keys",
+            owner_ref=f"principal:{user_name}",
+            content="".join(lines),
+            owner_description=f"authorized_keys for {user_name}",
+            owner_requires=[f"host-users:{host}"],
+            apply_hints={
+                "owner_user": user_name,
+                "owner_group": user.get("primary_group") or user_name,
+                "mode": "0600",
+                "ssh_dir_mode": "0700",
+            },
+        )
 
 
 def _walk_host_includes(
@@ -268,3 +340,39 @@ def _walk_host_includes(
     visited.add(host)
     ordered.append(host)
     return ordered
+
+
+def _register_users_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    output_path: Path,
+    target_path: str,
+    kind: str,
+    owner_ref: str,
+    content: str,
+    owner_description: str,
+    owner_requires: List[str] | None = None,
+    apply_hints: Dict[str, Any] | None = None,
+) -> None:
+    """Register user-management artifact and owner metadata when enabled."""
+    if collector is None or rendered_root is None:
+        return
+
+    render_path = output_path.relative_to(rendered_root).as_posix()
+    collector.register_artifact(
+        render_path=render_path,
+        target_path=target_path,
+        kind=kind,
+        owner_ref=owner_ref,
+        content=content,
+        replace=True,
+        apply_hints=apply_hints,
+    )
+
+    if owner_ref not in collector.get_all_owners():
+        collector.register_owner(
+            name=owner_ref,
+            description=owner_description,
+            requires=owner_requires or [],
+        )

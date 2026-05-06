@@ -7,11 +7,13 @@ from typing import Any, Dict, List
 
 from abhaile.renderers.vault_templates.copying import copy_vault_agent_templates
 from abhaile.renderers.vault_templates.discovery import (
+    VaultTemplateSpec,
     collect_vault_agent_template_specs,
     find_base_vault_agent_service,
     resolve_vault_agent_volume_paths,
 )
 from abhaile.utils.config import read_yaml
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.paths import normalize_service_prefixed_path
 from abhaile.utils.placeholders import resolve_placeholders
@@ -24,6 +26,9 @@ def render_vault_agent_configs(
     network: Dict[str, Any],
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render aggregated vault-agent configuration for the host.
 
@@ -69,8 +74,8 @@ def render_vault_agent_configs(
             f"Service '{base_service}' vault_agent.base missing source or destination"
         )
 
-    templates_host_root, templates_mount_root, out_mount_root = resolve_vault_agent_volume_paths(
-        base_service, service_data
+    templates_host_root, templates_mount_root, out_host_root, out_mount_root = (
+        resolve_vault_agent_volume_paths(base_service, service_data)
     )
 
     specs = collect_vault_agent_template_specs(host_services, services_root)
@@ -82,6 +87,17 @@ def render_vault_agent_configs(
         templates_mount_root,
         out_mount_root,
         base_service,
+        collector=collector,
+        rendered_root=rendered_root,
+    )
+    _ensure_vault_output_directories(
+        specs=specs,
+        out_host_root=out_host_root,
+        base_service=base_service,
+        service_data=service_data,
+        output_dir=output_dir,
+        collector=collector,
+        rendered_root=rendered_root,
     )
 
     _render_base_config(
@@ -92,6 +108,8 @@ def render_vault_agent_configs(
         network=network,
         services_root=services_root,
         output_dir=output_dir,
+        collector=collector,
+        rendered_root=rendered_root,
     )
 
 
@@ -103,6 +121,8 @@ def _render_base_config(
     network: Dict[str, Any],
     services_root: Path,
     output_dir: Path,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
 ) -> None:
     """Render the base vault-agent configuration file."""
     template_path = source.get("template")
@@ -140,3 +160,130 @@ def _render_base_config(
     output_path = output_dir / base_service / destination.lstrip("/")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8", newline="\n")
+    _register_vault_config_artifact(
+        collector=collector,
+        rendered_root=rendered_root,
+        output_path=output_path,
+        destination=destination,
+        content=rendered,
+    )
+
+
+def _register_vault_config_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    output_path: Path,
+    destination: str,
+    content: str,
+) -> None:
+    """Register vault-agent base config metadata when collection is enabled."""
+    if collector is None or rendered_root is None:
+        return
+
+    owner_ref = "service:vault-agent"
+    if owner_ref not in collector.get_all_owners():
+        collector.register_owner(
+            name=owner_ref,
+            description="vault-agent service",
+        )
+
+    collector.register_artifact(
+        render_path=output_path.relative_to(rendered_root).as_posix(),
+        target_path=destination,
+        kind="vault.config",
+        owner_ref=owner_ref,
+        content=content,
+        replace=True,
+        apply_hints={
+            "write_order": "after-templates",
+            "restart_mode": "restart",
+            "rootless": True,
+            "podman_user": "abhaile",
+        },
+    )
+
+
+def _ensure_vault_output_directories(
+    *,
+    specs: List[VaultTemplateSpec],
+    out_host_root: str,
+    base_service: str,
+    service_data: Dict[str, Any],
+    output_dir: Path,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+) -> None:
+    """Ensure runtime output parent directories are rendered and tracked for apply."""
+    directories: set[str] = {str(Path(out_host_root).as_posix())}
+
+    for spec in specs:
+        runtime_target = Path(_join_host_path(out_host_root, spec.out))
+        directories.add(runtime_target.parent.as_posix())
+
+    owner, group = _vault_runtime_owner_group(service_data)
+    for directory in sorted(directories):
+        output_path = output_dir / base_service / directory.lstrip("/")
+        output_path.mkdir(parents=True, exist_ok=True)
+        _register_vault_output_directory_artifact(
+            collector=collector,
+            rendered_root=rendered_root,
+            output_path=output_path,
+            destination=directory,
+            owner=owner,
+            group=group,
+        )
+
+
+def _register_vault_output_directory_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    output_path: Path,
+    destination: str,
+    owner: str,
+    group: str,
+) -> None:
+    """Register vault runtime output directory metadata when collection is enabled."""
+    if collector is None or rendered_root is None:
+        return
+
+    owner_ref = "service:vault-agent"
+    if owner_ref not in collector.get_all_owners():
+        collector.register_owner(
+            name=owner_ref,
+            description="vault-agent service",
+        )
+
+    collector.register_artifact(
+        render_path=output_path.relative_to(rendered_root).as_posix(),
+        target_path=destination,
+        kind="service.directory",
+        owner_ref=owner_ref,
+        content="",
+        is_directory=True,
+        replace=True,
+        apply_hints={
+            "owner": owner,
+            "group": group,
+            "mode": "0750",
+        },
+    )
+
+
+def _vault_runtime_owner_group(service_data: Dict[str, Any]) -> tuple[str, str]:
+    """Resolve host runtime owner/group for vault output directories."""
+    podman = service_data.get("podman")
+    owner = "root"
+    if isinstance(podman, dict):
+        podman_user = podman.get("user")
+        if isinstance(podman_user, str) and podman_user:
+            owner = podman_user
+
+    group = owner if owner != "root" else "root"
+    return owner, group
+
+
+def _join_host_path(root: str, path: str) -> str:
+    """Join an absolute host root path with a possibly rooted relative path."""
+    return f"{root.rstrip('/')}/{path.lstrip('/')}"

@@ -5,8 +5,8 @@ from pathlib import Path
 import pytest
 
 from abhaile.renderers.ingress import render_ingress_configs
-from abhaile.renderers.quadlets import render_service_quadlets
-from abhaile.renderers.vault_templates import render_vault_agent_configs
+from abhaile.renderers.quadlets.renderer import render_service_quadlets
+from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
 from abhaile.utils.config import read_yaml
 
 pytestmark = pytest.mark.integration

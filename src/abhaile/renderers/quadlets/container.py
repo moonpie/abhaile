@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from abhaile.renderers.quadlets.helpers import _validate_trailing_newline
+from abhaile.renderers.quadlets.helpers import (
+    _quadlet_kind_from_filename,
+    _quadlet_unit_name,
+    _register_quadlet_artifact,
+    _validate_trailing_newline,
+)
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.composition import resolve_composition
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
@@ -100,9 +106,20 @@ def _render_service_quadlet_files(
     volume_lines: List[str],
     build_filename: str | None,
     image_filename: str | None,
+    *,
+    output_root: Path | None = None,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
+    container_owner_requires: List[str] | None = None,
 ) -> None:
     """Render container quadlet files for a service into the output directory."""
     jinja_env = create_jinja_env(quadlets_dir)
+    is_rootless = bool(output_root and not output_root.as_posix().startswith("/etc"))
+    apply_hints: Dict[str, Any] = {"rootless": is_rootless}
+    if is_rootless and output_root is not None:
+        output_root_parts = output_root.as_posix().split("/")
+        if len(output_root_parts) > 2:
+            apply_hints["podman_user"] = output_root_parts[2]
 
     for source_path in sorted(quadlets_dir.rglob("*")):
         if source_path.is_dir():
@@ -144,24 +161,76 @@ def _render_service_quadlet_files(
                 image=image_filename,
                 build=build_filename,
             )
-            (output_dir / f"{service}.container").write_text(
-                rendered, encoding="utf-8", newline="\n"
-            )
+            container_filename = f"{service}.container"
+            container_path = output_dir / container_filename
+            container_path.write_text(rendered, encoding="utf-8", newline="\n")
+            if collector is not None and rendered_root is not None and output_root is not None:
+                _register_quadlet_artifact(
+                    collector=collector,
+                    rendered_root=rendered_root,
+                    output_path=container_path,
+                    target_path=str(output_root / container_filename),
+                    kind=_quadlet_kind_from_filename(container_filename),
+                    owner_ref=f"unit:{_quadlet_unit_name(container_filename)}",
+                    content=rendered,
+                    apply_hints=apply_hints,
+                    owner_apply_hints=apply_hints,
+                    owner_requires=container_owner_requires,
+                )
             continue
 
         if source_path.name == "image.image":
-            target = output_dir / f"{service}.image"
+            image_out_name = f"{service}.image"
+            target = output_dir / image_out_name
             content = source_path.read_text(encoding="utf-8")
             target.write_text(content, encoding="utf-8", newline="\n")
+            if collector is not None and rendered_root is not None and output_root is not None:
+                _register_quadlet_artifact(
+                    collector=collector,
+                    rendered_root=rendered_root,
+                    output_path=target,
+                    target_path=str(output_root / image_out_name),
+                    kind=_quadlet_kind_from_filename(image_out_name),
+                    owner_ref=f"unit:{_quadlet_unit_name(image_out_name)}",
+                    content=content,
+                    apply_hints=apply_hints,
+                    owner_apply_hints=apply_hints,
+                )
             continue
 
         if source_path.name == "build.build":
-            target = output_dir / f"{service}.build"
+            build_out_name = f"{service}.build"
+            target = output_dir / build_out_name
             content = source_path.read_text(encoding="utf-8")
             target.write_text(content, encoding="utf-8", newline="\n")
+            if collector is not None and rendered_root is not None and output_root is not None:
+                _register_quadlet_artifact(
+                    collector=collector,
+                    rendered_root=rendered_root,
+                    output_path=target,
+                    target_path=str(output_root / build_out_name),
+                    kind=_quadlet_kind_from_filename(build_out_name),
+                    owner_ref=f"unit:{_quadlet_unit_name(build_out_name)}",
+                    content=content,
+                    apply_hints=apply_hints,
+                    owner_apply_hints=apply_hints,
+                )
             continue
 
         # Copy any other static quadlet files as-is
         target = output_dir / source_path.name
         content = source_path.read_text(encoding="utf-8")
         target.write_text(content, encoding="utf-8", newline="\n")
+        if collector is not None and rendered_root is not None and output_root is not None:
+            out_name = source_path.name
+            _register_quadlet_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=target,
+                target_path=str(output_root / out_name),
+                kind=_quadlet_kind_from_filename(out_name),
+                owner_ref=f"unit:{_quadlet_unit_name(out_name)}",
+                content=content,
+                apply_hints=apply_hints,
+                owner_apply_hints=apply_hints,
+            )

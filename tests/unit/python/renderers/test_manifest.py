@@ -1,119 +1,133 @@
-"""Tests for scripts/lib/python/renderers modules."""
+"""Tests for metadata-driven manifest generation and writing."""
 
 import json
 from pathlib import Path
 
-from abhaile.renderers.manifest import build_manifest, write_manifest
+import pytest
+
+from abhaile.renderers.manifest import MANIFEST_VERSION, build_manifest, write_manifest
+from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.utils.errors import RenderError
 
 
 class TestBuildManifest:
     """Tests for manifest generation."""
 
-    def test_empty_rendered_dir(self, tmp_path):
-        """Test manifest for empty rendered directory."""
-        rendered_dir = tmp_path / "rendered"
-        rendered_dir.mkdir()
-        target_root = Path("/")
+    def test_empty_metadata(self) -> None:
+        """Manifest for empty metadata contains no entries/owners."""
+        collector = ArtifactCollector()
 
-        manifest = build_manifest("testhost", rendered_dir, target_root)
+        manifest = build_manifest("testhost", collector.get_metadata())
 
+        assert manifest["version"] == MANIFEST_VERSION
         assert manifest["host"] == "testhost"
         assert "rendered_at" in manifest
         assert manifest["entries"] == []
+        assert "owners" not in manifest
 
-    def test_manifest_with_files(self, tmp_path):
-        """Test manifest generation with files."""
+    def test_manifest_with_entries_and_owners(self, tmp_path: Path) -> None:
+        """Manifest includes enriched entry fields and top-level owners."""
         rendered_dir = tmp_path / "rendered"
-        rendered_dir.mkdir()
+        rendered_dir.mkdir(parents=True)
 
-        # Create some test files
-        (rendered_dir / "etc").mkdir()
-        (rendered_dir / "etc" / "config.txt").write_text("content1")
-        (rendered_dir / "var").mkdir()
-        (rendered_dir / "var" / "data.json").write_text("content2")
+        source_a = rendered_dir / "system" / "etc" / "a.conf"
+        source_a.parent.mkdir(parents=True, exist_ok=True)
+        source_a.write_text("a=1\n")
 
-        target_root = Path("/")
-        manifest = build_manifest("testhost", rendered_dir, target_root)
+        source_b = rendered_dir / "services" / "demo" / "etc" / "b.conf"
+        source_b.parent.mkdir(parents=True, exist_ok=True)
+        source_b.write_text("b=2\n")
 
-        assert len(manifest["entries"]) == 2
-        # Check deterministic ordering by rel_path
-        rel_paths = [e["rel_path"] for e in manifest["entries"]]
-        assert rel_paths == sorted(rel_paths)
+        collector = ArtifactCollector()
+        collector.register_artifact(
+            render_path="services/demo/etc/b.conf",
+            target_path="/etc/demo/b.conf",
+            kind="service.config",
+            owner_ref="service:demo",
+            content=source_b.read_bytes(),
+            contributor_ref="service:base",
+            apply_hints={"restart_mode": "try-restart"},
+        )
+        collector.register_artifact(
+            render_path="system/etc/a.conf",
+            target_path="/etc/a.conf",
+            kind="systemd.unit",
+            owner_ref="unit:a.service",
+            content=source_a.read_bytes(),
+        )
+        collector.register_owner(
+            name="service:demo",
+            description="Demo service owner",
+            requires=["unit:network-online.target", "unit:network-online.target"],
+            apply_hints={"restart_mode": "try-restart"},
+        )
+        collector.compute_hashes_and_sizes(rendered_dir)
 
-    def test_manifest_target_path(self, tmp_path):
-        """Test that target_path is correct."""
+        manifest = build_manifest("testhost", collector.get_metadata())
+
+        assert manifest["version"] == MANIFEST_VERSION
+        assert [entry["render_path"] for entry in manifest["entries"]] == [
+            "services/demo/etc/b.conf",
+            "system/etc/a.conf",
+        ]
+
+        first = manifest["entries"][0]
+        assert first["kind"] == "service.config"
+        assert first["owner_ref"] == "service:demo"
+        assert first["contributor_ref"] == "service:base"
+        assert first["apply_hints"] == {"restart_mode": "try-restart"}
+        assert len(first["sha256"]) == 64
+
+        owners = manifest["owners"]
+        assert owners["service:demo"]["name"] == "service:demo"
+        assert owners["service:demo"]["description"] == "Demo service owner"
+        assert owners["service:demo"]["requires"] == ["unit:network-online.target"]
+        assert owners["service:demo"]["apply_hints"] == {"restart_mode": "try-restart"}
+
+    def test_manifest_omits_optional_empty_fields(self, tmp_path: Path) -> None:
+        """Optional fields are omitted when unset or empty."""
         rendered_dir = tmp_path / "rendered"
-        rendered_dir.mkdir()
-        (rendered_dir / "etc").mkdir()
-        (rendered_dir / "etc" / "config").write_text("test")
+        rendered_dir.mkdir(parents=True)
+        source = rendered_dir / "system" / "etc" / "noop.conf"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("noop=1\n")
 
-        target_root = Path("/")
-        manifest = build_manifest("testhost", rendered_dir, target_root)
+        collector = ArtifactCollector()
+        collector.register_artifact(
+            render_path="system/etc/noop.conf",
+            target_path="/etc/noop.conf",
+            kind="service.config",
+            owner_ref="service:noop",
+            content=source.read_bytes(),
+        )
+        collector.compute_hashes_and_sizes(rendered_dir)
+
+        manifest = build_manifest("testhost", collector.get_metadata())
 
         entry = manifest["entries"][0]
-        assert entry["rel_path"] == "etc/config"
-        assert entry["target_path"] == "/etc/config"
+        assert "contributor_ref" not in entry
+        assert "apply_hints" not in entry
+        assert "owners" not in manifest
 
-    def test_manifest_target_path_from_rendered_layout(self, tmp_path):
-        """Test target path mapping from rendered layout prefixes."""
+    def test_manifest_requires_hashes_computed(self, tmp_path: Path) -> None:
+        """Manifest serialization fails closed when hashes are not computed."""
         rendered_dir = tmp_path / "rendered"
-        rendered_dir.mkdir()
+        rendered_dir.mkdir(parents=True)
+        source = rendered_dir / "system" / "etc" / "app.conf"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("a=1\n")
 
-        (rendered_dir / "system" / "etc").mkdir(parents=True)
-        (rendered_dir / "system" / "etc" / "example.conf").write_text("a")
+        collector = ArtifactCollector()
+        collector.register_artifact(
+            render_path="system/etc/app.conf",
+            target_path="/etc/app.conf",
+            kind="service.config",
+            owner_ref="service:app",
+            content=source.read_bytes(),
+        )
 
-        (rendered_dir / "users" / "etc").mkdir(parents=True)
-        (rendered_dir / "users" / "etc" / "sysusers.d").mkdir(parents=True)
-        (rendered_dir / "users" / "etc" / "sysusers.d" / "abhaile.conf").write_text("b")
-
-        (rendered_dir / "services" / "caddy-dmz" / "etc").mkdir(parents=True)
-        (rendered_dir / "services" / "caddy-dmz" / "etc" / "Caddyfile").write_text("c")
-
-        manifest = build_manifest("testhost", rendered_dir, Path("/"))
-        by_rel = {entry["rel_path"]: entry["target_path"] for entry in manifest["entries"]}
-
-        assert by_rel["system/etc/example.conf"] == "/etc/example.conf"
-        assert by_rel["users/etc/sysusers.d/abhaile.conf"] == "/etc/sysusers.d/abhaile.conf"
-        assert by_rel["services/caddy-dmz/etc/Caddyfile"] == "/etc/Caddyfile"
-
-    def test_manifest_file_metadata(self, tmp_path):
-        """Test that manifest includes correct file metadata."""
-        rendered_dir = tmp_path / "rendered"
-        rendered_dir.mkdir()
-        test_file = rendered_dir / "test.txt"
-        test_file.write_text("test content")
-
-        target_root = Path("/")
-        manifest = build_manifest("testhost", rendered_dir, target_root)
-
-        entry = manifest["entries"][0]
-        assert "rel_path" in entry
-        assert entry["size"] == len("test content")
-        assert "sha256" in entry
-        assert len(entry["sha256"]) == 64  # SHA256 hex is 64 chars
-
-    def test_manifest_determinism(self, tmp_path):
-        """Test that same input produces same manifest."""
-        rendered_dir1 = tmp_path / "rendered1"
-        rendered_dir1.mkdir()
-        (rendered_dir1 / "a.txt").write_text("content")
-        (rendered_dir1 / "b.txt").write_text("content")
-
-        rendered_dir2 = tmp_path / "rendered2"
-        rendered_dir2.mkdir()
-        (rendered_dir2 / "b.txt").write_text("content")
-        (rendered_dir2 / "a.txt").write_text("content")
-
-        target_root = Path("/")
-        manifest1 = build_manifest("testhost", rendered_dir1, target_root)
-        manifest2 = build_manifest("testhost", rendered_dir2, target_root)
-
-        # Same files in different order should produce same entry order
-        assert len(manifest1["entries"]) == len(manifest2["entries"])
-        for e1, e2 in zip(manifest1["entries"], manifest2["entries"]):
-            assert e1["rel_path"] == e2["rel_path"]
-            assert e1["target_path"] == e2["target_path"]
-            assert e1["sha256"] == e2["sha256"]
+        with pytest.raises(RenderError):
+            build_manifest("testhost", collector.get_metadata())
 
 
 class TestWriteManifest:
@@ -122,12 +136,15 @@ class TestWriteManifest:
     def test_write_manifest_success(self, tmp_path):
         """Test successful manifest write."""
         manifest = {
+            "version": "1",
             "host": "testhost",
             "rendered_at": "2026-03-11T00:00:00Z",
             "entries": [
                 {
-                    "rel_path": "etc/config",
+                    "render_path": "etc/config",
                     "target_path": "/etc/config",
+                    "kind": "service.config",
+                    "owner_ref": "service:test",
                     "sha256": "abc123",
                     "size": 100,
                 }
@@ -145,7 +162,12 @@ class TestWriteManifest:
 
     def test_write_manifest_parent_creation(self, tmp_path):
         """Test that parent directories are created if needed."""
-        manifest = {"host": "testhost", "rendered_at": "2026-03-11T00:00:00Z", "entries": []}
+        manifest = {
+            "version": "1",
+            "host": "testhost",
+            "rendered_at": "2026-03-11T00:00:00Z",
+            "entries": [],
+        }
         manifest_path = tmp_path / "deep" / "nested" / "path" / "manifest.json"
 
         # Parent dirs don't exist yet
@@ -159,12 +181,15 @@ class TestWriteManifest:
     def test_write_manifest_formatting(self, tmp_path):
         """Test that manifest JSON is properly formatted."""
         manifest = {
+            "version": "1",
             "host": "testhost",
             "rendered_at": "2026-03-11T00:00:00Z",
             "entries": [
                 {
-                    "rel_path": "etc/config",
+                    "render_path": "etc/config",
                     "target_path": "/etc/config",
+                    "kind": "service.config",
+                    "owner_ref": "service:test",
                     "sha256": "abc123",
                     "size": 100,
                 }

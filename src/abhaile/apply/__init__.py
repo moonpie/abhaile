@@ -1,1 +1,1 @@
-"""Apply pipeline: drift detection, deployment, safety gates, rollback."""
+"""Apply-time mutation helpers and execution primitives."""

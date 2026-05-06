@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""CLI entry point for Abhaile rendering."""
+"""CLI entrypoint for abhaile-render."""
 
 from __future__ import annotations
 
@@ -11,33 +10,32 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from abhaile.utils.errors import RenderError
-from abhaile.utils.paths import get_repo_root, load_paths, resolve_output_root
-from abhaile.utils.config import clear_config_cache, read_json, read_yaml_mapping
-from abhaile.validation.schema import validate_schema
-from abhaile.validation.network import validate_network_sanity, validate_host_physical_device
-from abhaile.validation.users import validate_user_management_ids
-from abhaile.validation.dns import validate_dns_serials
-from abhaile.validation.services import (
-    parse_mapping,
-    ensure_service_definitions,
-    validate_service_names,
-    get_all_services_in_order,
-)
-from abhaile.renderers.manifest import build_manifest, write_manifest
+from abhaile.cli.common import configure_logging
+from abhaile.dns.renderer import render_dns
+from abhaile.models.config import MappingConfig, NetworkConfig, ServiceConfig
 from abhaile.renderers.host import render_host_config
+from abhaile.renderers.ingress import render_ingress_configs
+from abhaile.renderers.manifest import build_manifest, write_manifest
+from abhaile.renderers.networkd import render_networkd_config, render_networkd_dropins
+from abhaile.renderers.quadlets.renderer import render_service_quadlets
+from abhaile.renderers.services import render_service_configs
 from abhaile.renderers.software import render_software_artifacts
 from abhaile.renderers.users import render_users_artifacts
-from abhaile.renderers.services import render_service_configs
-from abhaile.renderers.quadlets import render_service_quadlets
-from abhaile.renderers.ingress import render_ingress_configs
-from abhaile.renderers.vault_templates import render_vault_agent_configs
-from abhaile.dns import render_dns
-from abhaile.renderers.networkd import (
-    render_networkd_config,
-    render_networkd_dropins,
+from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
+from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.utils.config import clear_config_cache, read_json, read_yaml_mapping
+from abhaile.utils.errors import PipelineError, RenderError
+from abhaile.utils.paths import get_repo_root, load_paths, resolve_output_root
+from abhaile.validation.dns import validate_dns_serials
+from abhaile.validation.network import validate_host_physical_device, validate_network_sanity
+from abhaile.validation.schema import validate_schema
+from abhaile.validation.services import (
+    ensure_service_definitions,
+    get_all_services_in_order,
+    parse_mapping,
+    validate_service_names,
 )
-from abhaile.models.config import MappingConfig, NetworkConfig, ServiceConfig
+from abhaile.validation.users import validate_user_management_ids
 
 LOG = logging.getLogger(__name__)
 
@@ -227,9 +225,8 @@ def render_host(
     config_root = repo_root / paths["config_root"]
 
     host_config, common_config = _load_host_configs(host, config_root, paths)
-    system_dir, software_dir, users_dir, services_output_dir = _prepare_host_artifact_dirs(
-        rendered_dir, paths
-    )
+    collector = ArtifactCollector()
+    system_dir, software_dir, services_output_dir = _prepare_host_artifact_dirs(rendered_dir, paths)
 
     _render_host_system(
         host,
@@ -238,11 +235,19 @@ def render_host(
         network,
         config_root,
         system_dir,
+        rendered_dir,
+        collector,
         host_services.get(host, []),
     )
 
     _render_host_software(host, config_root, software_dir)
-    _render_host_users(host, config_root, users_dir)
+    _render_host_users(
+        host,
+        config_root,
+        system_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
+    )
 
     all_services = get_all_services_in_order(cast(dict[str, Any], mapping))
     _render_host_services(
@@ -253,9 +258,10 @@ def render_host(
         config_root,
         services_output_dir,
         rendered_dir,
+        collector,
     )
 
-    manifest_path = _write_manifest(host, rendered_dir, paths)
+    manifest_path = _write_manifest(host, rendered_dir, collector)
 
     # Validate DNS serials after rendering so artifacts exist for troubleshooting
     validate_dns_serials(cast(dict[str, Any], network), all_services, config_root=config_root)
@@ -287,7 +293,7 @@ def _load_host_configs(host: str, config_root: Path, paths: dict[str, str]) -> t
 
 def _prepare_host_artifact_dirs(
     rendered_dir: Path, paths: dict[str, str]
-) -> tuple[Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path]:
     """Create system, software, and services output directories for a host."""
     system_dir = rendered_dir / paths["system_dir_name"]
     system_dir.mkdir(parents=True, exist_ok=True)
@@ -295,13 +301,10 @@ def _prepare_host_artifact_dirs(
     software_dir = rendered_dir / paths["software_dir_name"]
     software_dir.mkdir(parents=True, exist_ok=True)
 
-    users_dir = rendered_dir / paths["users_dir_name"]
-    users_dir.mkdir(parents=True, exist_ok=True)
-
     services_output_dir = rendered_dir / paths["services_dir_name"]
     services_output_dir.mkdir(parents=True, exist_ok=True)
 
-    return system_dir, software_dir, users_dir, services_output_dir
+    return system_dir, software_dir, services_output_dir
 
 
 def _render_host_software(host: str, config_root: Path, software_dir: Path) -> None:
@@ -309,9 +312,22 @@ def _render_host_software(host: str, config_root: Path, software_dir: Path) -> N
     render_software_artifacts(host, config_root, software_dir)
 
 
-def _render_host_users(host: str, config_root: Path, users_dir: Path) -> None:
-    """Render user management artifacts for a host."""
-    render_users_artifacts(host, config_root, users_dir)
+def _render_host_users(
+    host: str,
+    config_root: Path,
+    system_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
+) -> None:
+    """Render user management artifacts for a host under system/ layout."""
+    render_users_artifacts(
+        host,
+        config_root,
+        system_dir,
+        collector=collector,
+        rendered_root=rendered_root,
+    )
 
 
 def _render_host_system(
@@ -321,6 +337,8 @@ def _render_host_system(
     network: NetworkConfig,
     config_root: Path,
     system_dir: Path,
+    rendered_dir: Path,
+    collector: ArtifactCollector,
     services: list[str],
 ) -> None:
     """Render system configuration artifacts for a host."""
@@ -331,6 +349,8 @@ def _render_host_system(
         cast(dict[str, Any], network),
         config_root,
         system_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
     )
     render_networkd_config(
         host,
@@ -339,6 +359,8 @@ def _render_host_system(
         cast(dict[str, Any], network),
         config_root,
         system_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
     )
     render_networkd_dropins(
         host,
@@ -346,6 +368,8 @@ def _render_host_system(
         cast(dict[str, Any], network),
         config_root,
         system_dir / "etc/systemd/network",
+        collector=collector,
+        rendered_root=rendered_dir,
     )
 
 
@@ -357,6 +381,7 @@ def _render_host_services(
     config_root: Path,
     services_output_dir: Path,
     rendered_dir: Path,
+    collector: ArtifactCollector,
 ) -> None:
     """Render service, ingress, vault, and DNS artifacts for a host."""
     render_service_configs(
@@ -365,6 +390,8 @@ def _render_host_services(
         cast(dict[str, Any], network),
         config_root,
         services_output_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
     )
     render_service_quadlets(
         host,
@@ -372,22 +399,46 @@ def _render_host_services(
         cast(dict[str, Any], network),
         config_root,
         services_output_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
     )
-    render_ingress_configs(host, services, all_services, config_root, services_output_dir)
+    render_ingress_configs(
+        host,
+        services,
+        all_services,
+        config_root,
+        services_output_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
+    )
     render_vault_agent_configs(
         host,
         services,
         cast(dict[str, Any], network),
         config_root,
         services_output_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
     )
-    render_dns(cast(dict[str, Any], network), rendered_dir, services, all_services, config_root)
+    render_dns(
+        cast(dict[str, Any], network),
+        rendered_dir,
+        services,
+        all_services,
+        config_root,
+        collector=collector,
+        rendered_root=rendered_dir,
+    )
 
 
-def _write_manifest(host: str, rendered_dir: Path, paths: dict[str, str]) -> Path:
+def _write_manifest(
+    host: str,
+    rendered_dir: Path,
+    collector: ArtifactCollector,
+) -> Path:
     """Build and write the render manifest into the rendered directory."""
-    target_root = Path(paths["target_root"])
-    manifest = build_manifest(host, rendered_dir, target_root)
+    collector.compute_hashes_and_sizes(rendered_dir)
+    manifest = build_manifest(host, collector.get_metadata())
     manifest_path = rendered_dir / "manifest.json"
     write_manifest(manifest, manifest_path)
     return manifest_path
@@ -409,25 +460,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _configure_logging(verbosity: int) -> None:
-    """Configure CLI logging verbosity."""
-    if verbosity >= 2:
-        level = logging.DEBUG
-    elif verbosity == 1:
-        level = logging.INFO
-    else:
-        level = logging.WARNING
-
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s %(name)s event=%(message)s",
-    )
-
-
 def main() -> int:
     """Main entry point."""
     args = parse_args()
-    _configure_logging(args.verbose)
+    configure_logging(args.verbose)
 
     if args.all and args.host:
         raise RenderError("Use either --host or --all, not both")
@@ -481,6 +517,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except RenderError as exc:
+    except PipelineError as exc:
         print(f"render: {exc}", file=sys.stderr)
         sys.exit(1)

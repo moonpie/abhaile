@@ -76,6 +76,102 @@ Apply should:
 - Secrets boundary between bootstrap (encrypted) and runtime (templated)
 - Reconciliation pattern: desired state in git, drift analysis, idempotent apply
 
+## Secrets Policy
+
+Abhaile enforces a strict secrets boundary across bootstrap, render/apply, and runtime.
+
+### Artifact Classes
+
+- **Committed templates/specs (in `config/`)**: service specs, placeholder-based config, `*.ctmpl` sources, and template metadata. These may define secret references and destination paths, but must never contain resolved secret values.
+
+- **Rendered non-secret configs (`<output>/rendered/`)**: artifacts derived from repo data that are strictly non-secret. These are allowed only when content contains no credentials, tokens, private keys, decrypted material, or other secret values. Template sources and destination metadata may be rendered or copied.
+
+- **Host-only secret outputs (runtime/bootstrap on host)**: Vault-rendered env files, app configs containing credentials, token files, private keys, and decrypted bootstrap assets. These are host-local only and must not be committed or written to repo-managed render output.
+
+### Boundary Rules
+
+- No secrets in git.
+- No resolved secret values in repo-managed rendered output.
+- `config/` remains source of truth for desired structure and secret references, not secret payloads.
+- External secret material is required at bootstrap/runtime and delivered outside git.
+- Render remains unprivileged and deterministic; apply remains privileged and enforces host reconciliation.
+
+### Ownership
+
+- **Bootstrap:** establishes initial trust/access, may use sealed bootstrap artifacts.
+- **Apply:** reconciles host state and wiring, but does not materialize resolved secret values into repo-managed output.
+- **Runtime:** Vault Agent renders resolved secrets to host-only destinations for service consumption.
+
+### External Key/Token/Cert Material Contract
+
+Apply installs references (units, watches, mounts, and directories) for external secret material, but does not install secret files.
+
+| Artifact / Path | Class | Owner:Group | Mode | Producer / Provisioning | Responsible phase |
+| --- | --- | --- | --- | --- | --- |
+| `/home/abhaile/.config/vault-agent/token` | Bootstrap-only input (Vault auth seed token file) | `abhaile:abhaile` | `0600` | Operator/Bootstrap provides host-local token out-of-band; never from git render output | Bootstrap + Operator |
+| `/srv/vault/agent/run/vault-agent-token` | Runtime secret output (Vault Agent sink token) | `abhaile:abhaile` | `0600` | Vault Agent sink writes it at runtime (`config.hcl`) | Runtime (Vault Agent) |
+| `/srv/vault/agent/out/.ready` | Runtime readiness sentinel (non-secret) | `abhaile:abhaile` | `0640` | Vault Agent template render (`ready.ctmpl`) | Runtime (Vault Agent) |
+| `/srv/vault/agent/out/<template-out>` (for example `authelia.configuration.yml`, `authelia-redis.conf`, `ddclient.conf`, `coredns-omada.env`, `caddy-dns-desec.env`) | Runtime secret-bearing service inputs | `abhaile:abhaile` | `0640` (from each `composition.vault_agent.templates[].perms`) | Vault Agent template rendering from `*.ctmpl` sources | Runtime (Vault Agent) |
+| `/srv/caddy/internal/data/certificates/local/omada-controller.svc.abhaile.home.arpa/omada-controller.svc.abhaile.home.arpa.crt` | Runtime certificate input for Omada chain rebuild | service runtime owner (Caddy-managed) | runtime-managed | Caddy internal PKI runtime output; watched by `rebuild-omada-cert.path` | Runtime (service-managed) |
+| `/srv/omada-controller/cert` | Runtime certificate bundle destination for Omada | `root:root` | `0750` directory, file modes set by rebuild script | Host-local `rebuild-omada-cert.sh` workflow (operator/bootstrap-managed script path) | Runtime + Operator |
+| `/etc/ssl/certs` | Host trust store (non-secret cert roots) | OS-managed | OS-managed | Debian/host package management | Host base system |
+
+Validation stance:
+
+- Apply assumes external secret/key/token files exist at their declared host paths.
+- Apply does not pre-validate presence or permissions of secret material.
+- Missing/incorrect external material fails in the owning runtime unit (Vault Agent, systemd path/service, or container startup), not in render output generation.
+
+### SOPS Bootstrap Policy (Bootstrap-Only)
+
+`sops` is allowed only for sealed bootstrap artifacts needed before Vault Agent can render runtime secrets.
+
+#### Allowed in Git (encrypted with `sops`)
+
+- Host-scoped, bootstrap-phase credentials required to establish initial trust (for example: one-time enrollment token material or initial Vault bootstrap handoff values).
+- Bootstrap-only access material needed to reach control-plane dependencies before Vault Agent is online (for example: short-lived repo access bootstrap credential).
+
+These artifacts must be minimal, host-scoped where possible, and limited to pre-Vault bootstrap.
+
+#### Forbidden in Git (even if encrypted)
+
+- Long-lived runtime service secrets (application passwords, API keys, database credentials, SMTP credentials, JWT secrets).
+- Runtime private keys and certificate keypairs used by running services.
+- Vault-rendered outputs and any secret material intended for steady-state runtime consumption.
+
+Runtime secret values belong in Vault and are rendered on-host by Vault Agent.
+
+#### Repository Layout and Naming Convention
+
+- Sealed bootstrap artifacts live under `config/bootstrap/sealed/`.
+- Artifacts are host-scoped under `config/bootstrap/sealed/<host>/`.
+- File naming convention is `<artifact-name>.sops.yaml`.
+
+Examples:
+
+- `config/bootstrap/sealed/phobos/vault-bootstrap.sops.yaml`
+- `config/bootstrap/sealed/deimos/repo-bootstrap.sops.yaml`
+
+#### Recipient and Decryption Model
+
+- Encryption recipients use age identities.
+- Each sealed artifact must include:
+  - a host bootstrap recipient for the target host, and
+  - at least one operator-controlled recovery recipient.
+- Decryption occurs locally on the target host during bootstrap.
+- The decryption identity is provided out-of-band by the operator (not from git).
+
+Current host software assumptions in `config/hosts/common/host.yaml` already include `age` and `sops` installation.
+
+#### Plaintext Handling Rules
+
+- Decrypted bootstrap material must never be committed.
+- Bootstrap should consume decrypted values in memory or via short-lived runtime paths only.
+- If temporary files are unavoidable, they must be created in an ephemeral runtime location and removed immediately after use.
+- Decrypted bootstrap plaintext must not persist under the repo working tree or other durable git-managed paths.
+
+See [ADR 0006](docs/adr/0006-secrets-model-and-bootstrap-artifacts.md) and [ADR 0007](docs/adr/0007-sops-bootstrap-policy-and-layout.md) for the durable architecture decisions.
+
 ## Non-Goals
 
 - No manual edits to rendered output
@@ -110,9 +206,9 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 
 ## CLI Entrypoints
 
-- Primary CLI entrypoint: `abhaile-render`
-- Entry module: `abhaile.cli:main`
-- Current supported mode: render (`--host` or `--all`, with optional `--output`)
+- `abhaile-render` (`abhaile.cli.render:main`) — render desired artifacts (`--host` or `--all`, optional `--output`)
+- `abhaile-diff` (`abhaile.cli.diff:main`) — read-only desired vs applied drift summary
+- `abhaile-apply` (`abhaile.cli.apply:main`) — reconcile desired state with dry-run and prune safety gates
 
 **Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 
@@ -157,8 +253,7 @@ Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
 │   └── services/
 │       ├── caddy-dmz/
 │       └── vault/
-└── state/
-    └── manifest.json
+└── (state/ is created by apply, not render)
 ```
 
 **Multi-host render (`--all`):**
@@ -171,14 +266,14 @@ Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
 │   │   ├── software/
 │   │   ├── users/
 │   │   └── services/
-│   └── state/
+│   └── (state/ created by apply)
 └── deimos/
     ├── rendered/
     │   ├── system/
     │   ├── software/
     │   ├── users/
     │   └── services/
-    └── state/
+  └── (state/ created by apply)
 ```
 
 The `<host>` subdirectory avoids collisions when rendering multiple hosts into one output tree.
@@ -190,7 +285,7 @@ Apply uses hash-based drift detection to compare desired state (manifest) agains
 1. **Render** produces desired-state artifacts in `<output>/rendered/` organized by type (system/software/users/services), and writes desired manifest `<output>/rendered/manifest.json`
 1. **Apply state** stores durable host reconciliation metadata in `<output>/state/`: current applied manifest `<output>/state/manifest.json`, previous applied manifest `<output>/state/manifest.previous.json`, and history archive `<output>/state/history/manifest-<timestamp>.json` (retained, bounded)
 1. **Apply** compares desired manifest and applied manifest against live filesystem to detect add/change/remove drift
-1. **Sync** copies changed/added files from `rendered/` to `/`, runs scoped reload actions, and then updates state manifests on success
+1. **Sync** copies changed/added files from `rendered/` to `/`, runs scoped owner-based reload and restart actions per artifact family (systemd, users, coredns, caddy, vault, networkd, quadlet), and then updates state manifests on success
 
 Artifacts are organized under `rendered/` by apply method:
 

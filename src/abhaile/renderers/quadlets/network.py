@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
-from abhaile.renderers.quadlets.helpers import _validate_trailing_newline
+from abhaile.renderers.quadlets.helpers import (
+    _quadlet_kind_from_filename,
+    _quadlet_unit_name,
+    _register_quadlet_artifact,
+    _validate_trailing_newline,
+)
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
 
@@ -29,6 +35,9 @@ def _render_network_quadlets(
     vlans: List[str],
     output_dir: Path,
     config_root: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render network quadlet files for the provided VLAN list."""
     template_path = config_root / "_templates" / "services" / "quadlets" / "network.network.j2"
@@ -54,8 +63,22 @@ def _render_network_quadlets(
             host_name=host,
             vlan_name=vlan_name,
         )
-        (output_base / f"{vlan_name}.network").write_text(
+        network_filename = f"{vlan_name}.network"
+        network_path = output_base / network_filename
+        network_path.write_text(
             rendered,
             encoding="utf-8",
             newline="\n",
         )
+        if collector is not None and rendered_root is not None:
+            _register_quadlet_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=network_path,
+                target_path=str(output_root / network_filename),
+                kind=_quadlet_kind_from_filename(network_filename),
+                owner_ref=f"unit:{_quadlet_unit_name(network_filename)}",
+                content=rendered,
+                apply_hints={"rootless": False, "shared": True},
+                owner_apply_hints={"rootless": False, "shared": True},
+            )

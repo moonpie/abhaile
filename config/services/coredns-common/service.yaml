@@ -1,8 +1,10 @@
 name: coredns-common
 composition:
-  config:
+  systemd:
     - source: coredns-common/systemd/coredns-zones.path
       destination: /etc/systemd/system/coredns-zones.path
+      enable: true
+      start: true
     - source: coredns-common/systemd/coredns-zones.service
       destination: /etc/systemd/system/coredns-zones.service
   dns:

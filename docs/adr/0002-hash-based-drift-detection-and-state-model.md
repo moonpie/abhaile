@@ -2,100 +2,78 @@
 
 ## Status
 
+2026-05-05: Updated Accepted
 2026-01-31: Accepted
 
 ## Context
 
-Render produces desired-state artifacts, and apply must detect what has changed on the live system before making changes. We need an efficient, deterministic way to track and compare desired state without keeping old renders around.
+Render produces desired-state artifacts, and apply must determine what changed on the live system before making changes. The system needs deterministic drift detection without retaining old rendered trees, because render output is ephemeral and may be wiped before each run.
 
-Two approaches:
-
-1. **File diffing**: diff old vs new rendered trees (requires keeping previous renders)
-1. **Hash-based inventory**: manifest contains hashes of all desired files; apply compares manifest against live filesystem hashes
-
-The production workflow on hosts is:
-
-- git pull --> render --> analyze drift --> apply (if drift detected)
-
-Since render overwrites `rendered/`, we can't rely on old renders for comparison.
+The original design used a single manifest concept. The current model separates the desired manifest emitted by render from the durable applied-state manifests maintained by apply.
 
 ## Decision
 
-### Manifest Schema
+### Desired Manifest
 
-Render produces `/var/lib/abhaile/state/manifest.json` containing an array of artifacts:
+Render writes the desired manifest to `<output>/rendered/manifest.json`. It describes the current desired state for the just-rendered tree.
 
-```json
-{
-  "rendered_at": "2026-01-31T12:34:56Z",
-  "artifacts": [
-    {
-      "target_path": "/etc/systemd/network/lan.network",
-      "rel_path": "etc/systemd/network/lan.network",
-      "sha256": "abc123...",
-      "size": 1024,
-      "mode": "0644",
-      "uid": 0,
-      "gid": 0
-    },
-    ...
-  ]
-}
-```
+### Applied State
 
-### Drift Detection Logic
+Apply owns the durable state under `<output>/state/`:
 
-1. **Read current manifest** from `/var/lib/abhaile/state/manifest.json`
-1. **For each artifact in manifest:**
-   - Calculate SHA256 of live file at `target_path`
-   - Compare SHA256, size, mode, uid, gid
-   - Report as changed, missing, or unchanged
-1. **Detect orphaned files:** files on live system not in manifest (optional: report but don't auto-delete)
-1. **Drift summary:** list all changes grouped by category (added, changed, removed, orphaned)
+- `state/manifest.json` — last successfully applied manifest
+- `state/manifest.previous.json` — prior successfully applied manifest
+- `state/history/manifest-<timestamp>.json` — retained apply history snapshots
 
-### Apply with Drift Detection
+History is rotated and pruned according to apply policy.
 
-1. Render current state --> `/var/lib/abhaile/rendered/`
-1. Generate manifest --> `/var/lib/abhaile/state/manifest.json`
-1. Run drift detection
-1. If drift exists and apply mode is enabled:
-   - Sync changed/added files from `rendered/` to `/`
-   - Set permissions and ownership
-   - Update state file with new manifest
-   - Restart impacted systemd units
-1. If no drift: update state file only (commit tracking)
+### Drift Detection Model
+
+Drift detection compares:
+
+1. the desired manifest in `rendered/`
+1. the last-applied manifest in `state/`
+1. the live host filesystem
+
+This allows apply to identify:
+
+- added artifacts
+- changed artifacts
+- missing artifacts
+- removal candidates
+- locally drifted files
+
+### Reconciliation Behavior
+
+Apply uses the desired manifest plus live-state inspection to plan reconciliation. Removal is guarded:
+
+- `--prune` removes only artifacts that were previously applied, are no longer desired, and have not drifted on-host since last apply
+- `--force-prune` allows removing those artifacts even if the on-host file has drifted
+
+State is updated only after a successful apply.
 
 ### Why Hash-based
 
-- **Efficient**: single pass per file, no file diffing overhead
-- **Deterministic**: same input --> same hash always
-- **Safe**: old renders don't need to persist; manifest is the durable record
-- **Atomic**: all file hashes in one manifest; easy to track what was last applied
-- **Aligns with GitOps**: desired state in repo --> rendered artifacts --> manifest as inventory
+- **Deterministic**: same desired content yields the same manifest
+- **Efficient**: content hashes are cheap to compare and automate around
+- **Safe**: no need to keep old rendered trees
+- **Auditable**: apply history provides durable snapshots of what was last applied
+- **GitOps-aligned**: desired state, applied state, and live state are distinct and inspectable
 
 ## Alternatives Considered
 
-### A. File diffing (old render vs new render)
-
-Requires keeping previous renders around; storage overhead and complex cleanup.
-
-### B. Checksum stored in rendered files (e.g., comments)
-
-Couples metadata to content; harder to update manifests independently of renders.
-
-### C. Tree diffing (e.g., rsync or git diff)
-
-Still requires preserving old tree; less explicit about what changed.
+- **Diff old render vs new render**: rejected because render output is ephemeral and retaining old trees adds storage and cleanup complexity.
+- **Minimal drift-only manifest**: rejected because apply needed richer metadata and clearer separation between desired and last-applied state.
+- **Single manifest owned by both render and apply**: rejected because it blurs ownership and makes it harder to distinguish desired state from successfully applied state.
 
 ## Consequences
 
-- Render output is ephemeral; only manifest persists
-- Drift detection is fast and requires no historical data
-- State file becomes single source of truth for "what was last applied"
-- Must handle file permissions and ownership explicitly in manifest
-- Apply can fail atomically: if sync fails, manifest not updated
+- Drift detection has a stable contract even when render output is regenerated from scratch
+- Apply has a durable audit trail and a clear rollback reference point
+- Tooling can reason separately about desired state and last-known-good applied state
+- Prune behavior is explicit and safer by default
 
 ## References
 
-- TODO.md: Foundations / Define environment paths
+- `TODO.md` current canonical decisions
 - ADR 0001: Output Root and Environment Paths

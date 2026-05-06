@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from abhaile.renderers.quadlets import render_service_quadlets
+from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
 
 

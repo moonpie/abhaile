@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from abhaile.cli import _load_host_configs
+from abhaile.cli.render import _load_host_configs
 from abhaile.utils.errors import RenderError
 
 

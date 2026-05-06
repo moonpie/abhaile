@@ -8,6 +8,7 @@ from typing import Any
 from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 
 from abhaile.dns.records import collect_zone_records
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.composition import resolve_composition, walk_service_includes
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
@@ -19,6 +20,9 @@ def render_dns(
     host_services: list[str],
     all_services: list[str],
     config_root: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render DNS zone files for zones relevant to services on this host.
 
@@ -125,6 +129,53 @@ def render_dns(
                 # Write zone file
                 zone_file = zone_output_dir / Path(actual_dest).name
                 zone_file.write_text(zone_content, encoding="utf-8")
+                _register_dns_zone_artifact(
+                    collector=collector,
+                    rendered_root=rendered_root,
+                    zone_file=zone_file,
+                    destination=f"/{actual_dest.lstrip('/')}",
+                    zone_name=zone_name,
+                    content=zone_content,
+                )
+
+
+def _register_dns_zone_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    zone_file: Path,
+    destination: str,
+    zone_name: str,
+    content: str,
+) -> None:
+    """Register CoreDNS zone metadata when collection is enabled."""
+    if collector is None or rendered_root is None:
+        return
+
+    server_owner = "dns:coredns"
+    zone_owner = f"dns-zone:{zone_name.rstrip('.')}"
+
+    if server_owner not in collector.get_all_owners():
+        collector.register_owner(
+            name=server_owner,
+            description="CoreDNS server owner",
+        )
+    if zone_owner not in collector.get_all_owners():
+        collector.register_owner(
+            name=zone_owner,
+            description=f"CoreDNS zone {zone_name}",
+            requires=[server_owner],
+        )
+
+    collector.register_artifact(
+        render_path=zone_file.relative_to(rendered_root).as_posix(),
+        target_path=destination,
+        kind="coredns.zone",
+        owner_ref=zone_owner,
+        content=content,
+        replace=True,
+        apply_hints={"reload_mode": "zones-service"},
+    )
 
 
 def build_provider_mapping(

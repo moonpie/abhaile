@@ -3,6 +3,78 @@
   "title": "Abhaile Service Schema",
   "description": "Schema for config/services/*/service.yaml - defines service configuration",
   "type": "object",
+  "definitions": {
+    "serviceConfigSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Static source file path"
+        },
+        {
+          "$ref": "common.schema.json#/definitions/templateSource"
+        }
+      ]
+    },
+    "serviceConfigFileEntry": {
+      "type": "object",
+      "description": "Plain copied or templated service config file",
+      "required": ["source", "destination"],
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/serviceConfigSource"
+        },
+        "destination": {
+          "type": "string",
+          "description": "Destination path on target system (absolute path)",
+          "not": {
+            "pattern": "^/etc/systemd/system/.+"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "serviceConfigDirectoryEntry": {
+      "type": "object",
+      "description": "Directory to ensure exists for service-owned runtime state",
+      "required": ["destination"],
+      "properties": {
+        "destination": {
+          "type": "string",
+          "description": "Destination path on target system (absolute path)",
+          "not": {
+            "pattern": "^/etc/systemd/system/.+"
+          }
+        },
+        "owner": {
+          "type": "string",
+          "description": "Owner user for managed directories"
+        },
+        "group": {
+          "type": "string",
+          "description": "Group for managed directories"
+        },
+        "mode": {
+          "type": "string",
+          "pattern": "^0[0-7]{3}$",
+          "description": "Directory permissions (e.g., 0750)"
+        }
+      },
+      "not": {
+        "required": ["source"]
+      },
+      "additionalProperties": false
+    },
+    "serviceConfigEntry": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/serviceConfigFileEntry"
+        },
+        {
+          "$ref": "#/definitions/serviceConfigDirectoryEntry"
+        }
+      ]
+    }
+  },
   "required": ["name", "composition"],
   "properties": {
     "name": {
@@ -38,6 +110,17 @@
       },
       "additionalProperties": false
     },
+    "apply": {
+      "type": "object",
+      "description": "Apply-time runtime hints for service-owned config artifacts",
+      "properties": {
+        "restart_unit": {
+          "type": "string",
+          "description": "Explicit systemd unit to restart after service.config/service.env updates"
+        }
+      },
+      "additionalProperties": false
+    },
     "composition": {
       "type": "object",
       "required": [],
@@ -49,8 +132,13 @@
         },
         "config": {
           "type": "array",
-          "description": "Configuration files to deploy",
-          "items": {"$ref": "common.schema.json#/definitions/configEntry"}
+          "description": "Service config/env files and directories to deploy",
+          "items": {"$ref": "#/definitions/serviceConfigEntry"}
+        },
+        "systemd": {
+          "type": "array",
+          "description": "Systemd units and drop-ins to deploy",
+          "items": {"$ref": "common.schema.json#/definitions/systemdEntry"}
         },
         "vault_agent": {
           "type": "object",

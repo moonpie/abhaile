@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Any, Dict
 
-from abhaile.dns import render_dns
+from abhaile.dns.renderer import render_dns
 from abhaile.dns.records import collect_zone_records as _collect_zone_records
 from abhaile.dns.serial_validator import compute_content_hash as _compute_content_hash
+from abhaile.utils.artifact_collector import ArtifactCollector
 from tests.unit.python.renderers.dns_helpers import build_zone_content_for_hash
 
 
@@ -385,3 +386,86 @@ composition:
             output_dir / "services" / "coredns-top" / "etc/coredns/zones" / "example.com.zone"
         )
         assert zone_file.exists()
+
+    def test_registers_coredns_zone_metadata(self, tmp_path: Path, write_file: Any) -> None:
+        """DNS renderer registers coredns.zone artifacts and owner dependencies."""
+        config_root = tmp_path / "config"
+        services_dir = config_root / "services"
+        rendered_root = tmp_path / "out"
+        collector = ArtifactCollector()
+
+        provider_dir = services_dir / "coredns-common"
+        provider_dir.mkdir(parents=True)
+        write_file(
+            provider_dir / "service.yaml",
+            """
+name: coredns-common
+composition:
+  dns:
+    zone_files:
+      - zone: '*'
+        file:
+          source:
+            template: coredns-common/config/zones/zone.zone.j2
+            variables: {}
+          destination: /etc/coredns/zones/zone.zone
+""",
+        )
+        write_file(
+            provider_dir / "config" / "zones" / "zone.zone.j2",
+            "$ORIGIN {{ zone.name }}\nSERIAL {{ zone.serial }}\n",
+        )
+
+        renderer_service = services_dir / "coredns"
+        renderer_service.mkdir(parents=True)
+        write_file(
+            renderer_service / "service.yaml",
+            """
+name: coredns
+composition:
+  include:
+    - coredns-common
+""",
+        )
+
+        network: Dict[str, Any] = {
+            "dns": {
+                "zones": [
+                    {
+                        "name": "abhaile.home.arpa.",
+                        "provider": {"type": "internal", "name": "coredns-common"},
+                        "serial": {
+                            "date": "20260325",
+                            "counter": "00",
+                            "content_hash": None,
+                        },
+                    }
+                ]
+            },
+            "hosts": {},
+            "services": {},
+        }
+
+        zone = network["dns"]["zones"][0]
+        records = _collect_zone_records(zone, network, ["coredns"])
+        zone["serial"]["content_hash"] = _compute_content_hash(
+            build_zone_content_for_hash(zone, records)
+        )
+
+        render_dns(
+            network,
+            rendered_root,
+            ["coredns"],
+            ["coredns"],
+            config_root,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        zone_artifacts = collector.get_artifacts_by_owner("dns-zone:abhaile.home.arpa")
+        assert len(zone_artifacts) == 1
+        assert zone_artifacts[0].kind == "coredns.zone"
+        assert zone_artifacts[0].target_path == "/etc/coredns/zones/abhaile.home.arpa.zone"
+
+        owners = collector.get_all_owners()
+        assert owners["dns-zone:abhaile.home.arpa"].requires == ["dns:coredns"]

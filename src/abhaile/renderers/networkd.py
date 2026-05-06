@@ -9,6 +9,7 @@ from typing import Any, Dict
 from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 
 from abhaile.utils.errors import RenderError
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
 from abhaile.utils.network import strip_cidr
 from abhaile.utils.templating import create_jinja_env
@@ -25,6 +26,9 @@ def render_networkd_config(
     network: Dict[str, Any],
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render systemd-networkd configuration files for a host.
 
@@ -65,6 +69,9 @@ def render_networkd_config(
         config_root / "hosts",
         output_dir,
         context,
+        collector=collector,
+        rendered_root=rendered_root,
+        default_owner_ref=f"host:{host}",
     )
 
     # Process host-specific (overrides/adds to common)
@@ -81,6 +88,16 @@ def render_networkd_config(
         config_root / "hosts",
         output_dir,
         context,
+        collector=collector,
+        rendered_root=rendered_root,
+        default_owner_ref=f"host:{host}",
+    )
+
+    _register_networkd_owners(
+        collector,
+        host=host,
+        host_config=host_config,
+        network=network,
     )
 
 
@@ -90,6 +107,9 @@ def render_networkd_dropins(
     network: Dict[str, Any],
     config_root: Path,
     output_networkd_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render service drop-in files for systemd-networkd.
 
@@ -174,6 +194,14 @@ def render_networkd_dropins(
         output_filename = f"{last_octet:03d}-{service_name}.conf"
         output_path = dropin_dir / output_filename
         output_path.write_text(rendered_content, encoding="utf-8", newline="\n")
+
+        _register_networkd_dropin_artifact(
+            collector=collector,
+            rendered_root=rendered_root,
+            output_path=output_path,
+            interface_name=interface_name,
+            content=rendered_content,
+        )
 
 
 def _get_dropin_dirs_by_vlan(
@@ -283,3 +311,135 @@ def _get_last_octet(address: str) -> int:
         raise RenderError(f"Only IPv4 addresses supported for drop-in naming: {address}")
 
     return int(str(ip).split(".")[-1])
+
+
+def _register_networkd_dropin_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    output_path: Path,
+    interface_name: str,
+    content: str,
+) -> None:
+    """Register rendered networkd drop-in metadata when collection is enabled."""
+    if collector is None or rendered_root is None:
+        return
+
+    render_path = output_path.relative_to(rendered_root).as_posix()
+    target_path = _target_path_from_render_path(render_path)
+    owner_ref = f"iface:{interface_name}"
+
+    collector.register_artifact(
+        render_path=render_path,
+        target_path=target_path,
+        kind="networkd.dropin",
+        owner_ref=owner_ref,
+        content=content,
+        replace=True,
+    )
+    _ensure_networkd_owner(collector, owner_ref)
+
+
+def _register_networkd_owners(
+    collector: ArtifactCollector | None,
+    *,
+    host: str,
+    host_config: Dict[str, Any],
+    network: Dict[str, Any],
+) -> None:
+    """Register interface owners for collected networkd artifacts."""
+    if collector is None:
+        return
+
+    requires_by_iface = _build_requires_by_iface(
+        host=host, host_config=host_config, network=network
+    )
+
+    for artifact in collector.get_all_artifacts():
+        if not artifact.kind.startswith("networkd."):
+            continue
+        _ensure_networkd_owner(collector, artifact.owner_ref, requires_by_iface=requires_by_iface)
+
+
+def _build_requires_by_iface(
+    *,
+    host: str,
+    host_config: Dict[str, Any],
+    network: Dict[str, Any],
+) -> Dict[str, list[str]]:
+    """Build requires edges for host interfaces from network topology.
+
+    For this repo's network model, ipvlan interfaces are children of a host's
+    physical uplink (or VLAN subinterface for dotted names). VLAN interfaces are
+    children of their base interface.
+    """
+    requires_by_iface: Dict[str, list[str]] = {}
+
+    host_interfaces = network.get("hosts", {}).get(host, {}).get("interfaces", {})
+    if not isinstance(host_interfaces, dict):
+        return requires_by_iface
+
+    physical_device = host_config.get("physical_device")
+    if not isinstance(physical_device, str) or not physical_device:
+        physical_device = None
+
+    for iface in host_interfaces:
+        if not isinstance(iface, str) or not iface:
+            continue
+
+        requires: list[str] = []
+
+        if iface.startswith("ipvlan-l2") and physical_device:
+            suffix = iface[len("ipvlan-l2") :]
+            parent_iface = f"{physical_device}{suffix}"
+            if parent_iface in host_interfaces:
+                requires.append(f"iface:{parent_iface}")
+            elif suffix:
+                requires.append(f"iface:{physical_device}")
+            else:
+                requires.append(f"iface:{physical_device}")
+        elif "." in iface:
+            parent_iface = iface.rsplit(".", 1)[0]
+            requires.append(f"iface:{parent_iface}")
+
+        requires_by_iface[iface] = sorted(set(requires))
+
+    return requires_by_iface
+
+
+def _ensure_networkd_owner(
+    collector: ArtifactCollector,
+    owner_ref: str,
+    *,
+    requires_by_iface: Dict[str, list[str]] | None = None,
+) -> None:
+    """Register owner metadata for a network interface if not present."""
+    if not owner_ref.startswith("iface:"):
+        return
+
+    owners = collector.get_all_owners()
+    if owner_ref in owners:
+        return
+
+    iface = owner_ref.split(":", 1)[1]
+    requires: list[str]
+    if requires_by_iface is not None and iface in requires_by_iface:
+        requires = list(requires_by_iface.get(iface, []))
+    else:
+        requires = []
+        if "." in iface:
+            parent_iface = iface.rsplit(".", 1)[0]
+            requires.append(f"iface:{parent_iface}")
+
+    collector.register_owner(
+        name=owner_ref,
+        description=f"systemd-networkd interface {iface}",
+        requires=requires,
+    )
+
+
+def _target_path_from_render_path(render_path: str) -> str:
+    """Map render path to target path for networkd artifact registration."""
+    if render_path.startswith("system/"):
+        return f"/{render_path[len('system/') :]}"
+    return f"/{render_path.lstrip('/')}"

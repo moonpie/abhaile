@@ -20,41 +20,110 @@
       },
       "additionalProperties": false
     },
-    "configEntry": {
+    "fileEntrySource": {
+      "description": "Source file path (static) or template object",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Static source file path"
+        },
+        {
+          "$ref": "#/definitions/templateSource"
+        }
+      ]
+    },
+    "fileSourceDestinationEntry": {
       "type": "object",
-      "description": "Configuration file entry: static file, template, or directory to ensure exists",
+      "description": "Reusable file entry shape with required source and destination",
+      "required": ["source", "destination"],
       "properties": {
         "source": {
-          "description": "Source file path (static) or template object",
-          "oneOf": [
-            {
-              "type": "string",
-              "description": "Static source file path"
-            },
-            {
-              "$ref": "#/definitions/templateSource"
-            }
-          ]
+          "$ref": "#/definitions/fileEntrySource"
         },
         "destination": {
           "type": "string",
           "description": "Destination path on target system (absolute path)"
         }
-      },
-      "oneOf": [
+      }
+    },
+    "configFileEntry": {
+      "description": "Static or templated configuration file with source and destination",
+      "allOf": [
         {
-          "description": "Static or templated file with source and destination",
-          "required": ["source", "destination"]
+          "$ref": "#/definitions/fileSourceDestinationEntry"
         },
         {
-          "description": "Directory to ensure exists (destination only, no source)",
-          "required": ["destination"],
-          "not": {
-            "required": ["source"]
-          }
+          "type": "object",
+          "required": ["source", "destination"],
+          "properties": {
+            "source": {
+              "$ref": "#/definitions/fileEntrySource"
+            },
+            "destination": {
+              "type": "string",
+              "description": "Destination path on target system (absolute path)"
+            }
+          },
+          "additionalProperties": false
         }
-      ],
+      ]
+    },
+    "configDirectoryEntry": {
+      "type": "object",
+      "description": "Directory to ensure exists (destination only, no source)",
+      "required": ["destination"],
+      "properties": {
+        "destination": {
+          "type": "string",
+          "description": "Destination path on target system (absolute path)"
+        }
+      },
+      "not": {
+        "required": ["source"]
+      },
       "additionalProperties": false
+    },
+    "configEntry": {
+      "description": "Configuration file entry: static file, template, or directory to ensure exists",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/configFileEntry"
+        },
+        {
+          "$ref": "#/definitions/configDirectoryEntry"
+        }
+      ]
+    },
+    "systemdEntry": {
+      "description": "Systemd unit or drop-in file managed explicitly from composition.systemd",
+      "allOf": [
+        {
+          "$ref": "#/definitions/fileSourceDestinationEntry"
+        },
+        {
+          "type": "object",
+          "required": ["source", "destination"],
+          "properties": {
+            "source": {
+              "$ref": "#/definitions/fileEntrySource"
+            },
+            "destination": {
+              "type": "string",
+              "pattern": "^/etc/systemd/system/.+",
+              "description": "Destination path under /etc/systemd/system/"
+            },
+            "enable": {
+              "type": "boolean",
+              "description": "Whether apply should enable the unit for boot persistence"
+            },
+            "start": {
+              "type": "boolean",
+              "description": "Whether apply should start the unit after writes"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "namedVolume": {
       "type": "object",

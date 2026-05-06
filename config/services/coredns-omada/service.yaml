@@ -5,14 +5,20 @@ composition:
       destination: /srv/build/coredns-omada/Containerfile
     - source: coredns-omada/quadlets/build.build
       destination: /etc/containers/systemd/coredns-omada.build
+  systemd:
     - source: coredns-omada/systemd/install.service
       destination: /etc/systemd/system/coredns-omada-install.service
+      enable: true
     - source: coredns-omada/systemd/service.service
       destination: /etc/systemd/system/coredns.service
+      enable: true
+      start: true
     - source: coredns-omada/systemd/coredns-omada-env.service
       destination: /etc/systemd/system/coredns-omada-env.service
     - source: coredns-omada/systemd/coredns-omada-env.path
       destination: /etc/systemd/system/coredns-omada-env.path
+      enable: true
+      start: true
   vault_agent:
     templates:
       - source: coredns-omada/templates/coredns-omada.env.ctmpl

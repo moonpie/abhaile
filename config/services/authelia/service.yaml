@@ -6,14 +6,19 @@ composition:
   config:
     - source: authelia/config/users_database.yml
       destination: /srv/authelia/authelia/config/users_database.yml
+  systemd:
     - source: authelia/systemd/authelia-config.service
       destination: /etc/systemd/system/authelia-config.service
     - source: authelia/systemd/authelia-config.path
       destination: /etc/systemd/system/authelia-config.path
+      enable: true
+      start: true
     - source: authelia/systemd/authelia-redis-conf.service
       destination: /etc/systemd/system/authelia-redis-conf.service
     - source: authelia/systemd/authelia-redis-conf.path
       destination: /etc/systemd/system/authelia-redis-conf.path
+      enable: true
+      start: true
   vault_agent:
     templates:
       - source: authelia/templates/authelia.configuration.yml.ctmpl

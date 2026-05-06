@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, List
 
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.composition import walk_mapping_includes
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
@@ -17,6 +18,9 @@ def render_ingress_configs(
     all_services: List[str],
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render aggregated ingress configurations for Caddy services.
 
@@ -87,6 +91,16 @@ def render_ingress_configs(
             output_path = output_dir / base_service / destination.lstrip("/")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(aggregated, encoding="utf-8", newline="\n")
+
+            _register_ingress_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=output_path,
+                destination=destination,
+                zone=zone,
+                content=aggregated,
+                blocks=blocks,
+            )
 
 
 def _find_base_ingress_services(
@@ -244,3 +258,46 @@ def _aggregate_caddyfile(base_content: str, blocks: List[tuple[str, str]]) -> st
             parts.append("\n")
 
     return "".join(parts)
+
+
+def _register_ingress_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    output_path: Path,
+    destination: str,
+    zone: str,
+    content: str,
+    blocks: List[tuple[str, str]],
+) -> None:
+    """Register ingress output as a caddy config artifact when enabled."""
+    if collector is None or rendered_root is None:
+        return
+
+    owner_ref = f"caddy:{zone}"
+    contributors: List[str] = []
+    for service_name, _block in blocks:
+        contributor_ref = f"service:{service_name}"
+        if contributor_ref not in contributors:
+            contributors.append(contributor_ref)
+
+    artifact_contributor = contributors[0] if len(contributors) == 1 else None
+    artifact_hints = {"contributors": contributors} if contributors else None
+
+    render_path = output_path.relative_to(rendered_root).as_posix()
+    collector.register_artifact(
+        render_path=render_path,
+        target_path=destination,
+        kind="caddy.config",
+        owner_ref=owner_ref,
+        content=content,
+        replace=True,
+        contributor_ref=artifact_contributor,
+        apply_hints=artifact_hints,
+    )
+
+    if owner_ref not in collector.get_all_owners():
+        collector.register_owner(
+            name=owner_ref,
+            description=f"caddy ingress segment {zone}",
+        )

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from abhaile.renderers.quadlets import render_service_quadlets
+from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.config import read_yaml
 
 pytestmark = pytest.mark.integration

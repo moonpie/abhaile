@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from abhaile.renderers.vault_templates import render_vault_agent_configs
+from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
 
 
 class TestRenderVaultAgentConfigs:

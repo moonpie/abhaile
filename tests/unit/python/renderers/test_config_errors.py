@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from abhaile.renderers.config import render_config_entries
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 
@@ -111,3 +112,127 @@ class TestRenderConfigEntries:
                 output_dir,
                 {},
             )
+
+    def test_authored_apply_block_is_ignored_for_apply_hints(
+        self,
+        tmp_path: Path,
+        write_file: Any,
+    ) -> None:
+        """Authored entry-level apply blocks are ignored by config renderer."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+
+        # Create source file
+        write_file(
+            config_root / "test.conf",
+            "test content",
+        )
+
+        entries = [
+            {
+                "source": "test.conf",
+                "destination": "/etc/app/config.conf",
+                "apply": {
+                    "activation_mode": "enable-start",
+                    "restart_mode": "try-restart",
+                    "requires": ["unit:network-online.target"],
+                },
+            }
+        ]
+
+        collector = ArtifactCollector()
+        rendered_root = output_dir
+
+        render_config_entries(
+            entries,
+            config_root,
+            config_root,
+            output_dir,
+            {},
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = collector.get_all_artifacts()
+        assert len(artifacts) == 1
+
+        artifact = artifacts[0]
+        assert artifact.apply_hints is None
+
+    def test_apply_hints_none_when_no_apply_block(self, tmp_path: Path, write_file: Any) -> None:
+        """Config entry without apply block has None apply_hints."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+
+        # Create source file
+        write_file(
+            config_root / "test.conf",
+            "test content",
+        )
+
+        entries = [
+            {
+                "source": "test.conf",
+                "destination": "/etc/app/config.conf",
+            }
+        ]
+
+        collector = ArtifactCollector()
+        rendered_root = output_dir
+
+        render_config_entries(
+            entries,
+            config_root,
+            config_root,
+            output_dir,
+            {},
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = collector.get_all_artifacts()
+        artifact = artifacts[0]
+        assert artifact.apply_hints is None
+
+    def test_precomputed_apply_hints_used_even_with_authored_apply_present(
+        self,
+        tmp_path: Path,
+        write_file: Any,
+    ) -> None:
+        """Internal precomputed apply hints are the only source for emitted apply_hints."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+
+        write_file(
+            config_root / "test.conf",
+            "test content",
+        )
+
+        entries = [
+            {
+                "source": "test.conf",
+                "destination": "/etc/app/config.conf",
+                "apply": {
+                    "restart_mode": "try-restart",
+                },
+                "_abhaile_apply_hints": {
+                    "enable_mode": "enable",
+                },
+            }
+        ]
+
+        collector = ArtifactCollector()
+
+        render_config_entries(
+            entries,
+            config_root,
+            config_root,
+            output_dir,
+            {},
+            collector=collector,
+            rendered_root=output_dir,
+        )
+
+        artifacts = collector.get_all_artifacts()
+        artifact = artifacts[0]
+        assert artifact.apply_hints == {"enable_mode": "enable"}

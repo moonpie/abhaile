@@ -6,10 +6,13 @@ composition:
   config:
     - source: omada-controller/config/omada-controller.env
       destination: /etc/omada-controller/omada-controller.env
+  systemd:
     - source: omada-controller/systemd/rebuild-omada-cert.service
       destination: /etc/systemd/system/rebuild-omada-cert.service
     - source: omada-controller/systemd/rebuild-omada-cert.path
       destination: /etc/systemd/system/rebuild-omada-cert.path
+      enable: true
+      start: true
   ingress:
     internal:
       blocks:

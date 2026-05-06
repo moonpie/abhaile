@@ -3,11 +3,13 @@ podman:
   user: abhaile
   network: host
 composition:
-  config:
+  systemd:
     - source: vault-agent/systemd/abhaile-secrets-ready.service
       destination: /etc/systemd/system/abhaile-secrets-ready.service
     - source: vault-agent/systemd/abhaile-secrets-ready.path
       destination: /etc/systemd/system/abhaile-secrets-ready.path
+      enable: true
+      start: true
   vault_agent:
     base:
       source:

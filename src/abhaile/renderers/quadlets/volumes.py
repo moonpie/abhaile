@@ -5,7 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
-from abhaile.renderers.quadlets.helpers import _validate_trailing_newline
+from abhaile.renderers.quadlets.helpers import (
+    _quadlet_kind_from_filename,
+    _quadlet_unit_name,
+    _register_quadlet_artifact,
+    _validate_trailing_newline,
+)
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
 
@@ -84,7 +90,9 @@ def _render_named_volumes(
     container_name: str | None = None,
     name_prefix: str | None = None,
     shared_volume_is_global: bool,
-) -> List[str]:
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
+) -> tuple[List[str], List[str]]:
     """Render named volume quadlets and return container volume lines.
 
     Args:
@@ -101,14 +109,14 @@ def _render_named_volumes(
         shared_volume_is_global: Flag for shared volume naming/validation behavior.
 
     Returns:
-        List of volume lines for the container quadlet.
+        Tuple of (volume lines for the container, dependent owner refs).
 
     Raises:
         RenderError: If validation fails.
     """
     named_volumes = container_def.get("named_volumes", []) or []
     if not named_volumes:
-        return []
+        return ([], [])
 
     if name_prefix is None:
         if container_name:
@@ -117,6 +125,7 @@ def _render_named_volumes(
             name_prefix = f"{service}-"
 
     volume_lines: List[str] = []
+    volume_owner_refs: List[str] = []
     volume_template_path = config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2"
     if not volume_template_path.exists():
         raise RenderError(f"Missing volume template: {volume_template_path}")
@@ -155,6 +164,7 @@ def _render_named_volumes(
         if shared and shared_volume_is_global and volume_file_path.exists():
             volume_line = _format_volume_line(volume_filename, mount_path, volume.get("mode"))
             volume_lines.append(volume_line)
+            volume_owner_refs.append(f"unit:{_quadlet_unit_name(volume_filename)}")
             continue
 
         template = jinja_env.get_template(volume_template_path.name)
@@ -165,11 +175,31 @@ def _render_named_volumes(
             encoding="utf-8",
             newline="\n",
         )
+        if collector is not None and rendered_root is not None:
+            vol_target_root = Path("/") / output_root_relative
+            volume_hints: Dict[str, Any] = {
+                "rootless": user != "root",
+                "shared": shared,
+            }
+            if user != "root":
+                volume_hints["podman_user"] = user
+            _register_quadlet_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=volume_file_path,
+                target_path=str(vol_target_root / volume_filename),
+                kind=_quadlet_kind_from_filename(volume_filename),
+                owner_ref=f"unit:{_quadlet_unit_name(volume_filename)}",
+                content=rendered_content,
+                apply_hints=volume_hints,
+                owner_apply_hints=volume_hints,
+            )
 
         volume_line = _format_volume_line(volume_filename, mount_path, volume.get("mode"))
         volume_lines.append(volume_line)
+        volume_owner_refs.append(f"unit:{_quadlet_unit_name(volume_filename)}")
 
-    return volume_lines
+    return (volume_lines, sorted(set(volume_owner_refs)))
 
 
 def _build_mounted_file_lines(container_def: Dict[str, Any]) -> List[str]:

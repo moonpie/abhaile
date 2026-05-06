@@ -135,20 +135,21 @@ def _collect_vault_template_specs_for_service(
 def resolve_vault_agent_volume_paths(
     base_service: str,
     service_data: Dict[str, Any],
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str]:
     """Resolve vault-agent templates/out paths from named volumes.
 
     Uses the base service's container.named_volumes entries for
     `templates` and `out` to determine host and mount roots.
 
     Returns:
-        (templates_host_root, templates_mount_root, out_mount_root)
+        (templates_host_root, templates_mount_root, out_host_root, out_mount_root)
     """
     container_def = service_data.get("composition", {}).get("container", {})
     named_volumes = container_def.get("named_volumes", []) or []
 
     templates_host_root = None
     templates_mount_root = None
+    out_host_root = None
     out_mount_root = None
 
     for volume in named_volumes:
@@ -162,12 +163,18 @@ def resolve_vault_agent_volume_paths(
             templates_host_root = host_path
             templates_mount_root = mount_path
         elif name == "out":
+            out_host_root = host_path
             out_mount_root = mount_path
 
-    if not templates_host_root or not templates_mount_root or not out_mount_root:
+    if (
+        not templates_host_root
+        or not templates_mount_root
+        or not out_host_root
+        or not out_mount_root
+    ):
         raise RenderError(
             f"Service '{base_service}' must define container.named_volumes for "
-            "'templates' (host_path + mount_path) and 'out' (mount_path)"
+            "'templates' (host_path + mount_path) and 'out' (host_path + mount_path)"
         )
 
-    return templates_host_root, templates_mount_root, out_mount_root
+    return templates_host_root, templates_mount_root, out_host_root, out_mount_root

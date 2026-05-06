@@ -2,16 +2,17 @@
 
 ## Status
 
+2026-05-05: Updated Accepted
 2026-01-31: Accepted
 
 ## Context
 
 Abhaile runs in two contexts:
 
-- **Host (production)**: single-host render and apply via systemd timer
-- **Workstation/CI**: single-host or multi-host renders for development and validation
+- **Host (production)**: single-host render/apply and scheduled reconciliation
+- **Workstation/CI**: development, validation, and optional multi-host rendering
 
-We need a single, predictable output root on hosts that persists across repo updates, while allowing flexible overrides for workstation/CI. The render/apply flow is host-first and single-host by default; multi-host is only for workstation/CI validation.
+The project needs a stable output root on hosts that survives repo updates, while still allowing local overrides for workstation and CI use. The output structure also needs to express ownership boundaries clearly: render owns desired-state artifacts, while apply owns durable applied-state records.
 
 ## Decision
 
@@ -19,105 +20,74 @@ We need a single, predictable output root on hosts that persists across repo upd
 
 The output root always contains two top-level subdirectories:
 
-- `rendered/` — ephemeral desired-state artifacts, organized by source (host vs service)
-- `state/` — persistent metadata (manifests, commit tracking)
+- `rendered/` — ephemeral, render-owned desired-state artifacts
+- `state/` — durable, apply-owned state and history
 
 ### Rendered Artifact Organization
 
 Artifacts under `rendered/` are organized by apply method:
 
-- `rendered/system/` — system configuration files (systemd-networkd, resolved, systemd units) - atomic file placement
-- `rendered/software/` — software installation artifacts (packages, downloads, builds, commands) - execution required
-- `rendered/users/` — user management artifacts (user/group setup, sudoers) - execution required
-- `rendered/services/<service>/` — service-specific artifacts (quadlets, configs, ingress)
+- `rendered/system/` — atomic file placement artifacts such as systemd-networkd, resolved, and systemd units
+- `rendered/software/` — execution-required software artifacts such as `packages.txt`, downloads, builds, and commands
+- `rendered/users/` — execution-required user-management artifacts
+- `rendered/services/<service>/` — service-specific artifacts such as quadlets, configs, and ingress material
 
-This organization makes it easy to identify which artifacts require execution versus atomic file placement. The manifest in `state/` still tracks target paths (e.g., `/etc/systemd/network/10-eth0.network`), so the intermediate directory structure is organizational only and does not affect apply.
+The desired manifest is written as `rendered/manifest.json`. The rendered tree is disposable and may be wiped before each render. Its layout is organizational only; apply uses manifest target paths to reconcile the host.
+
+### State Ownership
+
+Apply owns `state/` and maintains durable state there, including:
+
+- `state/manifest.json` — last successfully applied manifest
+- `state/manifest.previous.json` — prior successfully applied manifest
+- `state/history/` — timestamped apply history entries
 
 ### Host Default
 
 - **Output root:** `/var/lib/abhaile/`
-- **Single-host render:** `/var/lib/abhaile/rendered/` and `/var/lib/abhaile/state/`
+- **Single-host render root:** `/var/lib/abhaile/rendered/`
+- **Single-host state root:** `/var/lib/abhaile/state/`
 - **Live target root:** `/`
 
 ### Workstation/CI Override
 
 Use `--output <dir>` to set a local output root.
 
-**Single-host render:**
+Single-host example:
 
 ```text
---output ./out
-    ./out/rendered/
-    │   ├── system/
-    │   │   ├── etc/systemd/network/
-    │   │   ├── etc/systemd/resolved.conf
-    │   │   └── etc/systemd/system/
-    │   ├── software/
-    │   │   ├── packages.txt
-    │   │   ├── downloads/
-    │   │   │   └── <id>.yaml
-    │   │   ├── builds/
-    │   │   │   └── <id>.yaml
-    │   │   └── commands/
-    │   │       └── <id>.yaml
-    │   ├── users/
-    │   │   ├── setup-users.sh
-    │   │   └── etc/sudoers.d/abhaile
-    │   └── services/
-    │       ├── caddy-dmz/
-    │       │   ├── etc/containers/systemd/caddy-dmz.container
-    │       │   └── srv/caddy-dmz/Caddyfile
-    │       └── vault/
-    │           ├── etc/containers/systemd/vault.container
-    │           └── srv/vault/config.json
-    └── ./out/state/
-        └── manifest.json
+./out/
+├── rendered/
+│   ├── manifest.json
+│   ├── system/
+│   ├── software/
+│   ├── users/
+│   └── services/
+└── state/
 ```
 
-**Multi-host render:**
-
-```text
---output ./out --all
-    ./out/<host>/rendered/
-    │   ├── system/
-    │   ├── software/
-    │   ├── users/
-    │   └── services/
-    ./out/<host>/state/
-        └── manifest.json
-(for each host)
-```
-
-The `<host>` subdirectory is included in workstation/CI to avoid collisions when rendering multiple hosts into one output tree.
+Multi-host rendering may use per-host subdirectories under the chosen output root to avoid collisions.
 
 ### Live Target Root
 
 - Apply always targets `/` on hosts
-- No alternate root support (simplifies atomicity and safety gates)
+- No alternate live-root support is provided
 
 ## Alternatives Considered
 
-### A. Always include `<host>` on hosts
-
-Redundant for single-host production runs and complicates paths without clear benefit.
-
-### B. Use repo-local `./out/` on hosts
-
-Couples render/apply to repo checkout state; output becomes ephemeral across pulls or cleans.
-
-### C. Environment variables for path configuration
-
-More error-prone than explicit `--output` overrides; harder to reason about in scripts and logs.
+- **Always include `<host>` on production hosts**: rejected because it adds path complexity without improving single-host production safety.
+- **Write output under the repo checkout**: rejected because it couples durable state to a mutable checkout location.
+- **Store the desired manifest under `state/`**: rejected because it weakens the ownership boundary between render-owned desired artifacts and apply-owned durable applied state.
 
 ## Consequences
 
 - Hosts have a stable output root independent of repo location
-- Render output is ephemeral; manifest in state/ is the durable record
-- Workstation/CI can use a single `--output` override to produce same structure as host
-- Multi-host validation is safe (no path collisions)
-- Scripts must handle path selection logic: include `<host>` for multi-host, omit for single-host
+- Render output is explicitly ephemeral and disposable
+- Desired-state and applied-state ownership are separated cleanly
+- Workstation/CI can reproduce host-like output layout with a local override
+- Future runner/bootstrap tooling can rely on a stable path contract
 
 ## References
 
-- TODO.md: Foundations / Define environment paths
+- `TODO.md` current canonical decisions
 - ADR 0002: Hash-based Drift Detection and State Model

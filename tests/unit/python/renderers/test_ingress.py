@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from abhaile.renderers.ingress import render_ingress_configs
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 
@@ -337,7 +338,6 @@ composition:
             config_root / "services" / "caddy-internal" / "config" / "Caddyfile",
             "# Internal Base\n",
         )
-
         # Service with blocks for both zones
         write_file(
             config_root / "services" / "omada" / "service.yaml",
@@ -387,6 +387,173 @@ composition:
         # Internal has internal block, not dmz
         assert "omada.home" in internal_content
         assert "omada-dmz.example.com" not in internal_content
+
+    def test_registers_caddy_metadata(self, tmp_path: Path, write_file: Any) -> None:
+        """Ingress render registers caddy.config artifact and segment owner metadata."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "out" / "rendered"
+        output_dir = rendered_root / "services"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "services" / "caddy-dmz" / "service.yaml",
+            """name: caddy-dmz
+composition:
+  ingress:
+    dmz:
+      base:
+        source: config/Caddyfile
+        destination: /srv/caddy/dmz/Caddyfile
+""",
+        )
+
+        write_file(
+            config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
+            "# DMZ\n",
+        )
+
+        render_ingress_configs(
+            "phobos",
+            ["caddy-dmz"],
+            ["caddy-dmz"],
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = collector.get_artifacts_by_owner("caddy:dmz")
+        assert len(artifacts) == 1
+        assert artifacts[0].kind == "caddy.config"
+        assert artifacts[0].target_path == "/srv/caddy/dmz/Caddyfile"
+
+        owners = collector.get_all_owners()
+        assert "caddy:dmz" in owners
+
+    def test_registers_single_contributor_ref(self, tmp_path: Path, write_file: Any) -> None:
+        """Single ingress block contributor is preserved on aggregated artifact."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "out" / "rendered"
+        output_dir = rendered_root / "services"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "services" / "caddy-dmz" / "service.yaml",
+            """name: caddy-dmz
+composition:
+  ingress:
+    dmz:
+      base:
+        source: config/Caddyfile
+        destination: /srv/caddy/dmz/Caddyfile
+""",
+        )
+        write_file(
+            config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
+            "# DMZ\n",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "service.yaml",
+            """name: authelia
+composition:
+  ingress:
+    dmz:
+      blocks:
+        - caddy/dmz-ingress.txt
+""",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "caddy" / "dmz-ingress.txt",
+            "auth.example.com { reverse_proxy :9091 }\n",
+        )
+
+        render_ingress_configs(
+            "phobos",
+            ["caddy-dmz"],
+            ["caddy-dmz", "authelia"],
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifact = collector.get_artifacts_by_owner("caddy:dmz")[0]
+        assert artifact.contributor_ref == "service:authelia"
+        assert artifact.apply_hints == {"contributors": ["service:authelia"]}
+
+    def test_registers_multiple_contributors_in_hints(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Multiple ingress block contributors are tracked in apply_hints."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "out" / "rendered"
+        output_dir = rendered_root / "services"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "services" / "caddy-dmz" / "service.yaml",
+            """name: caddy-dmz
+composition:
+  ingress:
+    dmz:
+      base:
+        source: config/Caddyfile
+        destination: /srv/caddy/dmz/Caddyfile
+""",
+        )
+        write_file(
+            config_root / "services" / "caddy-dmz" / "config" / "Caddyfile",
+            "# DMZ\n",
+        )
+
+        write_file(
+            config_root / "services" / "authelia" / "service.yaml",
+            """name: authelia
+composition:
+  ingress:
+    dmz:
+      blocks:
+        - caddy/dmz-ingress.txt
+""",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "caddy" / "dmz-ingress.txt",
+            "auth.example.com { reverse_proxy :9091 }\n",
+        )
+
+        write_file(
+            config_root / "services" / "vault" / "service.yaml",
+            """name: vault
+composition:
+  ingress:
+    dmz:
+      blocks:
+        - caddy/dmz-ingress.txt
+""",
+        )
+        write_file(
+            config_root / "services" / "vault" / "caddy" / "dmz-ingress.txt",
+            "vault.example.com { reverse_proxy :8200 }\n",
+        )
+
+        render_ingress_configs(
+            "phobos",
+            ["caddy-dmz"],
+            ["caddy-dmz", "authelia", "vault"],
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifact = collector.get_artifacts_by_owner("caddy:dmz")[0]
+        assert artifact.contributor_ref is None
+        assert artifact.apply_hints == {
+            "contributors": [
+                "service:authelia",
+                "service:vault",
+            ]
+        }
 
     def test_missing_base_source_raises_error(self, tmp_path: Path, write_file: Any) -> None:
         """Missing base Caddyfile source raises error."""

@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
-from abhaile.renderers.quadlets import render_service_quadlets
+from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
+from abhaile.utils.artifact_collector import ArtifactCollector
 
 
 class TestRenderServiceQuadlets:
@@ -584,3 +585,88 @@ composition:
             / "userpod-app-app.container"
         )
         assert container.exists()
+
+    def test_registers_pod_metadata(self, tmp_path: Path, write_file: Any) -> None:
+        """Pod and container quadlet files are registered with correct kind and owner_ref."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "authelia" / "service.yaml",
+            """name: authelia
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  pod:
+    containers:
+      - name: app
+        named_volumes: []
+        mounted_files: []
+""",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "quadlets" / "pod.pod.j2",
+            "[Pod]\nNetwork={{ network.services[service_name].vlan }}.network\n",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "quadlets" / "app" / "image.image",
+            "[Image]\nImage=authelia:latest\n",
+        )
+        write_file(
+            config_root / "services" / "authelia" / "quadlets" / "app" / "container.container.j2",
+            "[Container]\nPod={{ pod }}\nImage={{ image }}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "network.network.j2",
+            "[Network]\nDriver=ipvlan\n",
+        )
+
+        network: dict[str, Any] = {
+            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "services": {"authelia": {"vlan": "services", "address": "172.20.20.20/32"}},
+        }
+
+        collector = ArtifactCollector()
+        render_service_quadlets(
+            "phobos",
+            ["authelia"],
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = {a.render_path: a for a in collector.get_all_artifacts()}
+        owners = collector.get_all_owners()
+
+        pod_key = next(k for k in artifacts if k.endswith("authelia-app.pod"))
+        pod_art = artifacts[pod_key]
+        assert pod_art.kind == "quadlet.pod"
+        assert pod_art.owner_ref == "unit:authelia-app.service"
+        assert pod_art.target_path == "/etc/containers/systemd/authelia-app.pod"
+        assert pod_art.apply_hints == {"rootless": False}
+
+        container_key = next(k for k in artifacts if k.endswith("authelia-app-app.container"))
+        container_art = artifacts[container_key]
+        assert container_art.kind == "quadlet.container"
+        assert container_art.owner_ref == "unit:authelia-app-app.service"
+
+        image_key = next(k for k in artifacts if k.endswith("authelia-app-app.image"))
+        image_art = artifacts[image_key]
+        assert image_art.kind == "quadlet.image"
+        assert image_art.owner_ref == "unit:authelia-app-app-image.service"
+
+        assert "unit:authelia-app.service" in owners
+        assert "unit:authelia-app-app.service" in owners
+        assert "unit:authelia-app-app-image.service" in owners
+        assert owners["unit:authelia-app.service"].apply_hints == {"rootless": False}
+        assert owners["unit:authelia-app.service"].requires == [
+            "unit:services-network.service",
+        ]
+        assert owners["unit:authelia-app-app.service"].requires == [
+            "unit:authelia-app-app-image.service",
+            "unit:authelia-app.service",
+        ]

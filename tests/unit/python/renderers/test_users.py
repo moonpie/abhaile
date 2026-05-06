@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from abhaile.renderers.users import render_users_artifacts
+from abhaile.utils.artifact_collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 
@@ -16,7 +17,7 @@ def test_render_users_merges_and_renders_sysusers_and_sudoers(
 ) -> None:
     """Merged user management renders deterministic sysusers and sudoers."""
     config_root = tmp_path / "config"
-    output_dir = tmp_path / "out" / "rendered" / "users"
+    output_dir = tmp_path / "out" / "rendered" / "system"
 
     write_file(
         config_root / "hosts" / "common" / "host.yaml",
@@ -95,7 +96,7 @@ composition:
 def test_render_users_errors_on_conflicting_user_fields(write_file: Any, tmp_path: Path) -> None:
     """Conflicting scalar fields for same user fail render."""
     config_root = tmp_path / "config"
-    output_dir = tmp_path / "out" / "rendered" / "users"
+    output_dir = tmp_path / "out" / "rendered" / "system"
 
     write_file(
         config_root / "hosts" / "common" / "host.yaml",
@@ -134,7 +135,7 @@ composition:
 def test_render_users_errors_on_missing_group_reference(write_file: Any, tmp_path: Path) -> None:
     """Missing referenced group fails render."""
     config_root = tmp_path / "config"
-    output_dir = tmp_path / "out" / "rendered" / "users"
+    output_dir = tmp_path / "out" / "rendered" / "system"
 
     write_file(
         config_root / "hosts" / "common" / "host.yaml",
@@ -167,3 +168,67 @@ composition:
 
     with pytest.raises(RenderError, match="additional_group 'sudo' is not defined"):
         render_users_artifacts("phobos", config_root, output_dir)
+
+
+def test_render_users_registers_metadata(write_file: Any, tmp_path: Path) -> None:
+    """Users renderer registers host/user metadata kinds and owners."""
+    config_root = tmp_path / "config"
+    rendered_root = tmp_path / "out" / "rendered"
+    output_dir = rendered_root / "system"
+    collector = ArtifactCollector()
+
+    write_file(
+        config_root / "hosts" / "common" / "host.yaml",
+        """
+name: common
+composition:
+  include: []
+  user_management:
+    users:
+      abhaile:
+        uid: 1001
+        primary_group: abhaile
+        home: /home/abhaile
+        ssh_authorized_keys:
+          - "ssh-ed25519 AAAATESTKEY1 moonpie@laptop"
+    groups:
+      abhaile:
+        gid: 1001
+    sudoers:
+      - name: abhaile
+        rules:
+          - "abhaile ALL=(ALL) NOPASSWD:ALL"
+""".strip() + "\n",
+    )
+
+    write_file(
+        config_root / "hosts" / "phobos" / "host.yaml",
+        """
+name: phobos
+composition:
+  include:
+    - common
+  user_management: {}
+""".strip() + "\n",
+    )
+
+    render_users_artifacts(
+        "phobos",
+        config_root,
+        output_dir,
+        collector=collector,
+        rendered_root=rendered_root,
+    )
+
+    sysusers = collector.get_artifacts_by_owner("host-users:phobos")
+    assert any(artifact.kind == "host.sysusers" for artifact in sysusers)
+
+    sudoers = collector.get_artifacts_by_owner("host-sudoers:phobos")
+    assert any(artifact.kind == "host.sudoers" for artifact in sudoers)
+
+    keys = collector.get_artifacts_by_owner("principal:abhaile")
+    assert any(artifact.kind == "host.authorized_keys" for artifact in keys)
+
+    owners = collector.get_all_owners()
+    assert owners["host-sudoers:phobos"].requires == ["host-users:phobos"]
+    assert owners["principal:abhaile"].requires == ["host-users:phobos"]

@@ -6,10 +6,13 @@ composition:
   config:
     - source: caddy-dmz/build/Containerfile
       destination: /srv/build/caddy-desec/Containerfile
+  systemd:
     - source: caddy-dmz/systemd/caddy-dns-desec.service
       destination: /etc/systemd/system/caddy-dns-desec.service
     - source: caddy-dmz/systemd/caddy-dns-desec.path
       destination: /etc/systemd/system/caddy-dns-desec.path
+      enable: true
+      start: true
   vault_agent:
     templates:
       - source: caddy-dmz/templates/caddy-dns-desec.env.ctmpl
