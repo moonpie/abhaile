@@ -89,5 +89,4 @@ Multi-host rendering may use per-host subdirectories under the chosen output roo
 
 ## References
 
-- `TODO.md` current canonical decisions
 - ADR 0002: Hash-based Drift Detection and State Model

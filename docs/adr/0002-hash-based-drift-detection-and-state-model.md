@@ -75,5 +75,5 @@ State is updated only after a successful apply.
 
 ## References
 
-- `TODO.md` current canonical decisions
 - ADR 0001: Output Root and Environment Paths
+- ADR 0004: Apply Execution Model

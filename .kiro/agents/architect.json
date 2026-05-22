@@ -1,0 +1,27 @@
+{
+  "name": "architect",
+  "description": "System design, specs, ADRs, technical coherence for Abhaile homelab",
+  "prompt": "file://.agents/architect.md",
+  "tools": ["read", "write", "grep", "glob", "code", "knowledge", "subagent"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["docs/**", "config/**", "schemas/**"]
+    },
+    "crew": {
+      "availableAgents": ["developer", "sysadmin", "code-reviewer", "technical-writer"],
+      "trustedAgents": ["developer", "sysadmin", "code-reviewer", "technical-writer"]
+    }
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://README.md",
+    "file://config/mapping.yaml",
+    "file://config/network.yaml",
+    "file://docs/specs/**/*.md",
+    "file://docs/adr/**/*.md",
+    "file://schemas/**/*.json"
+  ],
+  "keyboardShortcut": "ctrl+shift+a",
+  "welcomeMessage": "Architect agent ready. What needs designing?"
+}

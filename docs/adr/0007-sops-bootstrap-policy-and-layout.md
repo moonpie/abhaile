@@ -10,7 +10,7 @@ ADR 0006 established the split secrets model and limited `sops` usage to sealed 
 
 ## Decision
 
-`Sops` usage is bootstrap-only and host-scoped.
+`sops` usage is bootstrap-only and host-scoped.
 
 ### Allowed Data Classes in Git (Encrypted Only)
 
@@ -82,4 +82,3 @@ If temporary files are required, they are short-lived, explicitly cleaned up, an
 
 - ADR 0006: Secrets Model and Bootstrap Artifacts
 - `README.md` secrets policy section
-- `TODO.md` Secrets / SOPS bootstrap policy and layout task

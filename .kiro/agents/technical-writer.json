@@ -1,0 +1,21 @@
+{
+  "name": "technical-writer",
+  "description": "Documentation, runbooks, ADR drafts, and spec maintenance for Abhaile homelab",
+  "prompt": "file://.agents/technical-writer.md",
+  "tools": ["read", "write", "grep", "glob", "code", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["docs/**", "README.md", "config/**/*.md"]
+    }
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://README.md",
+    "file://docs/**/*.md",
+    "file://src/abhaile/**/*.py",
+    "file://config/**/*.yaml"
+  ],
+  "keyboardShortcut": "ctrl+shift+t",
+  "welcomeMessage": "Technical Writer agent ready. What needs documenting?"
+}

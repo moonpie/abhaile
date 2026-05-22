@@ -1,0 +1,39 @@
+{
+  "name": "developer",
+  "description": "Python/Jinja2/YAML implementation and testing for Abhaile homelab",
+  "prompt": "file://.agents/developer.md",
+  "tools": ["read", "write", "shell", "grep", "glob", "code", "knowledge", "subagent"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["src/**", "tests/**", "config/**"]
+    },
+    "shell": {
+      "allowedCommands": [
+        "make lint",
+        "make test",
+        "make test-fast",
+        "make typecheck",
+        "make doccheck",
+        "python -m pytest.*",
+        "python -m mypy.*",
+        "ruff.*"
+      ],
+      "autoAllowReadonly": true
+    },
+    "crew": {
+      "availableAgents": ["code-reviewer", "technical-writer"],
+      "trustedAgents": ["code-reviewer", "technical-writer"]
+    }
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://src/abhaile/**/*.py",
+    "file://tests/**/*.py",
+    "file://config/**/*.yaml",
+    "file://schemas/**/*.json",
+    "file://docs/specs/active/**/*.md"
+  ],
+  "keyboardShortcut": "ctrl+shift+d",
+  "welcomeMessage": "Developer agent ready. What needs implementing?"
+}

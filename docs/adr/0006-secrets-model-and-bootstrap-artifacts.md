@@ -28,13 +28,13 @@ Abhaile recognizes three artifact classes:
    - may define destination paths and secret references
    - must not contain resolved secret values
 
-1. Rendered non-secret configs (`<output>/rendered/`):
+1. **Rendered non-secret configs (`<output>/rendered/`)**
 
    - generated only from repo-defined, non-secret data
    - allowed only when output contains no credentials, tokens, private keys, decrypted material, or resolved secret payloads
    - template sources and destination paths may be rendered or copied
 
-1. Host-only secret outputs (bootstrap/runtime on host):
+1. **Host-only secret outputs (bootstrap/runtime on host):**
 
    - Vault-rendered env files
    - app configs that contain credentials
@@ -116,7 +116,7 @@ Runtime secret outputs remain host-only and are never materialized during render
 
 ## References
 
-- `TODO.md` current canonical decisions
 - ADR 0001: Output Root and Environment Paths
 - ADR 0004: Apply Execution Model
 - ADR 0005: Service Authoring Model
+- ADR 0007: SOPS Bootstrap Policy and Layout

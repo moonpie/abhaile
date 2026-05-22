@@ -44,6 +44,6 @@ The runner is responsible for:
 
 ## References
 
-- `TODO.md` current canonical decisions
 - ADR 0001: Output Root and Environment Paths
 - ADR 0002: Hash-based Drift Detection and State Model
+- ADR 0004: Apply Execution Model

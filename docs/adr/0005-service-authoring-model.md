@@ -48,5 +48,5 @@ Service configuration uses section-based semantics.
 
 ## References
 
-- `TODO.md` current canonical decisions
 - ADR 0004: Apply Execution Model
+- ADR 0006: Secrets Model and Bootstrap Artifacts

@@ -1,0 +1,27 @@
+{
+  "name": "sysadmin",
+  "description": "Infrastructure, systemd, podman, networking, and security for Abhaile homelab",
+  "prompt": "file://.agents/sysadmin.md",
+  "tools": ["read", "write", "shell", "grep", "glob", "code", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "toolsSettings": {
+    "write": {
+      "allowedPaths": ["config/**", "docs/**", "scripts/**"]
+    },
+    "shell": {
+      "autoAllowReadonly": true
+    }
+  },
+  "resources": [
+    "file://AGENTS.md",
+    "file://config/network.yaml",
+    "file://config/mapping.yaml",
+    "file://config/hosts/**/*.yaml",
+    "file://config/services/**/*.yaml",
+    "file://config/_templates/**/*",
+    "file://docs/adr/**/*.md",
+    "file://scripts/**/*"
+  ],
+  "keyboardShortcut": "ctrl+shift+s",
+  "welcomeMessage": "SysAdmin agent ready. What needs reviewing or configuring?"
+}

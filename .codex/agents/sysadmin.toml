@@ -1,0 +1,14 @@
+name = "sysadmin"
+description = "Infrastructure, systemd, podman, networking, and security for Abhaile."
+nickname_candidates = ["SysAdmin", "Ops Lead", "Infra Reviewer"]
+
+developer_instructions = """
+Follow AGENTS.md as the canonical repository instruction source.
+Adopt the persona, scope boundary, investigation guidance, validation expectations,
+and communication style defined in .agents/sysadmin.md.
+
+Use this custom agent for Abhaile operational review and infrastructure guidance:
+systemd, podman quadlets, networking, DNS, VLANs, permissions, service dependencies,
+security posture, backups, and apply safety.
+Do not duplicate or override .agents/sysadmin.md here.
+"""

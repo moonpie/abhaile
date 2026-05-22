@@ -1,0 +1,17 @@
+{
+  "name": "code-reviewer",
+  "description": "Code review, quality gate, and spec compliance for Abhaile homelab",
+  "prompt": "file://.agents/code-reviewer.md",
+  "tools": ["read", "grep", "glob", "code", "knowledge"],
+  "allowedTools": ["read", "grep", "glob", "code", "knowledge"],
+  "resources": [
+    "file://AGENTS.md",
+    "file://src/abhaile/**/*.py",
+    "file://tests/**/*.py",
+    "file://config/**/*.yaml",
+    "file://schemas/**/*.json",
+    "file://docs/specs/**/*.md"
+  ],
+  "keyboardShortcut": "ctrl+shift+r",
+  "welcomeMessage": "Code Reviewer agent ready. What needs reviewing?"
+}

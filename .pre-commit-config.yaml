@@ -25,6 +25,7 @@ repos:
       - id: mdformat
         name: Format Markdown (mdformat)
         files: \.md$
+        exclude: ^\.github/agents/.*\.agent\.md$
   - repo: https://github.com/psf/black
     rev: 26.1.0
     hooks:
@@ -76,7 +77,7 @@ repos:
     hooks:
       - id: pymarkdown
         name: Lint Markdown (pymarkdown)
-        args: ["-d", "md013", "scan", "."]
+        args: ["-d", "md013", "scan", "-e", ".github/agents/*.agent.md", "."]
         files: \.md$
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.14.14
