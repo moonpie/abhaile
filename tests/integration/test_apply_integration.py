@@ -121,7 +121,7 @@ class TestApplyIntegration:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.SystemdExecutor.apply_unit_write",
+            "abhaile.apply.dispatch.SystemdExecutor.apply_unit_write",
             lambda unit_name, entry, *, user, run_as_user: {
                 "unit_name": unit_name,
                 "kind": entry.get("kind", "systemd.unit"),
@@ -129,7 +129,7 @@ class TestApplyIntegration:
             },
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             lambda owner_ref, kinds, changed_phases, rootless, run_as_user: {
                 "owner_ref": owner_ref,
                 "unit": "demo.service",
@@ -138,7 +138,7 @@ class TestApplyIntegration:
             },
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.VaultExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.VaultExecutor.apply_owner_change",
             lambda owner_ref, run_as_user: {
                 "owner_ref": owner_ref,
                 "run_as_user": run_as_user,

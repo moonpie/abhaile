@@ -1,9 +1,9 @@
 """Helper utilities for DNS renderer tests."""
 
-from typing import Any, Dict, List
+from typing import Any
 
 
-def build_zone_content_for_hash(zone: Dict[str, Any], records: List[Dict[str, Any]]) -> str:
+def build_zone_content_for_hash(zone: dict[str, Any], records: list[dict[str, Any]]) -> str:
     """Build zone content used for hashing in serial validation tests."""
     zone_name = zone.get("name", "")
     zone_name_stripped = zone_name.rstrip(".")

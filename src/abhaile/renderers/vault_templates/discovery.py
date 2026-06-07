@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.utils.composition import walk_service_includes
 from abhaile.utils.config import read_yaml
@@ -23,20 +23,9 @@ class VaultTemplateSpec:
 
 def find_base_vault_agent_service(
     services_root: Path,
-    host_services: List[str],
+    host_services: list[str],
 ) -> str | None:
-    """Find the vault-agent service that defines base configuration.
-
-    Args:
-        services_root: Path to config/services directory.
-        host_services: Services mapped to the current host.
-
-    Returns:
-        Service name with vault_agent.base, or None if not found.
-
-    Raises:
-        RenderError: If service.yaml is missing or invalid.
-    """
+    """Find the vault-agent service that defines base configuration."""
     for service in host_services:
         service_yaml = services_root / service / "service.yaml"
         if not service_yaml.exists():
@@ -52,25 +41,11 @@ def find_base_vault_agent_service(
 
 
 def collect_vault_agent_template_specs(
-    host_services: List[str],
+    host_services: list[str],
     services_root: Path,
-) -> List[VaultTemplateSpec]:
-    """Collect vault-agent template specs from services on this host.
-
-    Recursively follows composition.include with mapping-order + depth-first
-    traversal, using shared dedupe via walk_service_includes.
-
-    Args:
-        host_services: Services mapped to the current host.
-        services_root: Path to config/services directory.
-
-    Returns:
-        List of validated template specs in mapping order.
-
-    Raises:
-        RenderError: If a referenced template entry is invalid.
-    """
-    specs: List[VaultTemplateSpec] = []
+) -> list[VaultTemplateSpec]:
+    """Collect vault-agent template specs from services on this host."""
+    specs: list[VaultTemplateSpec] = []
     visited: set[str] = set()
 
     for service in host_services:
@@ -94,7 +69,7 @@ def collect_vault_agent_template_specs(
 def _collect_vault_template_specs_for_service(
     service: str,
     services_root: Path,
-) -> List[VaultTemplateSpec]:
+) -> list[VaultTemplateSpec]:
     """Collect vault_agent template specs from a single service."""
     service_yaml = services_root / service / "service.yaml"
     if not service_yaml.exists():
@@ -105,7 +80,7 @@ def _collect_vault_template_specs_for_service(
     vault_agent_def = composition.get("vault_agent", {})
     template_defs = vault_agent_def.get("templates", []) or []
 
-    specs: List[VaultTemplateSpec] = []
+    specs: list[VaultTemplateSpec] = []
     for template_def in template_defs:
         source = template_def.get("source")
         out = template_def.get("out")
@@ -134,16 +109,9 @@ def _collect_vault_template_specs_for_service(
 
 def resolve_vault_agent_volume_paths(
     base_service: str,
-    service_data: Dict[str, Any],
+    service_data: dict[str, Any],
 ) -> tuple[str, str, str, str]:
-    """Resolve vault-agent templates/out paths from named volumes.
-
-    Uses the base service's container.named_volumes entries for
-    `templates` and `out` to determine host and mount roots.
-
-    Returns:
-        (templates_host_root, templates_mount_root, out_host_root, out_mount_root)
-    """
+    """Resolve vault-agent templates/out host and mount paths from named volumes."""
     container_def = service_data.get("composition", {}).get("container", {})
     named_volumes = container_def.get("named_volumes", []) or []
 

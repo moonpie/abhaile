@@ -12,6 +12,8 @@ from referencing import Registry, Resource
 from abhaile.utils.errors import RenderError
 from abhaile.utils.config import read_json
 
+_REGISTRY_CACHE: dict[str, Registry] = {}
+
 
 def _to_json_pointer(path_parts: Iterable[Any]) -> str:
     """Convert an error path iterable into a JSON Pointer string."""
@@ -32,30 +34,23 @@ def _schema_source_label(schema: Any, schema_path: Path | None) -> str:
     return "<inline schema>"
 
 
+def _get_registry(schema_dir: Path) -> Registry:
+    """Get or build a schema registry for the given directory."""
+    key = str(schema_dir.resolve())
+    if key in _REGISTRY_CACHE:
+        return _REGISTRY_CACHE[key]
+    resources = []
+    for schema_file in schema_dir.glob("*.json"):
+        schema_data = read_json(schema_file)
+        resources.append((schema_file.name, Resource.from_contents(schema_data)))
+    registry = Registry().with_resources(resources)
+    _REGISTRY_CACHE[key] = registry
+    return registry
+
+
 def validate_schema(data: Any, schema: Any, label: str, schema_path: Path | None = None) -> None:
-    """Validate data against JSON Schema (draft-07).
-
-    Args:
-        data: Data to validate.
-        schema: JSON Schema (draft-07).
-        label: Label for error messages (e.g., file path).
-        schema_path: Path to schema file (for resolving $ref).
-
-    Raises:
-        RenderError: If validation fails.
-    """
-    # Create registry for local $ref resolution
-    registry = None
-    if schema_path:
-        schema_dir = schema_path.parent
-        resources = []
-
-        # Pre-load all schemas in the same directory for $ref resolution
-        for schema_file in schema_dir.glob("*.json"):
-            schema_data = read_json(schema_file)
-            resources.append((schema_file.name, Resource.from_contents(schema_data)))
-
-        registry = Registry().with_resources(resources)
+    """Validate data against JSON Schema (draft-07)."""
+    registry = _get_registry(schema_path.parent) if schema_path else None
 
     if registry is not None:
         validator = Draft7Validator(schema, registry=registry)

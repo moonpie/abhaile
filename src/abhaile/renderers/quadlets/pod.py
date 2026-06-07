@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Set, Tuple
+from typing import Any
 
-from abhaile.renderers.quadlets.container import _validate_template_variables
 from abhaile.renderers.quadlets.helpers import (
     _discover_build_image_files,
     _quadlet_kind_from_filename,
     _quadlet_unit_name,
     _register_quadlet_artifact,
+    _resolve_composition_definition,
     _validate_trailing_newline,
 )
 from abhaile.renderers.quadlets.network import _lookup_service_vlan
@@ -20,82 +20,37 @@ from abhaile.renderers.quadlets.volumes import (
     _quadlet_output_root,
     _render_named_volumes,
 )
-from abhaile.utils.artifact_collector import ArtifactCollector
-from abhaile.utils.composition import resolve_composition
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
 
 
 def _resolve_pod_definition(
     service: str,
-    composition: Dict[str, Any],
+    composition: dict[str, Any],
     services_root: Path,
-) -> Tuple[Dict[str, Any] | None, str | None]:
-    """Resolve pod definition, checking includes recursively.
-
-    Args:
-        service: Service name.
-        composition: Service composition dict.
-        services_root: Path to config/services directory.
-    Returns:
-        Tuple of (pod_def, source_service) or (None, None) if not found.
-    """
-    # Check direct definition first
-    pod_def = composition.get("pod")
-    if pod_def:
-        return pod_def, service
-
-    config_root = services_root.parent
-    includes = composition.get("include", []) or []
-    for included in includes:
-        included_composition = resolve_composition(
-            service_name=included,
-            config_root=config_root,
-            merge_strategy="deep",
-        )
-        pod_def = included_composition.get("pod")
-        if pod_def:
-            return pod_def, included
-
-    return None, None
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve pod definition, checking includes recursively."""
+    return _resolve_composition_definition("pod", service, composition, services_root)
 
 
 def _render_pod_quadlets(
     service: str,
-    pod_def: Dict[str, Any],
-    podman: Dict[str, Any],
+    pod_def: dict[str, Any],
+    podman: dict[str, Any],
     services_root: Path,
     output_dir: Path,
     shared_output_dir: Path,
-    network: Dict[str, Any],
+    network: dict[str, Any],
     host: str,
     config_root: Path,
     host_paths_by_user: HostPathRegistry,
-    used_vlans: Set[str],
+    used_vlans: set[str],
     *,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
 ) -> None:
-    """Render quadlet files for a pod service.
-
-    Args:
-        service: Service name.
-        pod_def: Pod definition from composition.pod.
-        podman: Podman configuration.
-        services_root: Path to config/services directory.
-        output_dir: Path to rendered services root.
-        shared_output_dir: Path to shared output directory.
-        network: Network configuration from network.yaml.
-        host: Host name.
-        config_root: Path to config/ directory.
-        host_paths_by_user: Tracking dict for host path validation.
-        used_vlans: Set to track used VLANs.
-        collector: Optional artifact collector for metadata registration.
-        rendered_root: Rendered output root; required when collector is set.
-
-    Raises:
-        RenderError: If rendering fails.
-    """
+    """Render quadlet files for a pod service."""
     user = podman.get("user")
     if not user:
         raise RenderError(f"Podman user missing for pod service '{service}'")
@@ -110,7 +65,7 @@ def _render_pod_quadlets(
     service_output_dir.mkdir(parents=True, exist_ok=True)
 
     _is_rootless = user != "root"
-    _apply_hints: Dict[str, Any] = {"rootless": _is_rootless}
+    _apply_hints: dict[str, Any] = {"rootless": _is_rootless}
     if _is_rootless:
         _apply_hints["podman_user"] = user
 
@@ -218,9 +173,6 @@ def _render_pod_quadlets(
         jinja_env_container = create_jinja_env(container_dir)
 
         template_text = container_template_path.read_text(encoding="utf-8")
-
-        # Use robust validation instead of string-contains checks
-        _validate_template_variables("container.container.j2", template_text)
 
         # Check for conditional requirements
         if "{{ image" in template_text and not image_filename:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -72,19 +71,6 @@ class TestAtomicCopyFile:
         assert target.exists()
         assert target.stat().st_mode & 0o777 == 0o600
 
-    def test_copy_file_with_ownership(self, tmp_path: Path) -> None:
-        """Test copy with ownership enforcement (if running as root)."""
-        if os.getuid() != 0:
-            pytest.skip("Requires root privileges")
-
-        source = tmp_path / "source.txt"
-        source.write_text("content")
-        target = tmp_path / "target.txt"
-
-        atomic_copy_file_with_perms(source, target, owner_user="root", owner_group="root")
-
-        assert target.exists()
-
     def test_copy_file_invalid_user_raises(self, tmp_path: Path) -> None:
         """Test that invalid user name raises error."""
         source = tmp_path / "source.txt"
@@ -140,7 +126,7 @@ class TestRunCommand:
 
     def test_run_command_success(self) -> None:
         """Test successful command execution."""
-        result = run_command(["echo", "hello"])
+        result = run_command(["echo", "hello"], action_id="test")
 
         assert result.success
         assert result.return_code == 0
@@ -149,11 +135,11 @@ class TestRunCommand:
     def test_run_command_failure_with_check_true(self) -> None:
         """Test command failure with check=True raises."""
         with pytest.raises(ApplyError, match="Command failed"):
-            run_command(["false"], check=True)
+            run_command(["false"], action_id="test", check=True)
 
     def test_run_command_failure_with_check_false(self) -> None:
         """Test command failure with check=False returns result."""
-        result = run_command(["false"], check=False)
+        result = run_command(["false"], action_id="test", check=False)
 
         assert not result.success
         assert result.return_code != 0
@@ -162,6 +148,7 @@ class TestRunCommand:
         """Test that stderr is captured."""
         result = run_command(
             ["bash", "-c", "echo error >&2; exit 1"],
+            action_id="test",
             check=False,
         )
 

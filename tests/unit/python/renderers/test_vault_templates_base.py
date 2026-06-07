@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 
 
 class TestRenderVaultAgentConfigs:

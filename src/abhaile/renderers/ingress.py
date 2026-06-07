@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
 
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.composition import walk_mapping_includes
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
@@ -14,8 +13,8 @@ from abhaile.utils.paths import normalize_service_prefixed_path
 
 def render_ingress_configs(
     host: str,
-    host_services: List[str],
-    all_services: List[str],
+    host_services: list[str],
+    all_services: list[str],
     config_root: Path,
     output_dir: Path,
     *,
@@ -27,16 +26,6 @@ def render_ingress_configs(
     Finds base ingress services (those with ingress.{zone}.base) on the current host,
     then aggregates ingress blocks from ALL services in the mapping (across all hosts)
     into the base Caddyfile.
-
-    Args:
-        host: Host name (e.g., phobos, deimos).
-        host_services: Services mapped to this specific host.
-        all_services: All services from the entire mapping (all hosts), in mapping order.
-        config_root: Path to config/ directory.
-        output_dir: Path to rendered services root (rendered/services).
-
-    Raises:
-        RenderError: If rendering fails or validation errors occur.
     """
     if not all_services or not host_services:
         return
@@ -105,21 +94,10 @@ def render_ingress_configs(
 
 def _find_base_ingress_services(
     services_root: Path,
-    all_services: List[str],
-) -> Dict[str, List[str]]:
-    """Find services that define ingress base configurations.
-
-    Args:
-        config_root: Path to config/ directory.
-        all_services: All services from mapping.
-
-    Returns:
-        Dict mapping service name to list of zones (e.g., {'caddy-dmz': ['dmz']}).
-
-    Raises:
-        RenderError: If service.yaml is missing or invalid.
-    """
-    base_services: Dict[str, List[str]] = {}
+    all_services: list[str],
+) -> dict[str, list[str]]:
+    """Find services that define ingress base configurations."""
+    base_services: dict[str, list[str]] = {}
 
     for service in all_services:
         service_yaml = services_root / service / "service.yaml"
@@ -146,27 +124,16 @@ def _find_base_ingress_services(
 
 def _collect_ingress_blocks(
     zone: str,
-    all_services: List[str],
+    all_services: list[str],
     config_root: Path,
-) -> List[tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """Collect ingress blocks for a specific zone from all services.
 
     Recursively follows composition.include to collect blocks from included services.
     Order rule: mapping order, depth-first include traversal, and shared dedupe
     across the mapping list.
-
-    Args:
-        zone: Ingress zone name (dmz or internal).
-        all_services: All services from mapping.
-        config_root: Path to config/ directory.
-
-    Returns:
-        List of (service_name, block_content) tuples in mapping order.
-
-    Raises:
-        RenderError: If a referenced block file doesn't exist.
     """
-    blocks: List[tuple[str, str]] = []
+    blocks: list[tuple[str, str]] = []
     services_root = config_root / "services"
 
     ordered_services = walk_mapping_includes(all_services, config_root)
@@ -186,20 +153,8 @@ def _collect_ingress_blocks_for_service(
     service: str,
     zone: str,
     services_root: Path,
-) -> List[tuple[str, str]]:
-    """Collect ingress blocks for a single service.
-
-    Args:
-        service: Service name.
-        zone: Ingress zone name (dmz or internal).
-        services_root: Path to config/services directory.
-
-    Returns:
-        List of (service_name, block_content) tuples.
-
-    Raises:
-        RenderError: If block file not found.
-    """
+) -> list[tuple[str, str]]:
+    """Collect ingress blocks for a single service."""
     service_yaml = services_root / service / "service.yaml"
     if not service_yaml.exists():
         raise RenderError(f"Missing service definition: {service_yaml}")
@@ -211,7 +166,7 @@ def _collect_ingress_blocks_for_service(
     zone_def = ingress_def.get(zone, {})
     block_paths = zone_def.get("blocks", []) or []
 
-    blocks: List[tuple[str, str]] = []
+    blocks: list[tuple[str, str]] = []
     for block_path in block_paths:
         # Block path may be relative to service dir or include service name prefix
         relative_path = normalize_service_prefixed_path(service, block_path)
@@ -226,7 +181,7 @@ def _collect_ingress_blocks_for_service(
     return blocks
 
 
-def _aggregate_caddyfile(base_content: str, blocks: List[tuple[str, str]]) -> str:
+def _aggregate_caddyfile(base_content: str, blocks: list[tuple[str, str]]) -> str:
     """Aggregate base Caddyfile with ingress blocks.
 
     Args:
@@ -268,14 +223,14 @@ def _register_ingress_artifact(
     destination: str,
     zone: str,
     content: str,
-    blocks: List[tuple[str, str]],
+    blocks: list[tuple[str, str]],
 ) -> None:
     """Register ingress output as a caddy config artifact when enabled."""
     if collector is None or rendered_root is None:
         return
 
     owner_ref = f"caddy:{zone}"
-    contributors: List[str] = []
+    contributors: list[str] = []
     for service_name, _block in blocks:
         contributor_ref = f"service:{service_name}"
         if contributor_ref not in contributors:

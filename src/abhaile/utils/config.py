@@ -10,33 +10,26 @@ import yaml
 
 from abhaile.utils.errors import RenderError
 
+_YAML_CACHE: dict[str, Any] = {}
+
 
 def clear_config_cache() -> None:
-    """Clear any cached config state.
-
-    Placeholder for future caching; currently a no-op.
-    """
-    return None
+    """Clear cached config state between render passes."""
+    _YAML_CACHE.clear()
 
 
 def read_yaml(path: Path) -> Any:
-    """Load YAML file.
-
-    Args:
-        path: Path to YAML file.
-
-    Returns:
-        Parsed YAML data.
-
-    Raises:
-        RenderError: If file cannot be read or parsed (YAML syntax error,
-            file not found, permission denied, or other OS error).
-    """
+    """Load YAML file, returning cached result if available."""
+    key = str(path.resolve())
+    if key in _YAML_CACHE:
+        return _YAML_CACHE[key]
     try:
         with path.open("r", encoding="utf-8") as handle:
-            return yaml.safe_load(handle)
+            result = yaml.safe_load(handle)
     except (yaml.YAMLError, FileNotFoundError, PermissionError, OSError) as exc:
         raise RenderError(f"Failed to read YAML: {path} ({exc})") from exc
+    _YAML_CACHE[key] = result
+    return result
 
 
 def ensure_mapping(data: Any, path: Path) -> dict[str, Any]:

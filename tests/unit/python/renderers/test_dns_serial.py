@@ -1,8 +1,7 @@
 """Unit tests for DNS serial validation."""
 
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -61,11 +60,11 @@ class TestValidateZoneSerial:
 
     def test_serial_valid_no_content_change(self, minimal_config_root: Path) -> None:
         """Test that validation passes when content hash matches."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {},
         }
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
@@ -93,7 +92,7 @@ class TestValidateZoneSerial:
 
     def test_serial_invalid_content_changed(self, minimal_config_root: Path) -> None:
         """Test that validation fails when content hash mismatches."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {
                 "host1": {
                     "dns": [
@@ -113,12 +112,11 @@ class TestValidateZoneSerial:
             },
             "services": {},
         }
-        today = datetime.now().strftime("%Y%m%d")
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
-                "date": today,
+                "date": "20260101",
                 "counter": "00",
                 "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
             },
@@ -134,11 +132,11 @@ class TestValidateZoneSerial:
 
     def test_serial_missing_content_hash_fails(self, minimal_config_root: Path) -> None:
         """Test that validation fails if content_hash is missing."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {},
         }
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
@@ -159,11 +157,11 @@ class TestValidateZoneSerialCollect:
 
     def test_collect_single_valid_zone(self, minimal_config_root: Path) -> None:
         """Test that valid zones don't generate errors."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {},
         }
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
@@ -192,17 +190,16 @@ class TestValidateZoneSerialCollect:
 
     def test_collect_multiple_mismatched_zones(self, minimal_config_root: Path) -> None:
         """Test that all mismatched zones are collected."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {},
         }
-        today = datetime.now().strftime("%Y%m%d")
         zones = [
             {
                 "name": "zone1.com.",
                 "provider": {"type": "internal", "name": "coredns-common"},
                 "serial": {
-                    "date": today,
+                    "date": "20260101",
                     "counter": "00",
                     "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
                 },
@@ -211,7 +208,7 @@ class TestValidateZoneSerialCollect:
                 "name": "zone2.com.",
                 "provider": {"type": "internal", "name": "coredns-common"},
                 "serial": {
-                    "date": today,
+                    "date": "20260101",
                     "counter": "05",
                     "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
                 },
@@ -229,18 +226,16 @@ class TestValidateZoneSerialCollect:
 
     def test_collect_mixed_valid_and_invalid(self, minimal_config_root: Path) -> None:
         """Test collecting from mix of valid and invalid zones."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {},
         }
-        today = datetime.now().strftime("%Y%m%d")
-
         # Valid zone
-        zone1: Dict[str, Any] = {
+        zone1: dict[str, Any] = {
             "name": "valid.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
-                "date": today,
+                "date": "20260208",
                 "counter": "00",
                 "content_hash": None,
             },
@@ -258,11 +253,11 @@ class TestValidateZoneSerialCollect:
         zone1["serial"]["content_hash"] = _compute_content_hash(zone_content)
 
         # Invalid zone
-        zone2: Dict[str, Any] = {
+        zone2: dict[str, Any] = {
             "name": "invalid.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {
-                "date": today,
+                "date": "20260208",
                 "counter": "00",
                 "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
             },
@@ -277,7 +272,7 @@ class TestValidateZoneSerialCollect:
 
     def test_collect_skips_external_zones(self, minimal_config_root: Path) -> None:
         """Test that external zones are skipped."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {},
         }
@@ -295,7 +290,7 @@ class TestValidateZoneSerialCollect:
         self, minimal_config_root: Path
     ) -> None:
         """Test that service records are hashed in mapping order."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {
                 "svc-a": {
@@ -330,7 +325,7 @@ class TestValidateZoneSerialCollect:
                 },
             },
         }
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "provider": {"type": "internal", "name": "coredns-common"},
             "serial": {

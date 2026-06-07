@@ -11,7 +11,7 @@ from abhaile.renderers.networkd import (
     render_networkd_config,
     render_networkd_dropins,
 )
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 

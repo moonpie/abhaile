@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from abhaile.renderers.quadlets.container import (
     _render_service_quadlet_files,
@@ -21,35 +21,22 @@ from abhaile.renderers.quadlets.volumes import (
     _quadlet_output_root,
     _render_named_volumes,
 )
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
 
 
 def render_service_quadlets(
     host: str,
-    services: List[str],
-    network: Dict[str, Any],
+    services: list[str],
+    network: dict[str, Any],
     config_root: Path,
     output_dir: Path,
     *,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
 ) -> None:
-    """Render quadlet files for container-based services.
-
-    Args:
-        host: Host name (e.g., phobos, deimos).
-        services: Services mapped to the host.
-        network: Network configuration from network.yaml.
-        config_root: Path to config/ directory.
-        output_dir: Path to rendered services root (rendered/services).
-        collector: Optional artifact collector for metadata registration.
-        rendered_root: Rendered output root; required when collector is set.
-
-    Raises:
-        RenderError: If rendering fails or validation errors occur.
-    """
+    """Render quadlet files for container-based services."""
     if not services:
         return
 
@@ -59,7 +46,7 @@ def render_service_quadlets(
     shared_output_dir = output_dir / "_shared"
     networks_output_dir = output_dir / "podman-networks"
 
-    used_vlans: Set[str] = set()
+    used_vlans: set[str] = set()
     host_paths_by_user: HostPathRegistry = {}
 
     for service in services:

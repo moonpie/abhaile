@@ -2,35 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.models.artifact import OwnerMetadata, RenderMetadata, RenderedArtifact
+from abhaile.models.kinds import ALL_KINDS
 from abhaile.utils.errors import RenderError
 
 MANIFEST_VERSION = "1"
 
 
-def sha256_file(path: Path) -> str:
-    """Compute SHA256 hash of a file.
-
-    Args:
-        path: File path.
-
-    Returns:
-        Hex-encoded SHA256 hash.
-    """
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def build_manifest(host: str, metadata: RenderMetadata) -> Dict[str, Any]:
+def build_manifest(host: str, metadata: RenderMetadata) -> dict[str, Any]:
     """Build enriched manifest from collector metadata.
 
     Args:
@@ -54,7 +38,7 @@ def build_manifest(host: str, metadata: RenderMetadata) -> Dict[str, Any]:
     return manifest
 
 
-def _serialize_entries(metadata: RenderMetadata) -> List[Dict[str, Any]]:
+def _serialize_entries(metadata: RenderMetadata) -> list[dict[str, Any]]:
     """Serialize artifact entries in deterministic render_path order."""
     entries: list[dict[str, Any]] = []
     artifacts: list[RenderedArtifact] = sorted(
@@ -68,6 +52,8 @@ def _serialize_entries(metadata: RenderMetadata) -> List[Dict[str, Any]]:
                 "Artifact metadata missing hash/size before manifest serialization: "
                 f"{artifact.render_path}"
             )
+        if artifact.kind not in ALL_KINDS:
+            raise RenderError(f"Unknown artifact kind '{artifact.kind}': {artifact.render_path}")
 
         entry: dict[str, Any] = {
             "render_path": artifact.render_path,
@@ -88,7 +74,7 @@ def _serialize_entries(metadata: RenderMetadata) -> List[Dict[str, Any]]:
     return entries
 
 
-def _serialize_owners(metadata: RenderMetadata) -> Dict[str, Dict[str, Any]]:
+def _serialize_owners(metadata: RenderMetadata) -> dict[str, dict[str, Any]]:
     """Serialize owners in deterministic key order, omitting empty optional fields."""
     serialized: dict[str, dict[str, Any]] = {}
     owners: list[OwnerMetadata] = sorted(
@@ -112,7 +98,7 @@ def _serialize_owners(metadata: RenderMetadata) -> Dict[str, Dict[str, Any]]:
     return serialized
 
 
-def write_manifest(manifest: Dict[str, Any], manifest_path: Path) -> None:
+def write_manifest(manifest: dict[str, Any], manifest_path: Path) -> None:
     """Write manifest to JSON file.
 
     Args:

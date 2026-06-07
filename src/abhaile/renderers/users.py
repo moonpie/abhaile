@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
+from abhaile.utils.composition import walk_host_includes
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
@@ -78,13 +79,13 @@ def render_users_artifacts(
     )
 
 
-def _merge_user_management(host: str, config_root: Path) -> Dict[str, Any]:
+def _merge_user_management(host: str, config_root: Path) -> dict[str, Any]:
     """Merge user management config across host include chain."""
-    ordered_hosts = _walk_host_includes(host, config_root)
+    ordered_hosts = walk_host_includes(host, config_root)
 
-    merged_users: Dict[str, Dict[str, Any]] = {}
-    merged_groups: Dict[str, Dict[str, Any]] = {}
-    merged_sudoers: Dict[str, List[str]] = {}
+    merged_users: dict[str, dict[str, Any]] = {}
+    merged_groups: dict[str, dict[str, Any]] = {}
+    merged_sudoers: dict[str, list[str]] = {}
 
     for host_name in ordered_hosts:
         host_path = config_root / "hosts" / host_name / "host.yaml"
@@ -132,12 +133,12 @@ def _merge_user_management(host: str, config_root: Path) -> Dict[str, Any]:
 
 def _merge_user_definition(
     user_name: str,
-    existing: Dict[str, Any] | None,
-    incoming: Dict[str, Any],
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any],
     host_path: Path,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Merge a user definition, enforcing scalar equality and list unions."""
-    merged: Dict[str, Any] = dict(existing or {})
+    merged: dict[str, Any] = dict(existing or {})
 
     for field in USER_SCALAR_FIELDS:
         if field in incoming and incoming[field] is not None:
@@ -166,12 +167,12 @@ def _merge_user_definition(
 
 def _merge_group_definition(
     group_name: str,
-    existing: Dict[str, Any] | None,
-    incoming: Dict[str, Any],
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any],
     host_path: Path,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Merge a group definition, enforcing gid equality if redefined."""
-    merged: Dict[str, Any] = dict(existing or {})
+    merged: dict[str, Any] = dict(existing or {})
     if "gid" in incoming and incoming["gid"] is not None:
         if "gid" in merged and merged["gid"] is not None and merged["gid"] != incoming["gid"]:
             raise RenderError(
@@ -182,12 +183,12 @@ def _merge_group_definition(
 
 
 def _validate_user_group_references(
-    users: Dict[str, Dict[str, Any]],
-    groups: Dict[str, Dict[str, Any]],
+    users: dict[str, dict[str, Any]],
+    groups: dict[str, dict[str, Any]],
 ) -> None:
     """Validate that user group references exist."""
     group_names = set(groups.keys())
-    errors: List[str] = []
+    errors: list[str] = []
     for user_name, user_data in users.items():
         primary_group = user_data.get("primary_group") or user_name
         if primary_group not in group_names:
@@ -201,12 +202,12 @@ def _validate_user_group_references(
 
 
 def _write_sysusers_file(
-    users: Dict[str, Dict[str, Any]],
-    groups: Dict[str, Dict[str, Any]],
+    users: dict[str, dict[str, Any]],
+    groups: dict[str, dict[str, Any]],
     destination: Path,
 ) -> None:
     """Write sysusers configuration file with deterministic ordering."""
-    lines: List[str] = ["# Managed by Abhaile. Do not edit.\n"]
+    lines: list[str] = ["# Managed by Abhaile. Do not edit.\n"]
 
     for group_name in sorted(groups.keys()):
         gid = groups[group_name].get("gid")
@@ -218,10 +219,11 @@ def _write_sysusers_file(
         uid = user.get("uid")
         uid_str = str(uid) if uid is not None else "-"
         primary_group = user.get("primary_group") or user_name
+        id_field = f"{uid_str}:{primary_group}" if primary_group != user_name else uid_str
         gecos = _quote_sysusers_field(user.get("gecos") or "-")
         home = _quote_sysusers_field(user.get("home") or "-")
         shell = _quote_sysusers_field(user.get("shell") or "-")
-        lines.append(f"u {user_name} {uid_str} {primary_group} {gecos} {home} {shell}\n")
+        lines.append(f"u {user_name} {id_field} {gecos} {home} {shell}\n")
 
         additional_groups = sorted(set(user.get("additional_groups", []) or []))
         for group_name in additional_groups:
@@ -241,9 +243,9 @@ def _quote_sysusers_field(value: str) -> str:
     return value
 
 
-def _write_sudoers_file(sudoers: Dict[str, List[str]], destination: Path) -> None:
+def _write_sudoers_file(sudoers: dict[str, list[str]], destination: Path) -> None:
     """Write sudoers configuration file with deterministic ordering."""
-    lines: List[str] = ["# Managed by Abhaile. Do not edit.\n"]
+    lines: list[str] = ["# Managed by Abhaile. Do not edit.\n"]
     for name in sorted(sudoers.keys()):
         rules = sorted(set(sudoers[name]))
         for rule in rules:
@@ -254,7 +256,7 @@ def _write_sudoers_file(sudoers: Dict[str, List[str]], destination: Path) -> Non
 
 
 def _write_authorized_keys(
-    users: Dict[str, Dict[str, Any]],
+    users: dict[str, dict[str, Any]],
     output_dir: Path,
     *,
     host: str,
@@ -295,53 +297,6 @@ def _write_authorized_keys(
         )
 
 
-def _walk_host_includes(
-    host: str,
-    config_root: Path,
-    *,
-    visited: Set[str] | None = None,
-    stack: List[str] | None = None,
-) -> List[str]:
-    """Return depth-first include order for host composition."""
-    if visited is None:
-        visited = set()
-    if stack is None:
-        stack = []
-
-    if host in stack:
-        cycle = " -> ".join(stack + [host])
-        raise RenderError(f"Host include cycle detected: {cycle}")
-    if host in visited:
-        return []
-
-    host_path = config_root / "hosts" / host / "host.yaml"
-    if not host_path.exists():
-        raise RenderError(f"Missing host definition: {host_path}")
-
-    host_data = read_yaml_mapping(host_path)
-    composition = host_data.get("composition", {}) or {}
-    includes = composition.get("include", []) or []
-    if not isinstance(includes, list) or any(not isinstance(item, str) for item in includes):
-        raise RenderError(f"Host includes must be a list of strings: {host_path}")
-
-    ordered: List[str] = []
-    stack.append(host)
-    for include_host in includes:
-        ordered.extend(
-            _walk_host_includes(
-                include_host,
-                config_root,
-                visited=visited,
-                stack=stack,
-            )
-        )
-    stack.pop()
-
-    visited.add(host)
-    ordered.append(host)
-    return ordered
-
-
 def _register_users_artifact(
     *,
     collector: ArtifactCollector | None,
@@ -352,8 +307,8 @@ def _register_users_artifact(
     owner_ref: str,
     content: str,
     owner_description: str,
-    owner_requires: List[str] | None = None,
-    apply_hints: Dict[str, Any] | None = None,
+    owner_requires: list[str] | None = None,
+    apply_hints: dict[str, Any] | None = None,
 ) -> None:
     """Register user-management artifact and owner metadata when enabled."""
     if collector is None or rendered_root is None:

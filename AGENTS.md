@@ -97,9 +97,8 @@ All intent lives in `config/`:
 
 ### Rendered Artifact Types
 
-- `system/` — systemd-networkd, resolved (atomic file placement)
+- `system/` — systemd-networkd, resolved, user/group management, sudoers (atomic file placement)
 - `software/` — packages, downloads, builds (execution required)
-- `users/` — user/group management, sudoers (execution required)
 - `services/<service>/` — quadlets, configs, templates per service
 
 ## Repository Layout
@@ -125,7 +124,7 @@ paths.ini             Project-wide path configuration
 - **src layout**: `src/abhaile/` is the installable package
 - **Formatter**: black (line-length 100)
 - **Linter**: ruff
-- **Type checker**: mypy (strict mode — see pyproject.toml for exact flags)
+- **Type checker**: mypy (strict-equivalent flags — see pyproject.toml)
 - **Docstring coverage**: interrogate (fail-under 90%)
 - **Line length**: 100 characters
 
@@ -186,7 +185,7 @@ from abhaile.renderers import render_software_artifacts            # no
 ### Testing
 
 - **Framework**: pytest with markers (`unit`, `integration`, `slow`)
-- **Coverage**: branch coverage via pytest-cov (minimum threshold: 90%, enforced in CI)
+- **Coverage**: branch coverage via pytest-cov (minimum threshold: 90%, enforced locally via pytest addopts)
 - **Fixtures**: shared in `tests/conftest.py` (`tmp_repo`, `tmp_repo_with_config`, `write_file`, `tmp_output`)
 - **Test structure**: mirrors source — `tests/unit/python/renderers/`, `tests/unit/python/validation/`
 - **Naming**: `test_<behaviour>` functions in `Test<Subject>` classes
@@ -235,7 +234,7 @@ Linting: ruff, mypy, yamllint, pymarkdown, j2lint, shellcheck
 Validation: check-yaml, check-json, JSON schema validation
 Security: gitleaks (secret scanning)
 
-### CI
+### CI (Planned)
 
 - Pre-commit execution (all hooks)
 - pytest (unit + integration, with coverage)
@@ -244,7 +243,7 @@ Security: gitleaks (secret scanning)
 
 ### Dependencies
 
-- Runtime: minimal and pinned in `requirements.txt` (PyYAML, Jinja2, jsonschema)
+- Runtime: minimal with minimum-version pins in `requirements.txt` (PyYAML, Jinja2, jsonschema)
 - Dev: `requirements-dev.txt` (includes runtime + pytest, pre-commit, etc.)
 - New dependencies must be justified and documented
 

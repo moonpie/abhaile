@@ -1,12 +1,12 @@
 """Unit tests for DNS rendering."""
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from abhaile.dns.renderer import render_dns
 from abhaile.dns.records import collect_zone_records as _collect_zone_records
 from abhaile.dns.serial_validator import compute_content_hash as _compute_content_hash
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from tests.unit.python.renderers.dns_helpers import build_zone_content_for_hash
 
 
@@ -15,7 +15,7 @@ class TestRenderDns:
 
     def test_render_dns_skips_external_providers(self, tmp_path: Path) -> None:
         """Test that external DNS providers are skipped."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "dns": {
                 "zones": [
                     {
@@ -83,7 +83,7 @@ composition:
 """,
         )
 
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "dns": {
                 "zones": [
                     {
@@ -102,7 +102,7 @@ composition:
         }
 
         # Pre-compute the expected hash
-        zone: Dict[str, Any] = network["dns"]["zones"][0]
+        zone: dict[str, Any] = network["dns"]["zones"][0]
         records = _collect_zone_records(zone, network, ["coredns-clean"])
         zone_content = build_zone_content_for_hash(zone, records)
         expected_hash = _compute_content_hash(zone_content)
@@ -170,7 +170,7 @@ composition:
 """,
         )
 
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "dns": {
                 "zones": [
                     {
@@ -220,7 +220,7 @@ composition:
 
     def test_render_dns_no_dns_config(self, tmp_path: Path) -> None:
         """Test that render handles missing DNS config gracefully."""
-        network: Dict[str, Any] = {"hosts": {}, "services": {}}
+        network: dict[str, Any] = {"hosts": {}, "services": {}}
         output_dir = tmp_path / "out"
         output_dir.mkdir()
 
@@ -256,7 +256,7 @@ composition:
             "$ORIGIN {{ zone.name }}\n" "SERIAL {{ zone.serial }}\n",
         )
 
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "dns": {
                 "zones": [
                     {
@@ -274,7 +274,7 @@ composition:
             "services": {},
         }
 
-        zone: Dict[str, Any] = network["dns"]["zones"][0]
+        zone: dict[str, Any] = network["dns"]["zones"][0]
         records = _collect_zone_records(zone, network, ["coredns-self"])
         zone_content = build_zone_content_for_hash(zone, records)
         zone["serial"]["content_hash"] = _compute_content_hash(zone_content)
@@ -348,7 +348,7 @@ composition:
 """,
         )
 
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "dns": {
                 "zones": [
                     {
@@ -366,7 +366,7 @@ composition:
             "services": {},
         }
 
-        zone: Dict[str, Any] = network["dns"]["zones"][0]
+        zone: dict[str, Any] = network["dns"]["zones"][0]
         records = _collect_zone_records(zone, network, ["coredns-top"])
         zone_content = build_zone_content_for_hash(zone, records)
         zone["serial"]["content_hash"] = _compute_content_hash(zone_content)
@@ -428,7 +428,7 @@ composition:
 """,
         )
 
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "dns": {
                 "zones": [
                     {

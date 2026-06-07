@@ -9,7 +9,7 @@ import pytest
 
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 
 
 class TestRenderServiceQuadlets:

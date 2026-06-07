@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from abhaile.dns.placeholders import _resolve_placeholder_value
+from abhaile.utils.placeholders import resolve_placeholders as _resolve_placeholder_value
 from abhaile.utils.errors import RenderError
 
 

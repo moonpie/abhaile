@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
+from abhaile.utils.composition import walk_host_includes
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
@@ -19,14 +20,14 @@ def validate_user_management_ids(host: str, config_root: Path) -> None:
     Raises:
         RenderError: If duplicate uid/gid values are detected.
     """
-    ordered_hosts = _walk_host_includes(host, config_root)
+    ordered_hosts = walk_host_includes(host, config_root)
 
-    uid_to_users: Dict[int, List[str]] = {}
-    gid_to_groups: Dict[int, List[str]] = {}
-    user_to_uid: Dict[str, int] = {}
-    group_to_gid: Dict[str, int] = {}
-    user_scalars: Dict[str, Dict[str, Any]] = {}
-    errors: List[str] = []
+    uid_to_users: dict[int, list[str]] = {}
+    gid_to_groups: dict[int, list[str]] = {}
+    user_to_uid: dict[str, int] = {}
+    group_to_gid: dict[str, int] = {}
+    user_scalars: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
 
     for host_name in ordered_hosts:
         host_path = config_root / "hosts" / host_name / "host.yaml"
@@ -91,50 +92,3 @@ def validate_user_management_ids(host: str, config_root: Path) -> None:
     if errors:
         formatted = "\n".join(f"- {err}" for err in errors)
         raise RenderError(f"User management id validation failed for host '{host}':\n{formatted}")
-
-
-def _walk_host_includes(
-    host: str,
-    config_root: Path,
-    *,
-    visited: Set[str] | None = None,
-    stack: List[str] | None = None,
-) -> List[str]:
-    """Return depth-first include order for host composition."""
-    if visited is None:
-        visited = set()
-    if stack is None:
-        stack = []
-
-    if host in stack:
-        cycle = " -> ".join(stack + [host])
-        raise RenderError(f"Host include cycle detected: {cycle}")
-    if host in visited:
-        return []
-
-    host_path = config_root / "hosts" / host / "host.yaml"
-    if not host_path.exists():
-        raise RenderError(f"Missing host definition: {host_path}")
-
-    host_data = read_yaml_mapping(host_path)
-    composition = host_data.get("composition", {}) or {}
-    includes = composition.get("include", []) or []
-    if not isinstance(includes, list) or any(not isinstance(item, str) for item in includes):
-        raise RenderError(f"Host includes must be a list of strings: {host_path}")
-
-    ordered: List[str] = []
-    stack.append(host)
-    for include_host in includes:
-        ordered.extend(
-            _walk_host_includes(
-                include_host,
-                config_root,
-                visited=visited,
-                stack=stack,
-            )
-        )
-    stack.pop()
-
-    visited.add(host)
-    ordered.append(host)
-    return ordered

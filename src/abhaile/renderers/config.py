@@ -5,36 +5,31 @@ from __future__ import annotations
 import shutil
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 
 from abhaile.renderers.metadata import classify_config_artifact
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
 
 
 def filter_config_entries_by_destination_prefix(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     prefix: str,
     *,
     include: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Filter config entries by destination prefix.
 
     Args:
-        entries: Config entries to filter.
-        prefix: Destination prefix to match.
         include: If True, include entries with matching prefix; if False, exclude them.
-
-    Returns:
-        Filtered list of entries.
     """
     if not entries:
         return []
 
-    def _matches(entry: Dict[str, Any]) -> bool:
+    def _matches(entry: dict[str, Any]) -> bool:
         """Return True when entry destination starts with the prefix."""
         destination = entry.get("destination")
         if destination is None:
@@ -49,11 +44,11 @@ def filter_config_entries_by_destination_prefix(
 
 
 def render_config_entries(
-    entries: List[Dict[str, Any]],
+    entries: list[dict[str, Any]],
     config_root: Path,
     template_base_dir: Path,
     output_dir: Path,
-    context: Dict[str, Any],
+    context: dict[str, Any],
     *,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
@@ -66,16 +61,6 @@ def render_config_entries(
     - Static files: {source: "path/to/file", destination: "/abs/path"}
     - Templates: {source: {template: "path.j2", variables: {}}, destination: "/abs/path"}
     - Directories: {destination: "/abs/path"} (ensure exists, no source)
-
-    Args:
-        entries: List of config entries from composition.config.
-        config_root: Path to config/ directory (for resolving static sources).
-        template_base_dir: Base directory for Jinja2 template loader.
-        output_dir: Output directory root (destinations are relative to this).
-        context: Jinja2 template context (network, host_name, service_name, etc.).
-
-    Raises:
-        RenderError: If source file/template missing or rendering fails.
     """
     if not entries:
         return
@@ -180,7 +165,7 @@ def render_config_entries(
             )
 
 
-def _entry_apply_hints(entry: Dict[str, Any]) -> dict[str, Any] | None:
+def _entry_apply_hints(entry: dict[str, Any]) -> dict[str, Any] | None:
     """Return internal precomputed apply hints when present."""
     precomputed = entry.get("_abhaile_apply_hints")
     if isinstance(precomputed, dict):
@@ -188,7 +173,7 @@ def _entry_apply_hints(entry: Dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _entry_contributor_ref(entry: Dict[str, Any]) -> str | None:
+def _entry_contributor_ref(entry: dict[str, Any]) -> str | None:
     """Return internal contributor marker when present."""
     contributor_ref = entry.get("_abhaile_contributor_ref")
     if not isinstance(contributor_ref, str) or not contributor_ref:

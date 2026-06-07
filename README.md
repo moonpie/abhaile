@@ -247,9 +247,8 @@ Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
 ```text
 ./out/
 ├── rendered/
-│   ├── system/                  (systemd-networkd, resolved - atomic file placement)
+│   ├── system/                  (systemd-networkd, resolved, users/sudoers - atomic file placement)
 │   ├── software/                (packages, downloads, builds - execution required)
-│   ├── users/                   (user/group setup, sudoers - execution required)
 │   └── services/
 │       ├── caddy-dmz/
 │       └── vault/
@@ -264,14 +263,12 @@ Use `--output <dir>` to set a local output root (e.g., `--output ./out`):
 │   ├── rendered/
 │   │   ├── system/
 │   │   ├── software/
-│   │   ├── users/
 │   │   └── services/
 │   └── (state/ created by apply)
 └── deimos/
     ├── rendered/
     │   ├── system/
     │   ├── software/
-    │   ├── users/
     │   └── services/
   └── (state/ created by apply)
 ```
@@ -282,16 +279,15 @@ The `<host>` subdirectory avoids collisions when rendering multiple hosts into o
 
 Apply uses hash-based drift detection to compare desired state (manifest) against live system:
 
-1. **Render** produces desired-state artifacts in `<output>/rendered/` organized by type (system/software/users/services), and writes desired manifest `<output>/rendered/manifest.json`
+1. **Render** produces desired-state artifacts in `<output>/rendered/` organized by type (system/software/services), and writes desired manifest `<output>/rendered/manifest.json`
 1. **Apply state** stores durable host reconciliation metadata in `<output>/state/`: current applied manifest `<output>/state/manifest.json`, previous applied manifest `<output>/state/manifest.previous.json`, and history archive `<output>/state/history/manifest-<timestamp>.json` (retained, bounded)
 1. **Apply** compares desired manifest and applied manifest against live filesystem to detect add/change/remove drift
 1. **Sync** copies changed/added files from `rendered/` to `/`, runs scoped owner-based reload and restart actions per artifact family (systemd, users, coredns, caddy, vault, networkd, quadlet), and then updates state manifests on success
 
 Artifacts are organized under `rendered/` by apply method:
 
-- `rendered/system/` — systemd-networkd, resolved, systemd units (atomic file placement)
+- `rendered/system/` — systemd-networkd, resolved, systemd units, user/group management, sudoers (atomic file placement)
 - `rendered/software/` — package installation, downloads, builds (execution required)
-- `rendered/users/` — user/group management, sudoers (execution required)
 - `rendered/services/<service>/` — per-service quadlets and configs
 
 This makes it easy to identify which services/hosts are impacted by a change. The manifest still tracks target paths (e.g., `/etc/systemd/network/10-eth0.network`), so the intermediate directory structure is organizational only and does not affect apply.

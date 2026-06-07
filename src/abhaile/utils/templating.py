@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Dict
+from typing import Callable
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -12,7 +12,7 @@ from abhaile.utils.network import strip_cidr
 
 def create_jinja_env(
     template_dir: Path | str,
-    additional_filters: Dict[str, Callable] | None = None,
+    additional_filters: dict[str, Callable] | None = None,
     trim_blocks: bool = True,
     lstrip_blocks: bool = True,
 ) -> Environment:

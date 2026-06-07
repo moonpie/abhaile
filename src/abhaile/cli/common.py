@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
+from abhaile.plan.diff import PlanResult
 from abhaile.utils.errors import PipelineError
 from abhaile.utils.paths import get_repo_root, load_paths
 
@@ -68,7 +70,7 @@ def resolve_cli_paths(
     return rendered_dir, state_dir, desired_path, applied_path
 
 
-def print_diff_summary(plan: dict[str, object]) -> None:
+def print_diff_summary(plan: PlanResult | dict[str, Any]) -> None:
     """Print human-readable drift summary."""
     summary = plan["summary"]
     if not isinstance(summary, dict):

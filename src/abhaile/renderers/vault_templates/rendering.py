@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.renderers.vault_templates.copying import copy_vault_agent_templates
 from abhaile.renderers.vault_templates.discovery import (
@@ -13,7 +13,7 @@ from abhaile.renderers.vault_templates.discovery import (
     resolve_vault_agent_volume_paths,
 )
 from abhaile.utils.config import read_yaml
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.paths import normalize_service_prefixed_path
 from abhaile.utils.placeholders import resolve_placeholders
@@ -22,8 +22,8 @@ from abhaile.utils.templating import create_jinja_env
 
 def render_vault_agent_configs(
     host: str,
-    host_services: List[str],
-    network: Dict[str, Any],
+    host_services: list[str],
+    network: dict[str, Any],
     config_root: Path,
     output_dir: Path,
     *,
@@ -115,10 +115,10 @@ def render_vault_agent_configs(
 
 def _render_base_config(
     base_service: str,
-    source: Dict[str, Any],
+    source: dict[str, Any],
     destination: str,
-    templates: List[Dict[str, str]],
-    network: Dict[str, Any],
+    templates: list[dict[str, str]],
+    network: dict[str, Any],
     services_root: Path,
     output_dir: Path,
     collector: ArtifactCollector | None,
@@ -145,7 +145,7 @@ def _render_base_config(
 
     jinja_env = create_jinja_env(full_template_path.parent)
 
-    context: Dict[str, Any] = {
+    context: dict[str, Any] = {
         "vault_agent_templates": templates,
         "service": {"config": {}},
     }
@@ -160,41 +160,13 @@ def _render_base_config(
     output_path = output_dir / base_service / destination.lstrip("/")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(rendered, encoding="utf-8", newline="\n")
-    _register_vault_config_artifact(
+    _register_vault_artifact(
         collector=collector,
         rendered_root=rendered_root,
         output_path=output_path,
-        destination=destination,
-        content=rendered,
-    )
-
-
-def _register_vault_config_artifact(
-    *,
-    collector: ArtifactCollector | None,
-    rendered_root: Path | None,
-    output_path: Path,
-    destination: str,
-    content: str,
-) -> None:
-    """Register vault-agent base config metadata when collection is enabled."""
-    if collector is None or rendered_root is None:
-        return
-
-    owner_ref = "service:vault-agent"
-    if owner_ref not in collector.get_all_owners():
-        collector.register_owner(
-            name=owner_ref,
-            description="vault-agent service",
-        )
-
-    collector.register_artifact(
-        render_path=output_path.relative_to(rendered_root).as_posix(),
         target_path=destination,
         kind="vault.config",
-        owner_ref=owner_ref,
-        content=content,
-        replace=True,
+        content=rendered,
         apply_hints={
             "write_order": "after-templates",
             "restart_mode": "restart",
@@ -204,12 +176,48 @@ def _register_vault_config_artifact(
     )
 
 
+def _register_vault_artifact(
+    *,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    output_path: Path,
+    target_path: str,
+    kind: str,
+    owner_ref: str = "service:vault-agent",
+    content: str,
+    is_directory: bool = False,
+    contributor_ref: str | None = None,
+    apply_hints: dict[str, Any] | None = None,
+) -> None:
+    """Register a vault-agent artifact and ensure its owner exists."""
+    if collector is None or rendered_root is None:
+        return
+
+    if owner_ref not in collector.get_all_owners():
+        collector.register_owner(
+            name=owner_ref,
+            description="vault-agent service",
+        )
+
+    collector.register_artifact(
+        render_path=output_path.relative_to(rendered_root).as_posix(),
+        target_path=target_path,
+        kind=kind,
+        owner_ref=owner_ref,
+        content=content,
+        is_directory=is_directory,
+        replace=True,
+        contributor_ref=contributor_ref,
+        apply_hints=apply_hints,
+    )
+
+
 def _ensure_vault_output_directories(
     *,
-    specs: List[VaultTemplateSpec],
+    specs: list[VaultTemplateSpec],
     out_host_root: str,
     base_service: str,
-    service_data: Dict[str, Any],
+    service_data: dict[str, Any],
     output_dir: Path,
     collector: ArtifactCollector | None,
     rendered_root: Path | None,
@@ -225,53 +233,23 @@ def _ensure_vault_output_directories(
     for directory in sorted(directories):
         output_path = output_dir / base_service / directory.lstrip("/")
         output_path.mkdir(parents=True, exist_ok=True)
-        _register_vault_output_directory_artifact(
+        _register_vault_artifact(
             collector=collector,
             rendered_root=rendered_root,
             output_path=output_path,
-            destination=directory,
-            owner=owner,
-            group=group,
+            target_path=directory,
+            kind="service.directory",
+            content="",
+            is_directory=True,
+            apply_hints={
+                "owner": owner,
+                "group": group,
+                "mode": "0750",
+            },
         )
 
 
-def _register_vault_output_directory_artifact(
-    *,
-    collector: ArtifactCollector | None,
-    rendered_root: Path | None,
-    output_path: Path,
-    destination: str,
-    owner: str,
-    group: str,
-) -> None:
-    """Register vault runtime output directory metadata when collection is enabled."""
-    if collector is None or rendered_root is None:
-        return
-
-    owner_ref = "service:vault-agent"
-    if owner_ref not in collector.get_all_owners():
-        collector.register_owner(
-            name=owner_ref,
-            description="vault-agent service",
-        )
-
-    collector.register_artifact(
-        render_path=output_path.relative_to(rendered_root).as_posix(),
-        target_path=destination,
-        kind="service.directory",
-        owner_ref=owner_ref,
-        content="",
-        is_directory=True,
-        replace=True,
-        apply_hints={
-            "owner": owner,
-            "group": group,
-            "mode": "0750",
-        },
-    )
-
-
-def _vault_runtime_owner_group(service_data: Dict[str, Any]) -> tuple[str, str]:
+def _vault_runtime_owner_group(service_data: dict[str, Any]) -> tuple[str, str]:
     """Resolve host runtime owner/group for vault output directories."""
     podman = service_data.get("podman")
     owner = "root"

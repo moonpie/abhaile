@@ -125,7 +125,7 @@ def remove_target_file(target: Path) -> None:
 def run_command(
     argv: list[str],
     *,
-    action_id: str = "",
+    action_id: str,
     action_type: str = "command",
     run_as_user: str | None = None,
     check: bool = True,
@@ -186,7 +186,7 @@ def run_command(
 def run_validation(
     argv: list[str],
     *,
-    action_id: str = "",
+    action_id: str,
     is_blocker: bool = True,
 ) -> ExecutionResult:
     """Run a validation command and return result.

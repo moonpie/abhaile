@@ -22,7 +22,7 @@ from abhaile.renderers.services import render_service_configs
 from abhaile.renderers.software import render_software_artifacts
 from abhaile.renderers.users import render_users_artifacts
 from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.config import clear_config_cache, read_json, read_yaml_mapping
 from abhaile.utils.errors import PipelineError, RenderError
 from abhaile.utils.paths import get_repo_root, load_paths, resolve_output_root

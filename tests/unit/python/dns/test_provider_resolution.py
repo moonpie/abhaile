@@ -382,7 +382,7 @@ class TestGetZoneFilesConfigErrors:
             dns_config={"zone_files": "not-a-list"},
         )
 
-        with pytest.raises(RenderError, match="zone_files must be a list"):
+        with pytest.raises(RenderError, match="expected list, got"):
             _get_zone_files_config("bad-config", config_root)
 
     def test_zone_files_entry_not_object(self, tmp_path: Path) -> None:
@@ -452,7 +452,7 @@ class TestGetZoneFilesConfigErrors:
 
         error_msg = str(exc_info.value)
         # Error should suggest fix for zone_files
-        assert "zone_files must be a list" in error_msg
+        assert "expected list, got" in error_msg
 
 
 class TestProviderResolutionEdgeCases:

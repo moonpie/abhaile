@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from abhaile.renderers.quadlets.container import _validate_template_variables
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
 
@@ -176,43 +175,6 @@ composition:
 
 class TestTemplateVariableValidation:
     """Tests for template variable validation."""
-
-    def test_validate_template_variables_success(self) -> None:
-        """Template with valid variables passes validation."""
-        template_text = """
-[Container]
-Image={{ image }}
-Build={{ build }}
-"""
-        # Should not raise
-        _validate_template_variables("container.container.j2", template_text)
-
-    def test_validate_template_variables_partial(self) -> None:
-        """Template with optional variables is valid."""
-        template_text = """
-[Container]
-Image={{ image }}
-"""
-        # Should not raise - build is optional
-        _validate_template_variables("container.container.j2", template_text)
-
-    def test_validate_template_variables_no_vars(self) -> None:
-        """Template with no variables is valid."""
-        template_text = """
-[Container]
-Image=static:latest
-"""
-        # Should not raise
-        _validate_template_variables("container.container.j2", template_text)
-
-    def test_validate_template_variables_unknown_template(self) -> None:
-        """Unknown template name is silently accepted."""
-        template_text = """
-[Service]
-Type=notify
-"""
-        # Should not raise - unknown template types are not validated
-        _validate_template_variables("unknown.template.j2", template_text)
 
     def test_template_missing_image_at_render_time(self, tmp_path: Path, write_file: Any) -> None:
         """Template expecting image but no image.image file raises error."""

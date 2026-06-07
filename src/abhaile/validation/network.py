@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import ipaddress
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.utils.errors import RenderError
 
 
-def validate_network_sanity(network: Dict[str, Any]) -> None:
+def validate_network_sanity(network: dict[str, Any]) -> None:
     """Validate network configuration for VLAN/IP consistency.
 
     Checks:
@@ -24,7 +24,7 @@ def validate_network_sanity(network: Dict[str, Any]) -> None:
     Raises:
         RenderError: If any validation fails.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     vlans = network.get("vlans", {})
 
     def vlan_net(
@@ -114,7 +114,7 @@ def validate_network_sanity(network: Dict[str, Any]) -> None:
                             )
 
     # Address collision checks
-    ip_map: Dict[str, List[str]] = {}
+    ip_map: dict[str, list[str]] = {}
 
     def add_ip(owner: str, addr: str | None) -> None:
         """Record an owner for an IP address in the collision map."""
@@ -140,7 +140,7 @@ def validate_network_sanity(network: Dict[str, Any]) -> None:
 
 
 def validate_host_physical_device(
-    host: str, host_config: Dict[str, Any], network: Dict[str, Any]
+    host: str, host_config: dict[str, Any], network: dict[str, Any]
 ) -> None:
     """Validate that host's physical_device is defined in network.yaml.
 

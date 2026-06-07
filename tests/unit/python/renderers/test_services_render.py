@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from abhaile.renderers.services import render_service_configs
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 
 
 class TestRenderServiceConfigs:

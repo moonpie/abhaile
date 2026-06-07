@@ -1,11 +1,7 @@
 """Artifact collection coordinator for render pipeline.
 
-This module provides a central artifact collector that is passed through the
-render pipeline, allowing renderers to register artifacts with full provenance
-information without worrying about hashing or serialization.
-
-The collector is stateful and accumulates artifacts from all renderers in
-dependency order, preserving contributor attribution through include chains.
+Accumulates artifacts and owners from all renderers during a single render pass,
+deferring hash computation until all files are written.
 """
 
 from __future__ import annotations
@@ -44,21 +40,7 @@ class ArtifactCollector:
         """Register a single artifact for collection.
 
         Args:
-            render_path: Relative path within rendered/ directory.
-            target_path: Live host target path.
-            kind: Artifact kind for apply planning.
-            owner_ref: Owner identifier.
-            content: File content (bytes or str).
-            is_directory: True when artifact represents a managed directory.
             replace: If True, overwrite existing artifact with same render_path.
-            contributor_ref: Optional contributing service via includes.
-            apply_hints: Optional apply-phase hints.
-
-        Returns:
-            The registered RenderedArtifact.
-
-        Raises:
-            ValueError: If artifact already registered at render_path.
         """
         artifact = RenderedArtifact(
             render_path=render_path,
@@ -84,20 +66,7 @@ class ArtifactCollector:
         requires: list[str] | None = None,
         apply_hints: dict[str, Any] | None = None,
     ) -> OwnerMetadata:
-        """Register owner metadata for topological ordering.
-
-        Args:
-            name: Owner identifier.
-            description: Human-readable description.
-            requires: List of owner names this owner depends on.
-            apply_hints: Optional apply-phase hints.
-
-        Returns:
-            The registered OwnerMetadata.
-
-        Raises:
-            ValueError: If owner already registered.
-        """
+        """Register owner metadata for topological ordering."""
         owner = OwnerMetadata(
             name=name,
             description=description,
@@ -108,26 +77,26 @@ class ArtifactCollector:
         return owner
 
     def get_metadata(self) -> RenderMetadata:
-        """Get the accumulated metadata.
-
-        Returns:
-            The RenderMetadata containing all registered artifacts and owners.
-        """
+        """Get the accumulated metadata."""
         return self._metadata
 
     def compute_hashes_and_sizes(self, rendered_dir: Path) -> None:
         """Compute hashes and sizes for all registered artifacts.
 
-        This is called after all artifacts are registered but before manifest
-        serialization. It walks the rendered_dir to hash files and update artifact
-        entries with hash and size information.
-
-        Args:
-            rendered_dir: Path to rendered output directory.
-
-        Raises:
-            FileNotFoundError: If expected artifact file is missing.
+        Called after all artifacts are registered but before manifest serialization.
         """
+        # Assert target_path uniqueness across all artifacts
+        seen_targets: dict[str, str] = {}
+        for artifact in self._metadata.artifacts.values():
+            target = artifact.target_path
+            if target in seen_targets:
+                raise ValueError(
+                    f"Duplicate target_path '{target}': "
+                    f"render_path={artifact.render_path} conflicts with "
+                    f"render_path={seen_targets[target]}"
+                )
+            seen_targets[target] = artifact.render_path
+
         for artifact in self._metadata.artifacts.values():
             artifact_path = rendered_dir / artifact.render_path
 
@@ -185,30 +154,37 @@ class ArtifactCollector:
             self._metadata.artifacts[artifact.render_path] = updated
 
     def get_artifacts_by_owner(self, owner_ref: str) -> list[RenderedArtifact]:
-        """Get all artifacts owned by a specific owner.
-
-        Args:
-            owner_ref: The owner identifier.
-
-        Returns:
-            List of artifacts owned by this owner.
-        """
+        """Get all artifacts owned by a specific owner."""
         return self._metadata.get_artifact_by_owner(owner_ref)
 
     def get_all_artifacts(self) -> list[RenderedArtifact]:
-        """Get all registered artifacts.
-
-        Returns:
-            List of all artifacts, sorted by render_path for determinism.
-        """
+        """Get all registered artifacts sorted by render_path."""
         artifacts = list(self._metadata.artifacts.values())
         artifacts.sort(key=lambda a: a.render_path)
         return artifacts
 
     def get_all_owners(self) -> dict[str, OwnerMetadata]:
-        """Get all registered owners.
-
-        Returns:
-            Mapping of owner name to OwnerMetadata.
-        """
+        """Get all registered owners."""
         return dict(self._metadata.owners)
+
+
+class NullCollector:
+    """No-op collector that discards all registrations."""
+
+    def register_artifact(self, **kwargs: Any) -> None:  # noqa: ARG002
+        """Discard artifact registration."""
+
+    def register_owner(self, **kwargs: Any) -> None:  # noqa: ARG002
+        """Discard owner registration."""
+
+    def get_all_owners(self) -> dict[str, OwnerMetadata]:
+        """Return empty owners dict."""
+        return {}
+
+    def get_all_artifacts(self) -> list[RenderedArtifact]:
+        """Return empty artifacts list."""
+        return []
+
+    def get_artifacts_by_owner(self, owner_ref: str) -> list[RenderedArtifact]:  # noqa: ARG002
+        """Return empty list for any owner."""
+        return []

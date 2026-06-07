@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,6 +17,20 @@ DEFAULT_HISTORY_KEEP = 10
 def _timestamp_utc() -> str:
     """Create a compact UTC timestamp for history filenames."""
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _atomic_copy(src: Path, dst: Path) -> None:
+    """Copy src to dst atomically via temp file + os.replace."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=dst.parent, suffix=".tmp")
+    try:
+        os.close(fd)
+        shutil.copy2(src, tmp_path)
+        os.replace(tmp_path, dst)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
 
 
 def update_state_manifests(
@@ -35,7 +52,7 @@ def update_state_manifests(
 
     if current_path.exists():
         try:
-            shutil.copy2(current_path, previous_path)
+            _atomic_copy(current_path, previous_path)
 
             timestamp = _timestamp_utc()
             history_path = history_dir / f"manifest-{timestamp}.json"
@@ -43,13 +60,13 @@ def update_state_manifests(
             while history_path.exists():
                 history_path = history_dir / f"manifest-{timestamp}-{counter}.json"
                 counter += 1
-            shutil.copy2(current_path, history_path)
+            _atomic_copy(current_path, history_path)
         except OSError as exc:
             raise ApplyError(f"Failed rotating state manifests in {state_dir} ({exc})") from exc
 
     try:
         state_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(desired_manifest_path, current_path)
+        _atomic_copy(desired_manifest_path, current_path)
     except OSError as exc:
         raise ApplyError(f"Failed writing current state manifest in {state_dir} ({exc})") from exc
 

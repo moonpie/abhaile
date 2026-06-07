@@ -1,6 +1,6 @@
 """Unit tests for DNS record collection."""
 
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -13,7 +13,7 @@ class TestCollectZoneRecords:
 
     def test_collect_host_records_only(self):
         """Test collecting records from hosts only."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {
                 "host1": {
                     "dns": [
@@ -33,7 +33,7 @@ class TestCollectZoneRecords:
             },
             "services": {},
         }
-        zone: Dict[str, Any] = {"name": "example.com."}
+        zone: dict[str, Any] = {"name": "example.com."}
         records = _collect_zone_records(zone, network, [])
 
         assert len(records) == 1
@@ -41,7 +41,7 @@ class TestCollectZoneRecords:
 
     def test_collect_service_records_only(self):
         """Test collecting records from services only."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {},
             "services": {
                 "service1": {
@@ -61,7 +61,7 @@ class TestCollectZoneRecords:
                 }
             },
         }
-        zone: Dict[str, Any] = {"name": "svc.example.com."}
+        zone: dict[str, Any] = {"name": "svc.example.com."}
         records = _collect_zone_records(zone, network, ["service1"])
 
         assert len(records) == 1
@@ -69,7 +69,7 @@ class TestCollectZoneRecords:
 
     def test_collect_host_and_service_records(self):
         """Test collecting records from both hosts and services."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {
                 "host1": {
                     "dns": [
@@ -105,7 +105,7 @@ class TestCollectZoneRecords:
                 }
             },
         }
-        zone: Dict[str, Any] = {"name": "svc.example.com."}
+        zone: dict[str, Any] = {"name": "svc.example.com."}
         records = _collect_zone_records(zone, network, ["service1"])
 
         assert len(records) == 2
@@ -115,7 +115,7 @@ class TestCollectZoneRecords:
 
     def test_collect_multiple_records_per_entity(self):
         """Test collecting multiple records from same host."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {
                 "host1": {
                     "dns": [
@@ -141,7 +141,7 @@ class TestCollectZoneRecords:
             },
             "services": {},
         }
-        zone: Dict[str, Any] = {"name": "example.com."}
+        zone: dict[str, Any] = {"name": "example.com."}
         records = _collect_zone_records(zone, network, [])
 
         assert len(records) == 2
@@ -150,7 +150,7 @@ class TestCollectZoneRecords:
 
     def test_collect_records_multiple_zones(self):
         """Test that only matching zone records are collected."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {
                 "host1": {
                     "dns": [
@@ -181,7 +181,7 @@ class TestCollectZoneRecords:
             },
             "services": {},
         }
-        zone: Dict[str, Any] = {"name": "zone1.com."}
+        zone: dict[str, Any] = {"name": "zone1.com."}
         records = _collect_zone_records(zone, network, [])
 
         assert len(records) == 1
@@ -189,7 +189,7 @@ class TestCollectZoneRecords:
 
     def test_collect_ipv6_reverse_zone_rejected(self):
         """Test that IPv6 reverse zone PTR generation is rejected."""
-        network: Dict[str, Any] = {
+        network: dict[str, Any] = {
             "hosts": {
                 "host1": {
                     "dns": [
@@ -210,7 +210,7 @@ class TestCollectZoneRecords:
             },
             "services": {},
         }
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa."
         }
 

@@ -6,8 +6,9 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
-from abhaile.plan.diff import plan_manifest_drift
+from abhaile.plan.diff import PlanResult, plan_manifest_drift
 from abhaile.cli.common import print_diff_summary, resolve_cli_paths
 from abhaile.utils.errors import PipelineError
 
@@ -28,7 +29,7 @@ def parse_diff_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _has_content_differences(plan: dict[str, object]) -> bool:
+def _has_content_differences(plan: PlanResult | dict[str, Any]) -> bool:
     """Return True if the plan contains added, changed, or removed entries."""
     summary = plan.get("summary")
     if not isinstance(summary, dict):
@@ -40,7 +41,7 @@ def _has_content_differences(plan: dict[str, object]) -> bool:
 
 
 def _detect_metadata_changes(
-    plan: dict[str, object], applied_path: Path
+    plan: PlanResult | dict[str, Any], applied_path: Path
 ) -> list[dict[str, object]]:
     """Detect entries where sha256 matches but kind/owner_ref/apply_hints differ."""
     desired_manifest = plan.get("desired_manifest")

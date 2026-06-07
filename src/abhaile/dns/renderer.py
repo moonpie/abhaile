@@ -8,7 +8,7 @@ from typing import Any
 from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 
 from abhaile.dns.records import collect_zone_records
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.composition import resolve_composition, walk_service_includes
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
@@ -28,21 +28,10 @@ def render_dns(
 
     Zone files are rendered only to services running on the current host that have
     dns.zone_files configuration (either direct or inherited via composition.include).
-    This allows per-host divergence in zone configurations.
 
     Zone records are aggregated only from services deployed in mapping.yaml (for
     cross-host service discovery), but zones are only rendered to services on the
     current host.
-
-    Args:
-        network: Network configuration from network.yaml.
-        output_dir: Output directory for rendered zone files.
-        host_services: Services running on the current host being rendered.
-        all_services: All services from mapping.yaml in mapping order (for zone record aggregation).
-        config_root: Config root directory.
-
-    Raises:
-        RenderError: If zone rendering fails.
     """
     if "dns" not in network or "zones" not in network["dns"]:
         return
@@ -76,9 +65,7 @@ def render_dns(
         zone_files = get_zone_files_config(provider_name, config_root)
         if not zone_files:
             raise RenderError(
-                f"Zone '{zone_name}' provider '{provider_name}' has no zone_files config. "
-                f"Ensure '{provider_name}' service defines dns.zone_files in its service.yaml "
-                f"or via composition.include."
+                f"Zone '{zone_name}' provider '{provider_name}' has no zone_files config"
             )
 
         # Render zone files for each matching entry
@@ -107,11 +94,8 @@ def render_dns(
 
             if not providing_services:
                 raise RenderError(
-                    f"Zone '{zone_name}' has provider '{provider_name}' but no services "
-                    f"on this host provide zones for that provider. "
-                    f"To fix this: ensure a service on this host either directly defines "
-                    f"dns.zone_files (direct provider mode) or includes '{provider_name}' "
-                    f"in its composition.include list (transitive provider mode)."
+                    f"Zone '{zone_name}' provider '{provider_name}': "
+                    f"no services on this host provide zones for that provider"
                 )
 
             # Render zone file to each providing service
@@ -190,17 +174,6 @@ def build_provider_mapping(
     2. Transitive provider mode: A service on this host includes a provider service
        in its composition.include chain and has dns.zone_files, making it a provider
        for that included service.
-
-    Args:
-        host_services: Services running on the current host.
-        config_root: Config root directory.
-
-    Returns:
-        Dict mapping provider name to list of services on this host that provide
-        zone files for that provider.
-
-    Raises:
-        RenderError: If service composition cannot be resolved.
     """
     provider_to_services: dict[str, list[str]] = {}
 
@@ -260,24 +233,10 @@ def get_zone_files_config(
     may exist as:
     - A service with the given name that defines dns.zone_files directly, or
     - A service that can be included by other services in composition.include
-
-    Args:
-        provider_name: Name of the provider service (e.g., coredns, coredns-common).
-        config_root: Config root directory.
-
-    Returns:
-        List of zone_files entries for the provider service.
-
-    Raises:
-        RenderError: If the provider service is missing, has invalid dns.zone_files
-            configuration, or if the type of zone_files entries is incorrect.
     """
     provider_path = config_root / "services" / provider_name / "service.yaml"
     if not provider_path.exists():
-        raise RenderError(
-            f"Missing provider service definition for '{provider_name}' at {provider_path}. "
-            f"Ensure the service exists in config/services/ directory and has a service.yaml file."
-        )
+        raise RenderError(f"Missing provider service definition: {provider_path}")
 
     try:
         provider_comp = resolve_composition(provider_name, config_root, merge_strategy="deep")
@@ -296,9 +255,8 @@ def get_zone_files_config(
     zone_files = dns_config.get("zone_files", [])
     if not isinstance(zone_files, list):
         raise RenderError(
-            f"Invalid 'dns.zone_files' for provider '{provider_name}': "
-            f"zone_files must be a list, got {type(zone_files).__name__}. "
-            f"Define zone_files as: dns:\n  zone_files:\n    - zone: '...'  # Entry objects"
+            f"Invalid dns.zone_files for provider '{provider_name}': "
+            f"expected list, got {type(zone_files).__name__}"
         )
 
     typed_zone_files: list[dict[str, Any]] = []
@@ -320,17 +278,7 @@ def render_zone_template(
     records: list[dict[str, Any]],
     config_root: Path,
 ) -> str:
-    """Render a zone file from a Jinja2 template.
-
-    Args:
-        template_path: Path to template relative to config root (service/path/file.j2).
-        zone: Zone configuration dict.
-        records: Collected zone records.
-        config_root: Config root directory.
-
-    Returns:
-        Rendered zone file content.
-    """
+    """Render a zone file from a Jinja2 template."""
     # Parse template path - format: service/path/file.j2
     parts = template_path.split("/", 1)
     if len(parts) != 2:

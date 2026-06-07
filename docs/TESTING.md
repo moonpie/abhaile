@@ -1,15 +1,15 @@
-# Abhaile Render Test Suite
+# Abhaile Test Suite
 
 ## Overview
 
-Comprehensive pytest suite for the Abhaile Python package, with strong coverage across render, DNS, validation, composition/include behavior, and manifest generation.
+Pytest suite covering the Abhaile Python package: render, apply, DNS, validation, composition/include behavior, and manifest generation.
 
 The test suite is organized into both unit and integration layers.
 
 ## Test Statistics
 
-- **Unit Tests:** broad coverage across `utils`, `validation`, `renderers`, and `dns`
-- **Integration Tests:** render pipeline and feature-level integration suites (DNS, ingress, quadlets, vault templates, composition includes)
+- **Unit Tests:** covers `utils`, `validation`, `renderers`, `dns`, `apply`, `plan`, `state`, and `cli`
+- **Integration Tests:** render pipeline, apply pipeline, runner, bootstrap, and feature-level suites (DNS, ingress, quadlets, vault templates, composition includes)
 - **Total:** hundreds of tests (see "Counting tests" below for exact current values)
 - **Execution Time:** depends on environment and selected markers
 
@@ -31,27 +31,57 @@ tests/
 │       ├── test_utils.py                    # Paths, templating filters, placeholders
 │       ├── test_composition.py              # include resolution and cycle checks
 │       ├── test_cli_host_configs.py         # host/common config loading behavior
+│       ├── models/
+│       │   └── test_artifact.py             # RenderMetadata and artifact model tests
+│       ├── utils/
+│       │   └── test_artifact_collector.py   # ArtifactCollector unit tests
+│       ├── plan/
+│       │   └── test_diff.py                 # Drift planning logic tests
+│       ├── state/
+│       │   └── test_history.py              # State rotation and history retention
+│       ├── cli/
+│       │   ├── test_apply_diff_cli.py       # Apply and diff CLI integration
+│       │   ├── test_diff_exit_codes.py      # Diff exit code semantics
+│       │   └── test_inventory.py            # Inventory CLI tests
+│       ├── apply/
+│       │   ├── test_actions.py              # File staging, atomic copy, validation
+│       │   ├── test_systemd.py              # Systemd executor behavior
+│       │   ├── test_users_executor.py       # User management executor
+│       │   ├── test_coredns_executor.py     # CoreDNS executor
+│       │   ├── test_caddy_executor.py       # Caddy executor
+│       │   ├── test_vault_executor.py       # Vault-agent executor
+│       │   ├── test_service_executor.py     # Service config executor
+│       │   ├── test_networkd_executor.py    # Networkd executor
+│       │   └── test_quadlet_executor.py     # Quadlet executor
 │       ├── validation/
 │       │   ├── test_network.py              # VLAN/IP/collision sanity checks
-│       │   └── test_schema.py               # schema validation error reporting
+│       │   ├── test_schema.py              # Schema validation error reporting
+│       │   ├── test_services.py             # Service definition checks
+│       │   └── test_users.py                # UID/GID conflict validation
 │       ├── dns/
 │       │   ├── test_provider_resolution.py  # DNS provider/zone source resolution
 │       │   └── test_serial_validator.py     # serial/hash validation logic
 │       └── renderers/
 │           ├── test_manifest.py             # Manifest generation and writing
+│           ├── test_metadata.py             # Artifact metadata classification
 │           ├── test_networkd.py             # networkd files + drop-ins
-│           ├── test_services_*.py           # service config rendering behavior
-│           ├── test_ingress*.py             # ingress aggregation/error paths
-│           ├── test_quadlets_*.py           # container/pod/validation behavior
+│           ├── test_users.py                # User/group/sudoers rendering
+│           ├── test_software.py             # Software artifact rendering
+│           ├── test_services_*.py           # Service config rendering behavior
+│           ├── test_ingress*.py             # Ingress aggregation/error paths
+│           ├── test_quadlets_*.py           # Container/pod/validation behavior
 │           ├── test_dns_*.py                # DNS rendering and serial behavior
-│           └── test_vault_templates_*.py    # vault template discovery/rendering
+│           └── test_vault_templates_*.py    # Vault template discovery/rendering
 └── integration/
     ├── test_render_e2e.py                   # End-to-end render pipeline tests
+    ├── test_apply_integration.py            # Apply pipeline integration tests
+    ├── test_runner.py                       # GitOps runner integration tests
+    ├── test_bootstrap.py                    # Bootstrap script integration tests
     ├── test_dns.py                          # DNS integration scenarios
-    ├── test_ingress.py                      # ingress aggregation scenarios
-    ├── test_quadlets.py                     # quadlet integration scenarios
-    ├── test_vault_templates.py              # vault template integration scenarios
-    └── test_composition_includes.py         # include traversal across renderers
+    ├── test_ingress.py                      # Ingress aggregation scenarios
+    ├── test_quadlets.py                     # Quadlet integration scenarios
+    ├── test_vault_templates.py              # Vault template integration scenarios
+    └── test_composition_includes.py         # Include traversal across renderers
 ```
 
 ## Fixtures (conftest.py)
@@ -90,6 +120,12 @@ Representative areas covered by tests include:
 - DNS record rendering, provider resolution, and serial/content hash validation
 - Ingress and vault-template aggregation behavior
 - Manifest generation (`sha256`, permissions, uid/gid, deterministic ordering)
+- Drift planning (write classification, removal safety, owner dependency ordering)
+- Apply executor families (systemd, users, coredns, caddy, vault, networkd, quadlet, service)
+- Apply CLI (dry-run, prune modes, host safety gate, JSON reporting)
+- State rotation (manifest archival, history retention, bounded cleanup)
+- GitOps runner (commit tracking, rollback retry, locking)
+- Bootstrap (preflight checks, token input, stage sequencing)
 
 ## Running Tests
 
@@ -169,12 +205,19 @@ The test suite covers:
 - ✓ Manifest writing (file creation, formatting)
 - ✓ Error handling (RenderError exceptions)
 - ✓ Determinism (consistent outputs)
+- ✓ Drift planning (write/removal classification, owner ordering)
+- ✓ Apply executor families (systemd, users, coredns, caddy, vault, networkd, quadlet, service)
+- ✓ Apply CLI (dry-run, prune, host safety, JSON output)
+- ✓ Diff CLI (exit codes, metadata-only changes)
+- ✓ Inventory CLI (JSON output, validation mode)
+- ✓ State rotation (history retention, manifest archival)
+- ✓ GitOps runner (fetch/detect/apply cycle, rollback, locking)
+- ✓ Bootstrap (preflight, token handling, idempotency)
 
-Not yet covered (planned):
+Not yet covered:
 
-- Apply pipeline execution/orchestration (drift planning is still not implemented)
-- Users/software renderer implementation coverage as those renderers are completed
-- Host-level shell orchestration tests for future apply/bootstrapping scripts
+- Host-level shell orchestration tests for bootstrap/runner scripts (tested via integration smoke checks only)
+- nftables ruleset validation (Phase 3/4 hardening, not yet implemented)
 
 ## Continuous Integration
 

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.renderers.config import render_config_entries
 from abhaile.renderers.metadata import classify_service_artifact, classify_systemd_artifact
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.composition import walk_service_includes
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
@@ -16,26 +16,15 @@ from abhaile.utils.placeholders import resolve_placeholders
 
 def render_service_configs(
     host: str,
-    services: List[str],
-    network: Dict[str, Any],
+    services: list[str],
+    network: dict[str, Any],
     config_root: Path,
     output_dir: Path,
     *,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
 ) -> None:
-    """Render per-service configuration files for a host.
-
-    Args:
-        host: Host name (e.g., phobos, deimos).
-        services: Services mapped to the host.
-        network: Network configuration from network.yaml.
-        config_root: Path to config/ directory.
-        output_dir: Path to rendered services root (rendered/services).
-
-    Raises:
-        RenderError: If service definitions are missing or rendering fails.
-    """
+    """Render per-service configuration files for a host."""
     if not services:
         return
 
@@ -113,13 +102,13 @@ def _collect_service_composition_entries(
     service: str,
     config_root: Path,
     section: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Collect composition entries for a service and its includes.
 
     Includes are resolved depth-first; included entries are rendered before the
     service's own entries to allow later overrides.
     """
-    entries: List[Dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     ordered_services = walk_service_includes(service, config_root)
 
     for service_name in ordered_services:
@@ -141,11 +130,11 @@ def _collect_service_composition_entries(
 
 
 def _resolve_config_entry_variables(
-    entries: List[Dict[str, Any]],
-    network: Dict[str, Any],
-) -> List[Dict[str, Any]]:
+    entries: list[dict[str, Any]],
+    network: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Resolve %%...%% placeholders in template variables using network data."""
-    resolved: List[Dict[str, Any]] = []
+    resolved: list[dict[str, Any]] = []
     for entry in entries:
         if not isinstance(entry, dict):
             resolved.append(entry)
@@ -172,9 +161,9 @@ def _resolve_config_entry_variables(
     return resolved
 
 
-def _service_config_apply_hints(service: str, service_data: Dict[str, Any]) -> Dict[str, Any]:
+def _service_config_apply_hints(service: str, service_data: dict[str, Any]) -> dict[str, Any]:
     """Build apply hints for service-owned config artifacts."""
-    hints: Dict[str, Any] = {}
+    hints: dict[str, Any] = {}
 
     apply_block = service_data.get("apply")
     if isinstance(apply_block, dict):
@@ -207,22 +196,22 @@ def _service_config_apply_hints(service: str, service_data: Dict[str, Any]) -> D
 
 
 def _annotate_config_entries_with_apply_hints(
-    entries: List[Dict[str, Any]],
-    apply_hints: Dict[str, Any],
-    directory_apply_hints: Dict[str, Any],
-) -> List[Any]:
+    entries: list[dict[str, Any]],
+    apply_hints: dict[str, Any],
+    directory_apply_hints: dict[str, Any],
+) -> list[Any]:
     """Attach internal apply hints to service config/directory entries."""
     if not apply_hints and not directory_apply_hints:
         return entries
 
-    annotated: List[Any] = []
+    annotated: list[Any] = []
     for entry in entries:
         if not isinstance(entry, dict):
             annotated.append(entry)
             continue
 
         merged = dict(entry)
-        entry_hints: Dict[str, Any] = dict(apply_hints)
+        entry_hints: dict[str, Any] = dict(apply_hints)
         if "source" not in merged:
             entry_hints.update(directory_apply_hints)
             for key in ("owner", "group", "mode"):
@@ -237,16 +226,16 @@ def _annotate_config_entries_with_apply_hints(
     return annotated
 
 
-def _annotate_systemd_entries_with_apply_hints(entries: List[Dict[str, Any]]) -> List[Any]:
+def _annotate_systemd_entries_with_apply_hints(entries: list[dict[str, Any]]) -> list[Any]:
     """Attach internal apply hints to composition.systemd entries."""
-    annotated: List[Any] = []
+    annotated: list[Any] = []
     for entry in entries:
         if not isinstance(entry, dict):
             annotated.append(entry)
             continue
 
         merged = dict(entry)
-        hints: Dict[str, Any] = {}
+        hints: dict[str, Any] = {}
         if merged.get("enable") is True:
             hints["enable_mode"] = "enable"
         if merged.get("start") is True:
@@ -258,7 +247,7 @@ def _annotate_systemd_entries_with_apply_hints(entries: List[Dict[str, Any]]) ->
     return annotated
 
 
-def _service_directory_apply_hints(service_data: Dict[str, Any]) -> Dict[str, Any]:
+def _service_directory_apply_hints(service_data: dict[str, Any]) -> dict[str, Any]:
     """Build apply hints for service.directory ownership/mode enforcement."""
     podman = service_data.get("podman")
     owner = "root"

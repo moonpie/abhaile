@@ -2,7 +2,7 @@
 
 from datetime import datetime as _dt
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -71,14 +71,14 @@ def test_hash_mismatch_increments_counter(
         lambda _zone_name: {"date": "20260306", "counter": "03", "content_hash": "dead"},
     )
 
-    network: Dict[str, Any] = {"hosts": {}, "services": {}}
-    zone: Dict[str, Any] = {
+    network: dict[str, Any] = {"hosts": {}, "services": {}}
+    zone: dict[str, Any] = {
         "name": "example.com.",
         "provider": {"type": "internal", "name": "coredns-common"},
         "serial": {"date": "20260306", "counter": "00", "content_hash": "bad"},
     }
 
-    expected_zone: Dict[str, Any] = {
+    expected_zone: dict[str, Any] = {
         "name": "example.com.",
         "provider": {"type": "internal", "name": "coredns-common"},
         "serial": {"date": "20260306", "counter": "04"},
@@ -115,8 +115,8 @@ def test_hash_match_no_increment(
         lambda _zone_name: {"date": "20260306", "counter": "99", "content_hash": "dead"},
     )
 
-    network: Dict[str, Any] = {"hosts": {}, "services": {}}
-    zone: Dict[str, Any] = {
+    network: dict[str, Any] = {"hosts": {}, "services": {}}
+    zone: dict[str, Any] = {
         "name": "example.com.",
         "provider": {"type": "internal", "name": "coredns-common"},
         "serial": {"date": "20260306", "counter": "00", "content_hash": ""},
@@ -165,8 +165,8 @@ composition:
         encoding="utf-8",
     )
 
-    network: Dict[str, Any] = {"hosts": {}, "services": {}}
-    zone: Dict[str, Any] = {
+    network: dict[str, Any] = {"hosts": {}, "services": {}}
+    zone: dict[str, Any] = {
         "name": "example.com.",
         "provider": {"type": "internal", "name": "coredns-common"},
         "serial": {"date": "20260306", "counter": "00", "content_hash": ""},

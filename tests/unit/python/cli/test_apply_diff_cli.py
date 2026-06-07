@@ -203,7 +203,7 @@ class TestApplyCli:
             calls.append(argv)
             return _ValidationResult()
 
-        monkeypatch.setattr("abhaile.cli.apply.run_validation", _fake_validation)
+        monkeypatch.setattr("abhaile.apply.dispatch.run_validation", _fake_validation)
 
         rc = main_apply(
             [
@@ -268,7 +268,7 @@ class TestApplyCli:
             }
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.SystemdExecutor.apply_unit_write",
+            "abhaile.apply.dispatch.SystemdExecutor.apply_unit_write",
             _fake_apply_unit_write,
         )
 
@@ -292,7 +292,7 @@ class TestApplyCli:
         desired = tmp_path / "rendered" / "manifest.json"
         source = tmp_path / "rendered" / "system" / "etc" / "sysusers.d" / "abhaile.conf"
         source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text("u abhaile 1001 abhaile - /home/abhaile /bin/bash\n")
+        source.write_text("u abhaile 1001 - /home/abhaile /bin/bash\n")
 
         target = tmp_path / "target" / "etc" / "sysusers.d" / "abhaile.conf"
         _write_manifest(
@@ -309,19 +309,19 @@ class TestApplyCli:
                         "owner_group": "root",
                         "mode": "0644",
                     },
-                    "sha256": _sha_of("u abhaile 1001 abhaile - /home/abhaile /bin/bash\n"),
-                    "size": len("u abhaile 1001 abhaile - /home/abhaile /bin/bash\n"),
+                    "sha256": _sha_of("u abhaile 1001 - /home/abhaile /bin/bash\n"),
+                    "size": len("u abhaile 1001 - /home/abhaile /bin/bash\n"),
                 }
             ],
         )
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.atomic_copy_file_with_perms",
+            "abhaile.apply.staging.atomic_copy_file_with_perms",
             lambda *args, **kwargs: None,
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.UserManagementExecutor.apply_sysusers_write",
+            "abhaile.apply.dispatch.UserManagementExecutor.apply_sysusers_write",
             lambda entry: {
                 "kind": entry.get("kind", "host.sysusers"),
                 "actions": [{"action": "systemd-sysusers", "success": True, "return_code": 0}],
@@ -406,7 +406,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.CorednsExecutor.validate_zone_file",
+            "abhaile.apply.dispatch.CorednsExecutor.validate_zone_file",
             lambda *args, **kwargs: ExecutionResult(
                 action_id="validate-zone:abhaile.home.arpa",
                 action_type="validation",
@@ -473,7 +473,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.CorednsExecutor.apply_zone_write",
+            "abhaile.apply.dispatch.CorednsExecutor.apply_zone_write",
             lambda entry, target_path: {
                 "kind": entry.get("kind", "coredns.zone"),
                 "zone": "abhaile.home.arpa",
@@ -521,7 +521,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.CaddyExecutor.validate_caddy_config",
+            "abhaile.apply.dispatch.CaddyExecutor.validate_caddy_config",
             lambda *args, **kwargs: ExecutionResult(
                 action_id="validate-caddy:dmz",
                 action_type="validation",
@@ -579,7 +579,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.CaddyExecutor.apply_config_write",
+            "abhaile.apply.dispatch.CaddyExecutor.apply_config_write",
             lambda entry, target_path: {
                 "kind": entry.get("kind", "caddy.config"),
                 "segment": "dmz",
@@ -638,7 +638,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.VaultExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.VaultExecutor.apply_owner_change",
             lambda owner_ref, run_as_user: {
                 "owner_ref": owner_ref,
                 "run_as_user": run_as_user,
@@ -694,7 +694,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.NetworkdExecutor.apply_owner_change",
             lambda owner_ref, interface, strict_reconfigure, kinds, **kwargs: {
                 "owner_ref": owner_ref,
                 "interface": interface,
@@ -791,10 +791,10 @@ class TestApplyCli:
             )
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.delete_interface", _fake_delete_interface
+            "abhaile.apply.dispatch.NetworkdExecutor.delete_interface", _fake_delete_interface
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.reload_networkd", _fake_reload_networkd
+            "abhaile.apply.dispatch.NetworkdExecutor.reload_networkd", _fake_reload_networkd
         )
 
         rc = main_apply(
@@ -895,10 +895,10 @@ class TestApplyCli:
             )
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.delete_interface", _fake_delete_interface
+            "abhaile.apply.dispatch.NetworkdExecutor.delete_interface", _fake_delete_interface
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.reload_networkd", _fake_reload_networkd
+            "abhaile.apply.dispatch.NetworkdExecutor.reload_networkd", _fake_reload_networkd
         )
 
         rc = main_apply(
@@ -958,7 +958,7 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             lambda owner_ref, kinds, changed_phases, rootless, run_as_user: {
                 "owner_ref": owner_ref,
                 "unit": "blocky.service",
@@ -1111,11 +1111,11 @@ class TestApplyCli:
             }
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_convergence_action",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_convergence_action",
             _fake_apply_convergence_action,
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             _fake_apply_owner_change,
         )
 
@@ -1274,11 +1274,11 @@ class TestApplyCli:
             }
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_convergence_action",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_convergence_action",
             _fake_apply_convergence_action,
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             _fake_apply_owner_change,
         )
 
@@ -1400,11 +1400,11 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_convergence_action",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_convergence_action",
             lambda *args, **kwargs: pytest.fail("dry-run should not execute convergence actions"),
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.QuadletExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             lambda *args, **kwargs: pytest.fail("dry-run should not execute owner changes"),
         )
 
@@ -1486,23 +1486,23 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.cli.apply.ServiceConfigExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.ServiceConfigExecutor.apply_owner_change",
             lambda *args, **kwargs: pytest.fail("dry-run should not execute service restarts"),
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.ServiceConfigExecutor.apply_directory_change",
+            "abhaile.apply.dispatch.ServiceConfigExecutor.apply_directory_change",
             lambda *args, **kwargs: pytest.fail("dry-run should not execute directory enforcement"),
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.delete_interface",
+            "abhaile.apply.dispatch.NetworkdExecutor.delete_interface",
             lambda *args, **kwargs: pytest.fail("dry-run should not delete interfaces"),
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.reload_networkd",
+            "abhaile.apply.dispatch.NetworkdExecutor.reload_networkd",
             lambda *args, **kwargs: pytest.fail("dry-run should not reload networkd"),
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.NetworkdExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.NetworkdExecutor.apply_owner_change",
             lambda *args, **kwargs: pytest.fail(
                 "dry-run should not execute networkd owner changes"
             ),
@@ -1579,7 +1579,7 @@ class TestApplyCli:
             }
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.ServiceConfigExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.ServiceConfigExecutor.apply_owner_change",
             _fake_service_owner_change,
         )
 
@@ -1673,11 +1673,11 @@ class TestApplyCli:
             }
 
         monkeypatch.setattr(
-            "abhaile.cli.apply.ServiceConfigExecutor.apply_directory_change",
+            "abhaile.apply.dispatch.ServiceConfigExecutor.apply_directory_change",
             _fake_apply_directory_change,
         )
         monkeypatch.setattr(
-            "abhaile.cli.apply.ServiceConfigExecutor.apply_owner_change",
+            "abhaile.apply.dispatch.ServiceConfigExecutor.apply_owner_change",
             _fake_apply_owner_change,
         )
 

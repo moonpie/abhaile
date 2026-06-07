@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from abhaile.renderers.config import (
     filter_config_entries_by_destination_prefix,
     render_config_entries,
 )
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 
 
 def render_host_config(
     host: str,
-    host_config: Dict[str, Any],
-    common_config: Dict[str, Any],
-    network: Dict[str, Any],
+    host_config: dict[str, Any],
+    common_config: dict[str, Any],
+    network: dict[str, Any],
     config_root: Path,
     output_dir: Path,
     *,

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import ipaddress
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 
 from abhaile.utils.errors import RenderError
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
 from abhaile.utils.network import strip_cidr
 from abhaile.utils.templating import create_jinja_env
@@ -21,9 +21,9 @@ from abhaile.renderers.config import (
 
 def render_networkd_config(
     host: str,
-    host_config: Dict[str, Any],
-    common_config: Dict[str, Any],
-    network: Dict[str, Any],
+    host_config: dict[str, Any],
+    common_config: dict[str, Any],
+    network: dict[str, Any],
     config_root: Path,
     output_dir: Path,
     *,
@@ -34,17 +34,6 @@ def render_networkd_config(
 
     Processes composition.config entries with destinations under /etc/systemd/network/
     from both common and host-specific configurations.
-
-    Args:
-        host: Host name (e.g., phobos, deimos).
-        host_config: Host configuration from config/hosts/<host>/host.yaml.
-        common_config: Common configuration from config/hosts/common/host.yaml.
-        network: Network configuration from network.yaml.
-        config_root: Path to config/ directory.
-        output_dir: Path to output root (entries render relative to this).
-
-    Raises:
-        RenderError: If source file/template missing or rendering fails.
     """
     output_networkd_dir = output_dir / "etc/systemd/network"
     output_networkd_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +93,7 @@ def render_networkd_config(
 def render_networkd_dropins(
     host: str,
     host_services: list[str],
-    network: Dict[str, Any],
+    network: dict[str, Any],
     config_root: Path,
     output_networkd_dir: Path,
     *,
@@ -118,16 +107,6 @@ def render_networkd_dropins(
 
     The drop-in is placed under the .network.d/ directory for the interface on the
     same VLAN as the service address in network.yaml.
-
-    Args:
-        host: Host name (e.g., phobos, deimos).
-        host_services: Service names mapped to this host.
-        network: Network configuration from network.yaml.
-        config_root: Path to config/ directory.
-        output_networkd_dir: Path to <output>/rendered/systemd-networkd/.
-
-    Raises:
-        RenderError: If drop-in selection is ambiguous or configuration is missing.
     """
     if not host_services:
         return
@@ -206,9 +185,9 @@ def render_networkd_dropins(
 
 def _get_dropin_dirs_by_vlan(
     host: str,
-    network: Dict[str, Any],
+    network: dict[str, Any],
     output_networkd_dir: Path,
-) -> Dict[str, Path]:
+) -> dict[str, Path]:
     """Return drop-in directories keyed by VLAN name.
 
     Raises RenderError if multiple drop-in directories map to the same VLAN.
@@ -226,7 +205,7 @@ def _get_dropin_dirs_by_vlan(
         if path.is_dir() and path.name.endswith(".network.d")
     ]
 
-    dropins_by_vlan: Dict[str, list[Path]] = {}
+    dropins_by_vlan: dict[str, list[Path]] = {}
     for dropin_dir in dropin_dirs:
         interface_name = _interface_from_base_file(output_networkd_dir, dropin_dir)
         if interface_name not in interface_vlans:
@@ -249,22 +228,9 @@ def _get_dropin_dirs_by_vlan(
 
 
 def _interface_from_base_file(output_networkd_dir: Path, dropin_dir: Path) -> str:
-    """Extract interface name from the base file corresponding to a drop-in directory.
-
-    The base file is the drop-in directory name with .d suffix removed.
-    The interface name is extracted from the [Match] Name= field in the base file.
+    """Extract interface name from the [Match] Name= field of the base .network file.
 
     Example: 21-ipvlan-l2.network.d -> reads 21-ipvlan-l2.network -> [Match] Name=ipvlan-l2
-
-    Args:
-        output_networkd_dir: Path to systemd-networkd output directory.
-        dropin_dir: Drop-in directory path.
-
-    Returns:
-        Interface name from [Match] Name= field.
-
-    Raises:
-        RenderError: If base file missing, invalid format, or Name= not found.
     """
     dropin_name = dropin_dir.name
     if not dropin_name.endswith(".d"):
@@ -344,8 +310,8 @@ def _register_networkd_owners(
     collector: ArtifactCollector | None,
     *,
     host: str,
-    host_config: Dict[str, Any],
-    network: Dict[str, Any],
+    host_config: dict[str, Any],
+    network: dict[str, Any],
 ) -> None:
     """Register interface owners for collected networkd artifacts."""
     if collector is None:
@@ -364,16 +330,16 @@ def _register_networkd_owners(
 def _build_requires_by_iface(
     *,
     host: str,
-    host_config: Dict[str, Any],
-    network: Dict[str, Any],
-) -> Dict[str, list[str]]:
+    host_config: dict[str, Any],
+    network: dict[str, Any],
+) -> dict[str, list[str]]:
     """Build requires edges for host interfaces from network topology.
 
     For this repo's network model, ipvlan interfaces are children of a host's
     physical uplink (or VLAN subinterface for dotted names). VLAN interfaces are
     children of their base interface.
     """
-    requires_by_iface: Dict[str, list[str]] = {}
+    requires_by_iface: dict[str, list[str]] = {}
 
     host_interfaces = network.get("hosts", {}).get(host, {}).get("interfaces", {})
     if not isinstance(host_interfaces, dict):
@@ -411,7 +377,7 @@ def _ensure_networkd_owner(
     collector: ArtifactCollector,
     owner_ref: str,
     *,
-    requires_by_iface: Dict[str, list[str]] | None = None,
+    requires_by_iface: dict[str, list[str]] | None = None,
 ) -> None:
     """Register owner metadata for a network interface if not present."""
     if not owner_ref.startswith("iface:"):

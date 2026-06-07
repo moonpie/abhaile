@@ -72,12 +72,5 @@ class RenderMetadata:
         self.owners[owner.name] = owner
 
     def get_artifact_by_owner(self, owner_ref: str) -> list[RenderedArtifact]:
-        """Get all artifacts owned by a specific owner.
-
-        Args:
-            owner_ref: The owner identifier.
-
-        Returns:
-            List of artifacts owned by this owner.
-        """
+        """Get artifacts owned by a specific owner."""
         return [a for a in self.artifacts.values() if a.owner_ref == owner_ref]

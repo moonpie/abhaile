@@ -3,7 +3,7 @@
 import tempfile
 from pathlib import Path
 
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 
 
 class TestArtifactCollector:

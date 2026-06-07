@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Iterable
 
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
 
-def parse_mapping(mapping: Any) -> Dict[str, List[str]]:
+def parse_mapping(mapping: Any) -> dict[str, list[str]]:
     """Parse mapping.yaml to extract host -> services mapping.
 
     Args:
@@ -23,14 +23,14 @@ def parse_mapping(mapping: Any) -> Dict[str, List[str]]:
     """
     if not isinstance(mapping, dict) or "abhaile" not in mapping:
         raise RenderError("mapping.yaml missing top-level 'abhaile' list")
-    hosts: Dict[str, List[str]] = {}
+    hosts: dict[str, list[str]] = {}
     for item in mapping["abhaile"]:
         if not isinstance(item, dict) or len(item) != 1:
             raise RenderError("mapping.yaml host entries must be single-key objects")
         host, services = next(iter(item.items()))
         if not isinstance(services, list):
             raise RenderError(f"mapping.yaml services for host '{host}' must be a list")
-        service_names: List[str] = []
+        service_names: list[str] = []
         for svc in services:
             if isinstance(svc, str):
                 service_names.append(svc)
@@ -100,7 +100,7 @@ def _extract_service_name(svc_entry: Any) -> str:
     raise RenderError(f"Invalid service entry: {svc_entry}")
 
 
-def ensure_service_definitions(config_root: Path, services: Iterable[str]) -> List[Path]:
+def ensure_service_definitions(config_root: Path, services: Iterable[str]) -> list[Path]:
     """Ensure all services have service.yaml files.
 
     Args:
@@ -113,7 +113,7 @@ def ensure_service_definitions(config_root: Path, services: Iterable[str]) -> Li
     Raises:
         RenderError: If any service definition is missing.
     """
-    service_paths: List[Path] = []
+    service_paths: list[Path] = []
     for service in services:
         service_file = config_root / "services" / service / "service.yaml"
         if not service_file.exists():
@@ -131,7 +131,7 @@ def validate_service_names(config_root: Path) -> None:
     Raises:
         RenderError: If any service name mismatches.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for service_yaml in (config_root / "services").glob("*/service.yaml"):
         service_data = read_yaml_mapping(service_yaml)
         name = service_data.get("name")

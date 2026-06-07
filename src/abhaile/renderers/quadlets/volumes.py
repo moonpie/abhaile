@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.renderers.quadlets.helpers import (
     _quadlet_kind_from_filename,
@@ -11,11 +11,11 @@ from abhaile.renderers.quadlets.helpers import (
     _register_quadlet_artifact,
     _validate_trailing_newline,
 )
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
 
-HostPathRegistry = Dict[str, Dict[str, tuple[str, bool]]]
+HostPathRegistry = dict[str, dict[str, tuple[str, bool]]]
 
 
 def _register_host_path_usage(
@@ -27,20 +27,7 @@ def _register_host_path_usage(
     user: str,
     shared: bool,
 ) -> None:
-    """Register host path usage and enforce shared-volume reuse rules.
-
-    Args:
-        host_path: The host path to validate.
-        volume_filename: Computed quadlet volume filename.
-        host_paths_by_user: Dict tracking host paths by user.
-        service: Service name.
-        container_name: Container name (if applicable).
-        user: User name.
-        shared: Whether this is a shared volume.
-
-    Raises:
-        RenderError: If reuse rules are violated.
-    """
+    """Register host path usage and enforce shared-volume reuse rules."""
     user_registry = host_paths_by_user.setdefault(user, {})
     existing = user_registry.get(host_path)
     if existing is None:
@@ -80,7 +67,7 @@ def _quadlet_output_root(user: str) -> Path:
 def _render_named_volumes(
     *,
     service: str,
-    container_def: Dict[str, Any],
+    container_def: dict[str, Any],
     user: str,
     output_root_relative: str,
     output_dir: Path,
@@ -92,28 +79,8 @@ def _render_named_volumes(
     shared_volume_is_global: bool,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
-) -> tuple[List[str], List[str]]:
-    """Render named volume quadlets and return container volume lines.
-
-    Args:
-        service: Service name.
-        container_def: Container definition with named_volumes.
-        user: User (root or username).
-        output_root_relative: Relative path to output root.
-        output_dir: Base output directory.
-        shared_output_dir: Shared output directory.
-        host_paths_by_user: Tracking dict for host path validation.
-        config_root: Path to config/ directory.
-        container_name: Optional container name (pod containers).
-        name_prefix: Prefix for non-shared volume names.
-        shared_volume_is_global: Flag for shared volume naming/validation behavior.
-
-    Returns:
-        Tuple of (volume lines for the container, dependent owner refs).
-
-    Raises:
-        RenderError: If validation fails.
-    """
+) -> tuple[list[str], list[str]]:
+    """Render named volume quadlets and return container volume lines."""
     named_volumes = container_def.get("named_volumes", []) or []
     if not named_volumes:
         return ([], [])
@@ -124,8 +91,8 @@ def _render_named_volumes(
         else:
             name_prefix = f"{service}-"
 
-    volume_lines: List[str] = []
-    volume_owner_refs: List[str] = []
+    volume_lines: list[str] = []
+    volume_owner_refs: list[str] = []
     volume_template_path = config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2"
     if not volume_template_path.exists():
         raise RenderError(f"Missing volume template: {volume_template_path}")
@@ -177,7 +144,7 @@ def _render_named_volumes(
         )
         if collector is not None and rendered_root is not None:
             vol_target_root = Path("/") / output_root_relative
-            volume_hints: Dict[str, Any] = {
+            volume_hints: dict[str, Any] = {
                 "rootless": user != "root",
                 "shared": shared,
             }
@@ -193,6 +160,7 @@ def _render_named_volumes(
                 content=rendered_content,
                 apply_hints=volume_hints,
                 owner_apply_hints=volume_hints,
+                replace=shared,
             )
 
         volume_line = _format_volume_line(volume_filename, mount_path, volume.get("mode"))
@@ -202,10 +170,10 @@ def _render_named_volumes(
     return (volume_lines, sorted(set(volume_owner_refs)))
 
 
-def _build_mounted_file_lines(container_def: Dict[str, Any]) -> List[str]:
+def _build_mounted_file_lines(container_def: dict[str, Any]) -> list[str]:
     """Build Volume= lines for mounted files entries."""
     mounted_files = container_def.get("mounted_files", []) or []
-    volume_lines: List[str] = []
+    volume_lines: list[str] = []
     for mount in mounted_files:
         host_path = mount.get("host_path")
         mount_path = mount.get("mount_path")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.renderers.quadlets.helpers import (
     _quadlet_kind_from_filename,
@@ -11,12 +11,12 @@ from abhaile.renderers.quadlets.helpers import (
     _register_quadlet_artifact,
     _validate_trailing_newline,
 )
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.templating import create_jinja_env
 
 
-def _lookup_service_vlan(service: str, network: Dict[str, Any]) -> str:
+def _lookup_service_vlan(service: str, network: dict[str, Any]) -> str:
     """Return the VLAN name for a service from network.yaml."""
     service_def = network.get("services", {}).get(service)
     if not service_def:
@@ -31,8 +31,8 @@ def _lookup_service_vlan(service: str, network: Dict[str, Any]) -> str:
 
 def _render_network_quadlets(
     host: str,
-    network: Dict[str, Any],
-    vlans: List[str],
+    network: dict[str, Any],
+    vlans: list[str],
     output_dir: Path,
     config_root: Path,
     *,

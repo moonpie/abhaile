@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from abhaile.renderers.manifest import MANIFEST_VERSION, build_manifest, write_manifest
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 

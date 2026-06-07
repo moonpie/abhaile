@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from abhaile.renderers.ingress import render_ingress_configs
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 

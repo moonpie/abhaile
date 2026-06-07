@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
 
 from abhaile.renderers.vault_templates.discovery import VaultTemplateSpec
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 from abhaile.utils.paths import normalize_service_prefixed_path
 
 
 def copy_vault_agent_templates(
-    specs: List[VaultTemplateSpec],
+    specs: list[VaultTemplateSpec],
     services_root: Path,
     output_dir: Path,
     templates_host_root: str,
@@ -22,7 +21,7 @@ def copy_vault_agent_templates(
     *,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
-) -> List[Dict[str, str]]:
+) -> list[dict[str, str]]:
     """Copy vault-agent templates and return template metadata.
 
     Args:
@@ -40,7 +39,7 @@ def copy_vault_agent_templates(
     Raises:
         RenderError: If a referenced template file doesn't exist.
     """
-    templates: List[Dict[str, str]] = []
+    templates: list[dict[str, str]] = []
 
     for spec in specs:
         relative_source = normalize_service_prefixed_path(spec.service, spec.source)
@@ -63,13 +62,23 @@ def copy_vault_agent_templates(
             encoding="utf-8",
             newline="\n",
         )
-        _register_vault_template_artifact(
+
+        from abhaile.renderers.vault_templates.rendering import _register_vault_artifact
+
+        _register_vault_artifact(
             collector=collector,
             rendered_root=rendered_root,
             output_path=dest_path,
             target_path=_join_mount_path(templates_host_root, template_rel),
-            contributor_ref=f"service:{spec.service}",
+            kind="vault.template",
             content=dest_path.read_text(encoding="utf-8"),
+            contributor_ref=f"service:{spec.service}",
+            apply_hints={
+                "write_order": "before-config",
+                "restart_mode": "restart",
+                "rootless": True,
+                "podman_user": "abhaile",
+            },
         )
 
         templates.append(
@@ -81,43 +90,6 @@ def copy_vault_agent_templates(
         )
 
     return templates
-
-
-def _register_vault_template_artifact(
-    *,
-    collector: ArtifactCollector | None,
-    rendered_root: Path | None,
-    output_path: Path,
-    target_path: str,
-    contributor_ref: str,
-    content: str,
-) -> None:
-    """Register copied vault template metadata when collection is enabled."""
-    if collector is None or rendered_root is None:
-        return
-
-    owner_ref = "service:vault-agent"
-    if owner_ref not in collector.get_all_owners():
-        collector.register_owner(
-            name=owner_ref,
-            description="vault-agent service",
-        )
-
-    collector.register_artifact(
-        render_path=output_path.relative_to(rendered_root).as_posix(),
-        target_path=target_path,
-        kind="vault.template",
-        owner_ref=owner_ref,
-        contributor_ref=contributor_ref,
-        content=content,
-        replace=True,
-        apply_hints={
-            "write_order": "before-config",
-            "restart_mode": "restart",
-            "rootless": True,
-            "podman_user": "abhaile",
-        },
-    )
 
 
 def _join_mount_path(root: str, path: str) -> str:

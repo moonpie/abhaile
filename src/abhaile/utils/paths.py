@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import configparser
 from pathlib import Path
-from typing import Dict
 
 from abhaile.utils.errors import RenderError
 
@@ -46,7 +45,7 @@ def get_repo_root(script_file: Path) -> Path:
     raise RenderError(f"Could not determine repository root from path: {script_file}")
 
 
-def load_paths(repo_root: Path) -> Dict[str, str]:
+def load_paths(repo_root: Path) -> dict[str, str]:
     """Load paths from repo-root paths.ini (required).
 
     Args:
@@ -67,7 +66,7 @@ def load_paths(repo_root: Path) -> Dict[str, str]:
     if "paths" not in config:
         raise RenderError(f"Missing [paths] section in {paths_ini}")
 
-    values: Dict[str, str] = {}
+    values: dict[str, str] = {}
     missing = []
     for key in sorted(REQUIRED_PATH_KEYS):
         if key not in config["paths"]:
@@ -85,7 +84,7 @@ def load_paths(repo_root: Path) -> Dict[str, str]:
 def resolve_output_root(
     host: str,
     output_override: Path | None,
-    paths: Dict[str, str],
+    paths: dict[str, str],
     all_mode: bool,
 ) -> Path:
     """Resolve output root per ADR 0001.
@@ -121,18 +120,3 @@ def normalize_service_prefixed_path(service: str, raw_path: str) -> str:
     if raw_path.startswith(f"{service}/"):
         return raw_path[len(service) + 1 :]
     return raw_path
-
-
-def resolve_service_prefixed_path(
-    services_root: Path,
-    service: str,
-    raw_path: str,
-) -> Path:
-    """Normalize a path that may be prefixed with a service name.
-
-    Accepts either service-name/relative/path or relative/path and returns the
-    resolved path under the service's directory without changing filenames or
-    directory structure.
-    """
-    relative_path = normalize_service_prefixed_path(service, raw_path)
-    return services_root / service / relative_path

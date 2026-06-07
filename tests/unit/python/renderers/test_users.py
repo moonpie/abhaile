@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from abhaile.renderers.users import render_users_artifacts
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
 
@@ -79,7 +79,7 @@ composition:
         "g abhaile 1001\n"
         "g apex 1002\n"
         "g sudo 27\n"
-        'u abhaile 1001 abhaile "Abhaile service account" /home/abhaile /bin/bash\n'
+        'u abhaile 1001 "Abhaile service account" /home/abhaile /bin/bash\n'
         "m abhaile apex\n"
         "m abhaile sudo\n"
     )
@@ -232,3 +232,38 @@ composition:
     owners = collector.get_all_owners()
     assert owners["host-sudoers:phobos"].requires == ["host-users:phobos"]
     assert owners["principal:abhaile"].requires == ["host-users:phobos"]
+
+
+def test_sysusers_uid_group_syntax_when_group_differs(write_file: Any, tmp_path: Path) -> None:
+    """When primary_group differs from username, sysusers emits uid:group syntax."""
+    config_root = tmp_path / "config"
+    output_dir = tmp_path / "out" / "rendered" / "system"
+
+    write_file(
+        config_root / "hosts" / "common" / "host.yaml",
+        "name: common\ncomposition:\n  include: []\n  user_management: {}\n",
+    )
+    write_file(
+        config_root / "hosts" / "phobos" / "host.yaml",
+        """
+name: phobos
+composition:
+  include:
+    - common
+  user_management:
+    users:
+      deploy:
+        uid: 2001
+        primary_group: www-data
+        home: /home/deploy
+        shell: /bin/bash
+    groups:
+      www-data:
+        gid: 33
+""".strip() + "\n",
+    )
+
+    render_users_artifacts("phobos", config_root, output_dir)
+
+    sysusers_text = (output_dir / "etc" / "sysusers.d" / "abhaile.conf").read_text(encoding="utf-8")
+    assert "u deploy 2001:www-data - /home/deploy /bin/bash\n" in sysusers_text

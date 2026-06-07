@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
-from abhaile.utils.artifact_collector import ArtifactCollector
+from abhaile.models.kinds import KIND_FAMILIES
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
 
-# Maps quadlet file suffix to artifact kind used in the manifest
+# Derived from KIND_FAMILIES["quadlet"] — maps file suffix to artifact kind
 _QUADLET_KIND_BY_SUFFIX: dict[str, str] = {
-    ".container": "quadlet.container",
-    ".pod": "quadlet.pod",
-    ".image": "quadlet.image",
-    ".build": "quadlet.build",
-    ".volume": "quadlet.volume",
-    ".network": "quadlet.network",
+    f".{kind.split('.', 1)[1]}": kind for kind in KIND_FAMILIES["quadlet"]
 }
 
 
@@ -65,20 +61,11 @@ def _register_quadlet_artifact(
     apply_hints: dict[str, Any] | None = None,
     owner_apply_hints: dict[str, Any] | None = None,
     owner_requires: list[str] | None = None,
+    replace: bool = False,
 ) -> None:
     """Register a single quadlet artifact with the collector.
 
     Creates the owner if it has not yet been registered for this render.
-
-    Args:
-        collector: Artifact collector to register with.
-        rendered_root: Root of the rendered output tree (for render_path computation).
-        output_path: Absolute path of the written artifact.
-        target_path: Live host target path for this artifact.
-        kind: Artifact kind (e.g., ``quadlet.container``).
-        owner_ref: Owner identifier (e.g., ``unit:blocky.service``).
-        content: File content string.
-        apply_hints: Optional apply-phase hints.
     """
     render_path = output_path.relative_to(rendered_root).as_posix()
     if owner_ref not in collector.get_all_owners():
@@ -95,6 +82,7 @@ def _register_quadlet_artifact(
         owner_ref=owner_ref,
         content=content,
         apply_hints=apply_hints,
+        replace=replace,
     )
 
 
@@ -117,48 +105,45 @@ def _discover_build_image_files(
     quadlets_dir: Path,
     service: str,
     container_name: str | None = None,
-) -> Tuple[Path | None, Path | None, str | None, str | None]:
-    """Discover build/image files and compute target filenames.
+) -> tuple[Path | None, Path | None, str | None, str | None]:
+    """Discover build/image files and compute target filenames."""
+    name_base = f"{service}-app-{container_name}" if container_name else service
 
-    Args:
-        quadlets_dir: Directory containing quadlet files.
-        service: Service name.
-        container_name: Optional container name (for pod containers).
+    _build = quadlets_dir / "build.build"
+    _image = quadlets_dir / "image.image"
 
-    Returns:
-        Tuple of (build_path, image_path, build_filename, image_filename).
-    """
-    build_files = sorted(
-        path for path in quadlets_dir.rglob("build.build") if path.parent == quadlets_dir
-    )
-    image_files = sorted(
-        path for path in quadlets_dir.rglob("image.image") if path.parent == quadlets_dir
-    )
-
-    if container_name:
-        build_error = (
-            "Multiple build.build files found for container "
-            f"'{container_name}' in pod service '{service}'"
-        )
-        image_error = (
-            "Multiple image.image files found for container "
-            f"'{container_name}' in pod service '{service}'"
-        )
-        name_base = f"{service}-app-{container_name}"
-    else:
-        build_error = f"Multiple build.build files found for service '{service}'"
-        image_error = f"Multiple image.image files found for service '{service}'"
-        name_base = service
-
-    if len(build_files) > 1:
-        raise RenderError(build_error)
-    if len(image_files) > 1:
-        raise RenderError(image_error)
-
-    build_path = build_files[0] if build_files else None
-    image_path = image_files[0] if image_files else None
+    build_path = _build if _build.exists() else None
+    image_path = _image if _image.exists() else None
 
     build_filename = f"{name_base}.build" if build_path else None
     image_filename = f"{name_base}.image" if image_path else None
 
     return build_path, image_path, build_filename, image_filename
+
+
+def _resolve_composition_definition(
+    key: str,
+    service: str,
+    composition: dict[str, Any],
+    services_root: Path,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Resolve a composition definition by key, walking includes if needed."""
+    from abhaile.utils.composition import resolve_composition
+
+    definition = composition.get(key)
+    if definition:
+        return definition, service
+
+    config_root = services_root.parent
+    includes = composition.get("include", []) or []
+    for included in includes:
+        included_composition = resolve_composition(
+            service_name=included,
+            config_root=config_root,
+            merge_strategy="deep",
+        )
+        definition = included_composition.get(key)
+        if definition:
+            return definition, included
+
+    return None, None

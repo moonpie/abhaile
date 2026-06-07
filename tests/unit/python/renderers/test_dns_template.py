@@ -1,7 +1,7 @@
 """Unit tests for DNS zone template rendering."""
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from abhaile.dns.renderer import render_zone_template as _render_zone_template
 
@@ -27,11 +27,11 @@ class TestRenderZoneTemplate:
             "{% endfor %}",
         )
 
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "serial": {"date": "20260208", "counter": "00", "content_hash": "abc123"},
         }
-        records: List[Dict[str, Any]] = [
+        records: list[dict[str, Any]] = [
             {"name": "www", "type": "A", "rdata": "192.0.2.1", "ttl": 3600},
         ]
         content = _render_zone_template(
@@ -53,7 +53,7 @@ class TestRenderZoneTemplate:
             "SERIAL {{ zone.serial }}\n",
         )
 
-        zone: Dict[str, Any] = {
+        zone: dict[str, Any] = {
             "name": "example.com.",
             "serial": {"date": "20260208", "counter": "09", "content_hash": "abc123"},
         }

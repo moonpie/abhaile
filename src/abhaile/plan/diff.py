@@ -5,10 +5,50 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
-from abhaile.renderers.manifest import sha256_file
+from abhaile.utils.hashing import sha256_file
 from abhaile.utils.errors import DiffError
+
+
+class SyncPlan(TypedDict):
+    """Classified file operations from manifest comparison."""
+
+    writes: list[dict[str, Any]]
+    removals_safe: list[dict[str, Any]]
+    removals_drifted: list[dict[str, Any]]
+    removals_missing: list[dict[str, Any]]
+
+
+class DiffSummary(TypedDict):
+    """High-level diff counts."""
+
+    added: int
+    changed: int
+    removed: int
+    writes: int
+    removals_safe: int
+    removals_drifted: int
+    removals_missing: int
+    owner_plan_changed_owners: int
+    owner_plan_expanded_owners: int
+
+
+class PlanResult(TypedDict):
+    """Return type for plan_manifest_drift."""
+
+    host: str
+    desired_manifest_path: str
+    applied_manifest_path: str
+    applied_manifest_exists: bool
+    desired_manifest: dict[str, Any]
+    diff: dict[str, list[dict[str, Any]]]
+    sync: SyncPlan
+    owner_plan: dict[str, Any]
+    networkd_netdev_delete_order: list[str]
+    quadlet_convergence_plans: dict[str, list[dict[str, str]]]
+    summary: DiffSummary
+
 
 NON_REGULAR_LIVE_FILE = "__NON_REGULAR__"
 
@@ -446,9 +486,7 @@ def _build_quadlet_convergence_plans(
     return plans
 
 
-def plan_manifest_drift(
-    rendered_manifest_path: Path, applied_manifest_path: Path
-) -> dict[str, Any]:
+def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Path) -> PlanResult:
     """Compare desired and applied manifests and classify live drift."""
     desired = _load_manifest(rendered_manifest_path, allow_missing=False)
     applied = _load_manifest(

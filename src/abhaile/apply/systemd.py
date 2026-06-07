@@ -13,14 +13,7 @@ class SystemdExecutor:
 
     @staticmethod
     def daemon_reload() -> ExecutionResult:
-        """Run systemctl daemon-reload.
-
-        Raises:
-            ApplyError: If daemon-reload fails (fail-fast policy).
-
-        Returns:
-            ExecutionResult of daemon-reload command.
-        """
+        """Run systemctl daemon-reload."""
         result = run_command(
             ["systemctl", "daemon-reload"],
             action_id="systemctl-daemon-reload",
@@ -37,19 +30,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> ExecutionResult:
-        """Start a systemd unit.
-
-        Args:
-            unit_name: Full unit name (e.g., 'caddy.service').
-            user: If True, use `systemctl --user`.
-            run_as_user: If set (with user=True), run command as this user.
-
-        Returns:
-            ExecutionResult of start command.
-
-        Raises:
-            ApplyError: If command fails.
-        """
+        """Start a systemd unit."""
         return run_systemctl_command(
             "start",
             unit_name,
@@ -64,19 +45,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> ExecutionResult:
-        """Try-restart a systemd unit (restart if active, no-op if inactive).
-
-        Args:
-            unit_name: Full unit name.
-            user: If True, use `systemctl --user`.
-            run_as_user: If set (with user=True), run command as this user.
-
-        Returns:
-            ExecutionResult of try-restart command.
-
-        Raises:
-            ApplyError: If command fails.
-        """
+        """Try-restart a systemd unit (restart if active, no-op if inactive)."""
         return run_systemctl_command(
             "try-restart",
             unit_name,
@@ -91,19 +60,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> ExecutionResult:
-        """Reload a systemd unit (using reload if available, else restart).
-
-        Args:
-            unit_name: Full unit name.
-            user: If True, use `systemctl --user`.
-            run_as_user: If set (with user=True), run command as this user.
-
-        Returns:
-            ExecutionResult of reload-or-restart command.
-
-        Raises:
-            ApplyError: If command fails.
-        """
+        """Reload a systemd unit (using reload if available, else restart)."""
         return run_systemctl_command(
             "reload-or-restart",
             unit_name,
@@ -118,19 +75,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> ExecutionResult:
-        """Stop a systemd unit.
-
-        Args:
-            unit_name: Full unit name.
-            user: If True, use `systemctl --user`.
-            run_as_user: If set (with user=True), run command as this user.
-
-        Returns:
-            ExecutionResult of stop command.
-
-        Raises:
-            ApplyError: If command fails.
-        """
+        """Stop a systemd unit."""
         return run_systemctl_command(
             "stop",
             unit_name,
@@ -145,19 +90,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> ExecutionResult:
-        """Enable a systemd unit (creates boot-persistence symlink).
-
-        Args:
-            unit_name: Full unit name (e.g., 'caddy.service').
-            user: If True, use `systemctl --user`.
-            run_as_user: If set (with user=True), run command as this user.
-
-        Returns:
-            ExecutionResult of enable command.
-
-        Raises:
-            ApplyError: If command fails.
-        """
+        """Enable a systemd unit (creates boot-persistence symlink)."""
         return run_systemctl_command(
             "enable",
             unit_name,
@@ -172,19 +105,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> ExecutionResult:
-        """Disable a systemd unit (removes boot-persistence symlink).
-
-        Args:
-            unit_name: Full unit name (e.g., 'caddy.service').
-            user: If True, use `systemctl --user`.
-            run_as_user: If set (with user=True), run command as this user.
-
-        Returns:
-            ExecutionResult of disable command.
-
-        Raises:
-            ApplyError: If command fails.
-        """
+        """Disable a systemd unit (removes boot-persistence symlink)."""
         return run_systemctl_command(
             "disable",
             unit_name,
@@ -202,23 +123,8 @@ class SystemdExecutor:
     ) -> dict[str, Any]:
         """Apply a systemd.unit write entry (create or update).
 
-        Workflow:
-        1. Write file (done by caller).
-        2. Daemon-reload.
-        3. If active and hint says restart, try-restart.
-        4. If hint says start (and not yet active), start.
-
-        Args:
-            unit_name: Full unit name (e.g., 'caddy.service').
-            entry: Manifest entry dict with kind/owner_ref/apply_hints.
-            user: If True, use `systemctl --user`.
-            run_as_user: If set, run systemctl commands as this user.
-
-        Returns:
-            Summary dict with actions taken and results.
-
-        Raises:
-            ApplyError: On any failure (daemon-reload, restart, start).
+        Workflow: daemon-reload, then optionally enable, try-restart, and/or start
+        based on apply_hints (enable_mode, restart_mode, activation_mode).
         """
         actions = []
 
@@ -311,25 +217,7 @@ class SystemdExecutor:
         user: bool = False,
         run_as_user: str | None = None,
     ) -> dict[str, Any]:
-        """Apply a systemd.dropin write entry (create or update).
-
-        Workflow:
-        1. Write file (done by caller).
-        2. Daemon-reload.
-        3. If parent unit is active, try-restart it.
-
-        Args:
-            parent_unit_name: Full parent unit name (e.g., 'caddy.service').
-            entry: Manifest entry dict with kind/owner_ref/apply_hints.
-            user: If True, use `systemctl --user`.
-            run_as_user: If set, run systemctl commands as this user.
-
-        Returns:
-            Summary dict with actions taken.
-
-        Raises:
-            ApplyError: On daemon-reload or restart failure.
-        """
+        """Apply a systemd.dropin write entry (daemon-reload + try-restart parent)."""
         actions = []
 
         # 1. Daemon-reload (mandatory after dropin file write)
@@ -370,21 +258,7 @@ class SystemdExecutor:
     def apply_resolved_config_write(
         entry: dict[str, Any],
     ) -> dict[str, Any]:
-        """Apply a resolved.config write entry (systemd-resolved singleton).
-
-        Workflow:
-        1. Write file (done by caller).
-        2. Reload systemd-resolved (always reload for singleton service).
-
-        Args:
-            entry: Manifest entry dict with kind/owner_ref/apply_hints.
-
-        Returns:
-            Summary dict with actions taken.
-
-        Raises:
-            ApplyError: On reload failure.
-        """
+        """Apply a resolved.config write entry (reload systemd-resolved)."""
         actions = []
 
         # 1. Reload systemd-resolved (always reload for singleton)
@@ -417,22 +291,7 @@ class SystemdExecutor:
     ) -> dict[str, Any]:
         """Apply a systemd.unit removal entry.
 
-        Workflow:
-        1. Disable unit if it was enabled (removes boot-persistence symlink).
-        2. Stop unit if active.
-        3. Daemon-reload.
-
-        Args:
-            unit_name: Full unit name.
-            entry: Manifest entry dict with apply_hints (used to check enable_mode).
-            user: If True, use `systemctl --user`.
-            run_as_user: If set, run systemctl commands as this user.
-
-        Returns:
-            Summary dict with actions taken.
-
-        Raises:
-            ApplyError: On disable, stop, or daemon-reload failure.
+        Workflow: disable (if enabled), stop, daemon-reload.
         """
         actions = []
 
