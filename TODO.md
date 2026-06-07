@@ -4,9 +4,9 @@ Working scratchpad. Three jobs: what's next, where decisions live, how to start 
 
 ## Next Up
 
-**GitOps Runner** — `docs/specs/proposed/0012-gitops-runner.md`
+**Ops Tooling** — `docs/specs/proposed/0013-ops-tooling.md`
 
-Move to `active/`, then implement. Blocks: Bootstrap and Ops Tooling depend on Runner design.
+Move to `active/`, then implement. Runner is now complete.
 
 ## Progress
 
@@ -17,7 +17,7 @@ Move to `active/`, then implement. Blocks: Bootstrap and Ops Tooling depend on R
 | Apply Pipeline | [x] | `docs/specs/accepted/0009-apply-pipeline.md` |
 | Secrets | [x] | `docs/specs/accepted/0010-secrets-management.md` |
 | Validation & Testing | [x] | `docs/specs/accepted/0007-validation-pipeline.md` |
-| GitOps Runner | [ ] | `docs/specs/proposed/0012-gitops-runner.md` |
+| GitOps Runner | [x] | `docs/specs/accepted/0012-gitops-runner.md` |
 | Ops Tooling | [ ] | `docs/specs/proposed/0013-ops-tooling.md` |
 | Bootstrap | [ ] | `docs/specs/proposed/0014-bootstrap.md` |
 | Documentation | [ ] | ADRs 0001–0007 done. README refresh after Runner + Bootstrap. |
@@ -43,7 +43,7 @@ Acceptance criteria live in each spec. Don't duplicate them here.
 |---------|-----|------|
 | Output paths, environment modes | `0001` | `accepted/0001-render-pipeline.md` |
 | Drift detection, state/manifest | `0002` | `accepted/0009-apply-pipeline.md` |
-| Runner vs render/apply boundary | `0003` | `proposed/0012-gitops-runner.md` |
+| Runner vs render/apply boundary | `0003` | `accepted/0012-gitops-runner.md` |
 | Apply execution model | `0004` | `accepted/0009-apply-pipeline.md` |
 | Service authoring model | `0005` | `accepted/0005-service-composition.md` |
 | Secrets model, vault-agent boundary | `0006` | `accepted/0010-secrets-management.md` |

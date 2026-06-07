@@ -1,0 +1,15 @@
+[Unit]
+Description=Abhaile GitOps Runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/abhaile/scripts/abhaile-runner
+User=abhaile
+Group=abhaile
+WorkingDirectory=/opt/abhaile
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/etc/abhaile/runner.env
+StandardOutput=journal
+StandardError=journal

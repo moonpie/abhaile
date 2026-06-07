@@ -1,0 +1,204 @@
+#!/usr/bin/env bash
+# Abhaile GitOps Runner — outer reconciliation loop.
+# Fetches repository state, renders, applies, and tracks success.
+# See: docs/specs/active/0012-gitops-runner.md
+set -euo pipefail
+
+readonly ABHAILE_BRANCH="${ABHAILE_BRANCH:-main}"
+readonly ABHAILE_REMOTE="${ABHAILE_REMOTE:-origin}"
+readonly ABHAILE_OUTPUT="${ABHAILE_OUTPUT:-/var/lib/abhaile}"
+readonly RUNNER_STATE_DIR="${ABHAILE_OUTPUT}/runner"
+readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
+readonly LAST_COMMIT_FILE="${RUNNER_STATE_DIR}/last-successful-commit"
+readonly LAST_STATUS_FILE="${RUNNER_STATE_DIR}/last-run-status"
+
+log() { printf '[abhaile-runner] %s\n' "$*"; }
+die() { log "FATAL: $*"; exit 1; }
+
+# --- State helpers -----------------------------------------------------------
+
+write_atomic() {
+    local dest="$1" content="$2"
+    local tmp="${dest}.tmp"
+    printf '%s\n' "$content" > "$tmp"
+    sync "$tmp"
+    mv "$tmp" "$dest"
+}
+
+record_run_status() {
+    local exit_code="$1" commit="${2:-unknown}"
+    local ts
+    ts="$(date --iso-8601=seconds)"
+    write_atomic "$LAST_STATUS_FILE" "${exit_code} ${ts} ${commit}"
+}
+
+read_last_good_sha() {
+    if [[ -f "$LAST_COMMIT_FILE" ]]; then
+        awk '{print $1}' "$LAST_COMMIT_FILE"
+    fi
+}
+
+record_success() {
+    local sha="$1"
+    local ts
+    ts="$(date --iso-8601=seconds)"
+    write_atomic "$LAST_COMMIT_FILE" "${sha} ${ts} ${ABHAILE_BRANCH}"
+}
+
+# --- Validation --------------------------------------------------------------
+
+validate_host() {
+    local host="$1"
+    if ! python3 -c "
+import yaml, sys
+m = yaml.safe_load(open('config/mapping.yaml'))
+hosts = [k for item in m.get('abhaile', []) for k in item]
+sys.exit(0 if '$host' in hosts else 1)
+" 2>/dev/null; then
+        log "Host '${host}' not found in config/mapping.yaml"
+        exit 3
+    fi
+}
+
+check_worktree_clean() {
+    if [[ -n "$(git status --porcelain)" ]]; then
+        log "Dirty worktree detected; operator intervention required"
+        exit 3
+    fi
+}
+
+# --- Pipeline steps ----------------------------------------------------------
+
+do_fetch() {
+    log "fetch: ${ABHAILE_REMOTE}/${ABHAILE_BRANCH}"
+    if ! git fetch "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"; then
+        die "git fetch failed (network/auth issue)"
+    fi
+}
+
+do_checkout() {
+    local target_sha="$1"
+    log "checkout: fast-forward to ${target_sha:0:12}"
+
+    local current_sha
+    current_sha="$(git rev-parse HEAD)"
+    if ! git merge-base --is-ancestor "$current_sha" "$target_sha" 2>/dev/null; then
+        log "Cannot fast-forward: current HEAD is not an ancestor of target"
+        exit 1
+    fi
+
+    # Fast-forward local branch to target, then checkout
+    git update-ref "refs/heads/${ABHAILE_BRANCH}" "$target_sha"
+    git checkout --quiet "$ABHAILE_BRANCH"
+}
+
+do_render() {
+    local host="$1"
+    log "render: host=${host} output=${ABHAILE_OUTPUT}"
+    abhaile-render --host "$host" --output "$ABHAILE_OUTPUT"
+}
+
+do_apply() {
+    log "apply: output=${ABHAILE_OUTPUT}"
+    sudo abhaile-apply --output "$ABHAILE_OUTPUT"
+}
+
+return_to_branch() {
+    log "returning worktree to ${ABHAILE_BRANCH}"
+    git checkout --quiet "$ABHAILE_BRANCH" 2>/dev/null \
+        || git checkout --quiet "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}" 2>/dev/null \
+        || true
+}
+
+do_rollback() {
+    local host="$1" target_sha="$2"
+    local last_good_sha
+    last_good_sha="$(read_last_good_sha)"
+
+    if [[ -z "$last_good_sha" ]]; then
+        log "rollback: no last-known-good commit (first run); cannot rollback"
+        return 1
+    fi
+
+    if ! git cat-file -t "$last_good_sha" &>/dev/null; then
+        log "rollback: target SHA ${last_good_sha:0:12} unreachable; operator intervention required"
+        return 1
+    fi
+
+    log "rollback: checking out last-known-good ${last_good_sha:0:12}"
+    git checkout --quiet "$last_good_sha"
+
+    if do_render "$host" && do_apply; then
+        log "rollback: SUCCESS — host running prior commit ${last_good_sha:0:12}, not latest ${target_sha:0:12}"
+        return 0
+    else
+        log "rollback: FAILED — both new and last-known-good commits fail"
+        return 1
+    fi
+}
+
+# --- Main --------------------------------------------------------------------
+
+main() {
+    local host
+    host="$(hostname -s)"
+
+    # Ensure state directory exists with correct ownership
+    mkdir -p "$RUNNER_STATE_DIR"
+    chmod 0750 "$RUNNER_STATE_DIR"
+
+    # Acquire lock (non-blocking)
+    exec 9>"$LOCK_FILE"
+    if ! flock -n 9; then
+        log "lock: another run is active; exiting"
+        exit 2
+    fi
+
+    log "start: host=${host} branch=${ABHAILE_BRANCH} remote=${ABHAILE_REMOTE}"
+
+    validate_host "$host"
+    check_worktree_clean
+    do_fetch
+
+    # Detect: compare fetched HEAD against last-applied commit
+    local target_sha last_sha current_sha
+    target_sha="$(git rev-parse "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}")"
+    last_sha="$(read_last_good_sha)"
+
+    if [[ "$target_sha" == "$last_sha" ]]; then
+        current_sha="$(git rev-parse HEAD)"
+        if [[ "$current_sha" == "$target_sha" ]]; then
+            log "detect: already at target commit ${target_sha:0:12}; nothing to do"
+            record_run_status 0 "$target_sha"
+            exit 0
+        fi
+    fi
+
+    log "detect: target=${target_sha:0:12} last-good=${last_sha:-none}"
+
+    # Checkout (fast-forward only)
+    do_checkout "$target_sha"
+
+    # Render + Apply
+    if do_render "$host" && do_apply; then
+        log "success: applied commit ${target_sha:0:12}"
+        record_success "$target_sha"
+        record_run_status 0 "$target_sha"
+        return_to_branch
+        exit 0
+    fi
+
+    # Render or apply failed — attempt rollback (once only)
+    log "pipeline failed at commit ${target_sha:0:12}; attempting rollback"
+    if do_rollback "$host" "$target_sha"; then
+        return_to_branch
+        record_run_status 0 "$target_sha"
+        exit 0
+    else
+        return_to_branch
+        record_run_status 1 "$target_sha"
+        exit 1
+    fi
+}
+
+main "$@"

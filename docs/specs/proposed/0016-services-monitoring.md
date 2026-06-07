@@ -59,6 +59,8 @@ the full service definitions and render/deploy requirements.
 - [ ] All containerized services use deterministic /32 ipvlan-l2 addressing.
 - [ ] Vault-agent templates provide credentials where required (Grafana admin, Alertmanager
   notification creds, SNMP community strings).
+- [ ] Alertmanager fires on GitOps runner failures: non-zero exit code, rollback events
+  (host running prior commit), and unreachable rollback target (SPEC-2026-012).
 
 ## Constraints
 

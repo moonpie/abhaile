@@ -1,5 +1,6 @@
 abhaile:
   - phobos:
+      - abhaile-runner
       - ddclient
       - chrony-a
       - coredns-filtered
@@ -11,6 +12,7 @@ abhaile:
       - authelia
       - omada-controller
   - deimos:
+      - abhaile-runner
       - chrony-b
       - coredns-clean
       - vault-agent

@@ -5,7 +5,7 @@
 ```yaml
 id: SPEC-2026-012
 title: GitOps Runner
-status: proposed
+status: accepted
 owner: moonpie
 created: 2026-06-05
 updated: 2026-06-05
@@ -39,15 +39,15 @@ workspace-state tools with no git awareness.
 
 ## Requirements
 
-- [ ] Runner wrapper that fetches git state, selects target commit, and invokes
+- [x] Runner wrapper that fetches git state, selects target commit, and invokes
   `abhaile-render` + `abhaile-apply` for the local host.
-- [ ] Last-successful commit tracking that persists applied commit SHA per host
+- [x] Last-successful commit tracking that persists applied commit SHA per host
   after full render+apply success.
-- [ ] Automatic rollback retry that checks out the last-known-good commit and
+- [x] Automatic rollback retry that checks out the last-known-good commit and
   re-runs render+apply when a newer commit fails.
-- [ ] Systemd service and timer that schedule the runner periodically with
+- [x] Systemd service and timer that schedule the runner periodically with
   overlap protection.
-- [ ] Runner state and locking that prevents concurrent runs and documents
+- [x] Runner state and locking that prevents concurrent runs and documents
   state layout.
 
 ## Constraints
@@ -75,8 +75,8 @@ Pipeline steps executed in order:
 1. **Fetch** — `git fetch origin` from the configured remote/branch.
 1. **Detect** — compare fetched HEAD against last-applied commit; skip if equal.
 1. **Checkout** — update working tree to fetched HEAD (fast-forward only).
-1. **Render** — invoke `abhaile-render --host $(hostname)`.
-1. **Apply** — invoke `sudo abhaile-apply` (live mode, not dry-run).
+1. **Render** — invoke `abhaile-render --host $(hostname -s) --output $ABHAILE_OUTPUT`.
+1. **Apply** — invoke `sudo abhaile-apply --output $ABHAILE_OUTPUT` (live mode, not dry-run).
 1. **Record** — on success, write the applied commit SHA to runner state.
 1. **Release lock**.
 
@@ -143,6 +143,9 @@ When render or apply fails at a newer commit, the runner attempts recovery:
 
 1. Read last-known-good SHA from `/var/lib/abhaile/runner/last-successful-commit`.
 1. If no last-known-good exists (first run ever), skip rollback and fail immediately.
+1. Verify the SHA is reachable locally (`git cat-file -t <sha>`). If not, skip
+   rollback and exit with "rollback target unreachable; operator intervention
+   required".
 1. Checkout last-known-good commit (detached HEAD).
 1. Re-run render+apply at that commit.
 1. If rollback succeeds, exit 0 but log a warning that the host is running a
@@ -310,82 +313,110 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 - ADR: null
 
+- Decision: Runner is implemented in bash (not Python).
+
+- Rationale: The runner is pure orchestration — git, flock, exec. Every operation is a subprocess call. ~100-150 lines. Shell is the natural tool for a thin wrapper that calls other tools.
+
+- Impact: No Python dependency in the runner path; testability via integration rather than unit tests.
+
+- ADR: null
+
+- Decision: Branch and remote are configured via environment variables (`ABHAILE_BRANCH`, `ABHAILE_REMOTE`) defaulting to `main` and `origin`, loaded from `/etc/abhaile/runner.env` by systemd EnvironmentFile.
+
+- Rationale: Separates runtime config from script logic; operators override per-host without editing units or scripts; `paths.ini` stays path-focused.
+
+- Impact: No hardcoded branch; override requires only editing one env file.
+
+- ADR: null
+
+- Decision: Timer cadence is fixed at 5 minutes in the systemd timer unit; override via `systemctl edit abhaile-runner.timer`.
+
+- Rationale: Timer cadence is a systemd concern. Environment variables can't influence timer intervals without convoluted ExecStartPre hacks.
+
+- Impact: Simple; standard systemd override mechanism for per-host tuning.
+
+- ADR: null
+
+- Decision: Repository location is fixed at `/opt/abhaile`; set once during bootstrap via systemd WorkingDirectory.
+
+- Rationale: Single known location simplifies the runner, sudoers, and operator expectations. Bootstrap owns initial placement.
+
+- Impact: Runner script operates on `$PWD` (set by systemd); no path logic in the script itself.
+
+- ADR: null
+
+- Decision: Single sudoers entry grants `abhaile` passwordless access to `abhaile-apply` only. Apply handles all internal privilege escalation (daemon-reload, restart, file placement) once running as root.
+
+- Rationale: Minimal privilege surface; apply already owns all OS mutations internally.
+
+- Impact: One sudoers line: `abhaile ALL=(root) NOPASSWD: /usr/local/bin/abhaile-apply *`
+
+- ADR: null
+
+- Decision: Runner passes `--output /var/lib/abhaile` explicitly to both render and apply.
+
+- Rationale: Explicit invocation is clearer in logs and `ps` output; aids troubleshooting. Value comes from `ABHAILE_OUTPUT` env var (default `/var/lib/abhaile`), overridable in `runner.env`.
+
+- Impact: No reliance on `paths.ini` default at runtime; operator can see exact paths in journald.
+
+- ADR: null
+
+- Decision: Before rollback checkout, the runner verifies the target SHA exists locally (`git cat-file -t <sha>`). If unreachable, skip rollback and exit with a clear diagnostic.
+
+- Rationale: Protects against edge case where branch changes or force-push removes the last-known-good commit from local history. Gives operator an actionable error rather than a cryptic git failure.
+
+- Impact: One extra check; monitoring should alert on this failure mode (covered by SPEC-2026-016).
+
+- ADR: null
+
 ## Acceptance Criteria
 
-- [ ] Runner wrapper exists at `scripts/abhaile-runner`, is executable, and
+- [x] Runner wrapper exists at `scripts/abhaile-runner`, is executable, and
   performs fetch → detect → checkout → render → apply in sequence for the
   local host.
-- [ ] Runner exits non-zero on unrecoverable failure and logs each pipeline step.
-- [ ] Runner skips render+apply when already at the target commit.
-- [ ] Runner detects local host identity from hostname and validates against
+- [x] Runner exits non-zero on unrecoverable failure and logs each pipeline step.
+- [x] Runner skips render+apply when already at the target commit.
+- [x] Runner detects local host identity from hostname and validates against
   `config/mapping.yaml`.
-- [ ] Runner refuses to proceed on dirty worktree or fast-forward failure.
-- [ ] Last-successful commit file is written atomically only after render+apply
+- [x] Runner refuses to proceed on dirty worktree or fast-forward failure.
+- [x] Last-successful commit file is written atomically only after render+apply
   success.
-- [ ] Commit record includes SHA, timestamp, and branch.
-- [ ] On render or apply failure at a new commit, the runner checks out the
+- [x] Commit record includes SHA, timestamp, and branch.
+- [x] On render or apply failure at a new commit, the runner checks out the
   last-known-good commit and re-runs render+apply.
-- [ ] Rollback is attempted once only; double failure exits non-zero.
-- [ ] After rollback (success or failure), working tree returns to branch HEAD.
-- [ ] Successful rollback does not update the last-successful-commit file.
-- [ ] Systemd service unit is `Type=oneshot` and runs as user `abhaile`.
-- [ ] Systemd timer fires every 5 minutes with boot catch-up and jitter.
-- [ ] Runner uses `flock(2)` for serialization; concurrent invocations exit
+- [x] Rollback is attempted once only; double failure exits non-zero.
+- [x] After rollback (success or failure), working tree returns to branch HEAD.
+- [x] Successful rollback does not update the last-successful-commit file.
+- [x] Systemd service unit is `Type=oneshot` and runs as user `abhaile`.
+- [x] Systemd timer fires every 5 minutes with boot catch-up and jitter.
+- [x] Runner uses `flock(2)` for serialization; concurrent invocations exit
   immediately with code 2.
-- [ ] Runner state layout is documented and lives under
+- [x] Runner state layout is documented and lives under
   `/var/lib/abhaile/runner/` separate from apply state.
-- [ ] Runner state directory and files have correct ownership (`abhaile:abhaile`)
+- [x] Runner state directory and files have correct ownership (`abhaile:abhaile`)
   and permissions.
 
 ### Evidence
 
-For each completed criterion, include:
-
-- Implementation evidence: [commit or PR link]
-- Validation evidence: [test, dry-run, or equivalent]
+- Implementation evidence: `scripts/abhaile-runner`, `config/services/abhaile-runner/`
+- Validation evidence: `tests/integration/test_runner.py` (6 tests, all passing), `bash -n` syntax check, `make test` 500 passed
 
 ## Out of Scope
 
 - Multi-host orchestration or cross-host coordination.
 - Remote apply (runner always operates on the local host).
 - Branch selection logic beyond a single configured branch.
-- Notification/alerting on failure (may be added by a future spec).
 - Render or apply business logic changes.
 - Secrets management or Vault interaction (runner does not handle secrets).
 - Bootstrap/enrollment (covered by the Bootstrap phase).
+- Notification/alerting on runner failure — covered by SPEC-2026-016
+  (monitoring). The runner writes `last-run-status` with exit code and
+  commit; monitoring should alert on non-zero exit codes and on rollback
+  events (host running prior commit rather than latest).
 
 ## Open Questions
 
-1. **Runner implementation language:** Shell script (simpler, fewer
-   dependencies, aligns with `scripts/` convention) vs Python (testable,
-   consistent with `src/abhaile/`, structured error handling)? The decision log
-   places the runner in `scripts/` which suggests shell, but testability may
-   favor Python with a `scripts/abhaile-runner` thin wrapper.
-
-1. **Branch configuration:** Where does the runner read its target branch and
-   remote? Candidates: hardcoded `main`, environment variable via
-   `runner.env`, or a field in `paths.ini`.
-
-1. **Partial apply success:** If `abhaile-apply` partially applies (some
-   owners succeed, others fail) and exits non-zero, should the runner treat
-   this as full failure (trigger rollback) or record partial success? Current
-   design treats any non-zero apply exit as failure.
-
-1. **Timer cadence:** 5 minutes is a starting point. Should this be
-   configurable per-host via `runner.env` or fixed in the timer unit?
-
-1. **Repository location on host:** The spec assumes `/opt/abhaile` as the
-   working directory. Should this be configurable, or is it fixed by the
-   bootstrap enrollment process?
-
-1. **Apply escalation mechanism:** The runner runs as `abhaile` but apply
-   requires root. The design specifies `sudo abhaile-apply` with a sudoers
-   rule. Confirm whether additional sudo entries are needed for systemd
-   operations that apply delegates (daemon-reload, restart), or whether apply
-   handles all privileged subprocess calls internally once launched as root.
-
-1. **Render output path:** Should the runner pass `--output` to render
-   explicitly, or rely on the default `/var/lib/abhaile` from `paths.ini`?
+All original open questions have been resolved. See Decision Notes.
 
 ## References
 
@@ -395,4 +426,4 @@ For each completed criterion, include:
 - `src/abhaile/cli/apply.py`
 - `src/abhaile/cli/diff.py`
 - `paths.ini`
-- `TODO.md` — Phase: GitOps Runner
+- `docs/specs/proposed/0016-services-monitoring.md` (SPEC-2026-016 — runner failure alerting)
