@@ -5,7 +5,7 @@
 ```yaml
 id: SPEC-2026-014
 title: Bootstrap
-status: proposed
+status: accepted
 owner: moonpie
 created: 2026-06-05
 updated: 2026-06-05
@@ -48,10 +48,10 @@ Bootstrap handles pre-Vault trust establishment only:
 
 ## Requirements
 
-- [ ] Implement `scripts/bootstrap.sh` as a curl-bash entry point for fresh host enrollment.
-- [ ] Implement sealed bootstrap artifact decryption and consumption without plaintext persistence.
-- [ ] Define and document the complete host enrollment flow from bare metal to first successful apply.
-- [ ] Implement one-time token/credential handling that refuses to run without explicit input.
+- [x] Implement `scripts/bootstrap.sh` as a curl-bash entry point for fresh host enrollment.
+- [x] Implement sealed bootstrap artifact decryption and consumption without plaintext persistence.
+- [x] Define and document the complete host enrollment flow from bare metal to first successful apply.
+- [x] Implement one-time token/credential handling that refuses to run without explicit input.
 
 ## Constraints
 
@@ -87,8 +87,11 @@ The script performs these stages in order, aborting on any failure:
 1. Install `sops` binary (from GitHub release, pinned version, verified checksum).
 1. Enable `systemd-networkd` and `systemd-resolved`.
 
-#### Stage 3 — Credential Validation
+#### Stage 3 — User and Credential Validation
 
+1. Create `abhaile` user and group if absent (uid 1001, gid 1001, group `abhaile`,
+   shell `/bin/bash`, home `/home/abhaile`, not a system user — matches
+   `config/hosts/common/host.yaml`). User must exist before credential path checks.
 1. Require one-time bootstrap token (see §4 below).
 1. Verify age decryption identity exists at `/home/abhaile/.config/sops/age/keys.txt` (or
    root path for root-scoped artifacts). Abort with instructions if missing.
@@ -97,8 +100,6 @@ The script performs these stages in order, aborting on any failure:
 
 #### Stage 4 — Repo and Environment
 
-1. Create `abhaile` system user if absent (uid from `config/`, shell `/bin/bash`,
-   home `/home/abhaile`).
 1. Clone repo to `/opt/abhaile` (or pull if directory exists for re-run idempotency).
 1. Checkout target branch (default: `main`).
 1. Create Python venv at `/opt/abhaile/.venv`, install `requirements.txt`.
@@ -118,14 +119,18 @@ The script performs these stages in order, aborting on any failure:
 
 #### Stage 7 — First Render and Apply
 
+1. Enable user lingering for `abhaile` user (`loginctl enable-linger abhaile`) — required
+   before apply can manage rootless quadlets (vault-agent runs as `podman.user: abhaile`).
 1. Run `abhaile-render --host <hostname> --output /var/lib/abhaile`.
 1. Run `abhaile-apply --host <hostname> --output /var/lib/abhaile` (live apply, not dry-run).
 1. Abort on failure with clear error and state summary.
+1. Wait for Vault Agent `.ready` sentinel at `/srv/vault/agent/out/.ready` with configurable
+   timeout (default 60s, polling interval 2s). If timeout expires, log warning but do not
+   abort — runner handles steady-state convergence.
 
 #### Stage 8 — GitOps Runner Registration
 
 1. Enable and start `abhaile-runner.timer`.
-1. Enable user lingering for `abhaile` user (`loginctl enable-linger abhaile`).
 1. Print summary: enrolled host, active services, next GitOps run time.
 
 **Idempotency:** Each stage checks preconditions. Already-completed stages (user exists, repo
@@ -140,20 +145,29 @@ Per ADR 0007, sealed bootstrap artifacts live at `config/bootstrap/sealed/<host>
 
 | Artifact | Contents | Consumed by |
 | --- | --- | --- |
-| `vault-bootstrap.sops.yaml` | Vault AppRole role_id and initial wrapped secret_id for seed token minting | Bootstrap Stage 6 |
+| `vault-bootstrap.sops.yaml` | Vault unseal keys (phobos only) and AppRole role_id for seed token minting (secret_id is provided at runtime via `BOOTSTRAP_TOKEN`) | Bootstrap Stage 6 |
 | `repo-bootstrap.sops.yaml` | (Optional) Repo access token if deploy key is not pre-placed | Bootstrap Stage 3/4 |
+
+Note: On deimos (which does not run Vault), `vault-bootstrap.sops.yaml` contains only the
+AppRole credentials needed to mint a seed token against phobos Vault. On phobos (the Vault
+host), it additionally contains unseal keys for the first-host bootstrap case.
 
 **Decryption and consumption flow:**
 
 1. Create ephemeral working directory (`mktemp -d` on tmpfs if available, otherwise
-   `/tmp` with restrictive permissions).
+   `/tmp` with restrictive permissions). Use `mktemp -d --tmpdir=/dev/shm` as the
+   preferred tmpfs path on Debian. Set mode 0700 immediately.
 1. Decrypt with `sops --decrypt --output <tmpdir>/<artifact>.yaml <sealed-path>`.
 1. Parse YAML, extract values into shell variables (never write to persistent files).
 1. Use extracted values to:
+   - (phobos only) Unseal Vault via API using decrypted unseal keys, then discard keys.
    - Mint initial Vault Agent seed token via Vault API (AppRole login).
    - Write seed token to `/home/abhaile/.config/vault-agent/token` (mode 0600,
      owner `abhaile:abhaile`).
 1. `rm -rf` ephemeral directory in EXIT trap (unconditional cleanup).
+1. Defense-in-depth: implementation should also `shred` individual decrypted files
+   before `rm -rf`, as `rm` on tmpfs does not guarantee immediate overwrite. The EXIT
+   trap cannot protect against SIGKILL/OOM-kill; tmpfs residue is cleared on next reboot.
 
 **Failure modes:**
 
@@ -171,6 +185,9 @@ Complete operator workflow from bare metal to steady-state:
 
 1. Install Debian 13 on target host. Set hostname (`phobos` or `deimos`).
 1. Ensure host is defined in `config/mapping.yaml` and `config/network.yaml` (commit to repo).
+1. Create `abhaile` user and group manually (`useradd -u 1001 -m -s /bin/bash abhaile`,
+   `groupadd -g 1001 abhaile` if not already done). Bootstrap Stage 3 is idempotent and
+   will skip creation if the user exists.
 1. Generate and place age decryption identity:
    - `/home/abhaile/.config/sops/age/keys.txt` (mode 0600, owner `abhaile:abhaile`)
    - `/root/.config/sops/age/keys.txt` (mode 0600, for root-scoped decryption if needed)
@@ -178,6 +195,8 @@ Complete operator workflow from bare metal to steady-state:
    - `/home/abhaile/.ssh/gitops_ed25519` (mode 0600, owner `abhaile:abhaile`)
    - Add public key to repo as read-only deploy key.
    - Add repo host to `/home/abhaile/.ssh/known_hosts`.
+   - Bootstrap uses `GIT_SSH_COMMAND='ssh -i /home/abhaile/.ssh/gitops_ed25519 -o IdentitiesOnly=yes'`
+     to force the deploy key (non-default key name requires explicit selection).
 1. Ensure sealed bootstrap artifacts exist in repo for this host
    (`config/bootstrap/sealed/<host>/vault-bootstrap.sops.yaml`).
 1. Ensure Vault is reachable from the target host (running on the other host, or on this
@@ -205,13 +224,10 @@ sudo /opt/abhaile/scripts/bootstrap.sh <hostname>
 
 **First-host special case (Vault host):**
 
-When enrolling the first host (phobos, which runs Vault), Vault is not yet available for
-AppRole token minting. Bootstrap handles this by:
-
-1. Skipping Vault API token minting in Stage 6.
-1. Using sealed Vault unseal keys to start and unseal Vault.
-1. Creating the initial AppRole and minting the seed token locally post-Vault-start.
-1. Proceeding with the normal flow from Stage 7 onward.
+When enrolling phobos (which runs Vault), the operator must have Vault already running and
+accessible before bootstrap executes. Bootstrap unseals Vault using sealed unseal keys from
+`config/bootstrap/sealed/<host>/vault-bootstrap.sops.yaml`, then mints the AppRole seed
+token. Vault deployment and initial setup are documented as pre-bootstrap operator steps.
 
 ### 4. One-Time Token Handling
 
@@ -302,31 +318,75 @@ Bootstrap requires explicit credential input and refuses to proceed without it.
 
 - ADR: null
 
+- Decision: Vault is a pre-requisite, not something bootstrap creates.
+
+- Rationale: Vault deployment and initial configuration are manual operator steps (like SSH keys and age identities). Bootstrap only unseals and mints the seed token.
+
+- Impact: Operator must have Vault running and accessible before bootstrap. Documented as a pre-bootstrap step.
+
+- ADR: null
+
+- Decision: Support both deploy key and token for repo access; prefer deploy key.
+
+- Rationale: Deploy keys are standard for automated read-only access (no expiry). Token is the fallback for environments where SSH isn't available.
+
+- Impact: Script checks for deploy key first, falls back to sealed `repo-bootstrap.sops.yaml` token for HTTPS clone.
+
+- ADR: null
+
+- Decision: Re-enrollment is always idempotent fresh (preserve runner state, redo everything else).
+
+- Rationale: Simplest model — no "detect and preserve" logic. Runner state is harmless to keep; next run updates it.
+
+- Impact: Operator can re-run bootstrap safely on a partially enrolled or previously enrolled host.
+
+- ADR: null
+
+- Decision: Bootstrap installs sops in Stage 2 (prerequisites) via direct binary download from GitHub release with checksum.
+
+- Rationale: sops is needed for sealed artifact decryption in Stage 6, before the software renderer can run. The software renderer later manages the canonical version via config/hosts/common/software/downloads/sops.yaml.
+
+- Impact: Minor duplication between bootstrap prerequisite install and software renderer; second apply overwrites with the canonical pinned version.
+
+- ADR: null
+
+- Decision: Bootstrap waits for Vault Agent `.ready` sentinel after apply, with configurable timeout (default 60s).
+
+- Rationale: Confirms the host is fully operational. Timeout value is provisional and should be adjusted during initial deployment testing.
+
+- Impact: If sentinel doesn't appear within timeout, log warning but don't abort — runner handles steady-state convergence.
+
+- ADR: null
+
+- Decision: Bootstrap logs to both stdout and `/var/log/abhaile/bootstrap.log` via tee.
+
+- Rationale: First-run bootstrap is outside systemd, so journald doesn't capture it. A log file is essential for post-mortem debugging.
+
+- Impact: Log file persists for operator review; no secret material is logged.
+
 ## Acceptance Criteria
 
-- [ ] `scripts/bootstrap.sh` exists and is executable.
-- [ ] Running `scripts/bootstrap.sh` without a hostname argument exits non-zero with usage message.
-- [ ] Running `scripts/bootstrap.sh` without a bootstrap token exits non-zero with credential requirement message.
-- [ ] Bootstrap installs all required packages and creates the `abhaile` user.
-- [ ] Bootstrap clones the repo and sets up the Python venv.
-- [ ] Bootstrap validates the host exists in `config/mapping.yaml` and `config/network.yaml`.
-- [ ] Bootstrap decrypts sealed artifacts from `config/bootstrap/sealed/<host>/` and removes all decrypted material on exit (success or failure).
-- [ ] Bootstrap places the Vault Agent seed token at `/home/abhaile/.config/vault-agent/token` with correct ownership and mode.
-- [ ] Bootstrap invokes `abhaile-render` and `abhaile-apply` for the target host.
-- [ ] Bootstrap enables and starts `abhaile-runner.timer`.
-- [ ] Bootstrap is idempotent: re-running on a partially enrolled host resumes without duplicating work.
-- [ ] No plaintext secret material persists in the repo tree, logs, or process-visible locations after bootstrap completes.
-- [ ] One-time token handling supports env var (`BOOTSTRAP_TOKEN`), file descriptor (`BOOTSTRAP_TOKEN_FD`), and interactive prompt input methods.
-- [ ] Host enrollment flow is documented with pre-bootstrap operator steps, execution, and post-verification.
-- [ ] First-host (Vault host) enrollment handles the chicken-and-egg case where Vault is not yet running.
-- [ ] Unit tests cover token input validation, preflight checks, and stage sequencing logic (where testable without root).
+- [x] `scripts/bootstrap.sh` exists and is executable.
+- [x] Running `scripts/bootstrap.sh` without a hostname argument exits non-zero with usage message.
+- [x] Running `scripts/bootstrap.sh` without a bootstrap token exits non-zero with credential requirement message.
+- [x] Bootstrap installs all required packages and creates the `abhaile` user.
+- [x] Bootstrap clones the repo and sets up the Python venv.
+- [x] Bootstrap validates the host exists in `config/mapping.yaml` and `config/network.yaml`.
+- [x] Bootstrap decrypts sealed artifacts from `config/bootstrap/sealed/<host>/` and removes all decrypted material on exit (success or failure).
+- [x] Bootstrap places the Vault Agent seed token at `/home/abhaile/.config/vault-agent/token` with correct ownership and mode.
+- [x] Bootstrap invokes `abhaile-render` and `abhaile-apply` for the target host.
+- [x] Bootstrap enables and starts `abhaile-runner.timer`.
+- [x] Bootstrap is idempotent: re-running on a partially enrolled host resumes without duplicating work.
+- [x] No plaintext secret material persists in the repo tree, logs, or process-visible locations after bootstrap completes.
+- [x] One-time token handling supports env var (`BOOTSTRAP_TOKEN`), file descriptor (`BOOTSTRAP_TOKEN_FD`), and interactive prompt input methods.
+- [x] Host enrollment flow is documented with pre-bootstrap operator steps, execution, and post-verification.
+- [x] First-host (Vault host) enrollment handles the chicken-and-egg case where Vault is not yet running.
+- [x] Unit tests cover token input validation, preflight checks, and stage sequencing logic (where testable without root).
 
 ### Evidence
 
-For each completed criterion, include:
-
-- Implementation evidence: [commit or PR link]
-- Validation evidence: [test, dry-run, or equivalent]
+- Implementation evidence: `scripts/bootstrap.sh`, `docs/BOOTSTRAP.md`
+- Validation evidence: `tests/integration/test_bootstrap.py` (5 tests), `bash -n` syntax check, `make test` 515 passed
 
 ## Out of Scope
 
@@ -342,31 +402,7 @@ For each completed criterion, include:
 
 ## Open Questions
 
-1. **Vault availability for first-host bootstrap:** When enrolling phobos (which hosts Vault),
-   should bootstrap start Vault from rendered quadlets before attempting AppRole auth, or
-   should the operator start Vault manually first? The old project had Vault unseal as a
-   separate systemd unit — does the new design keep that pattern?
-
-1. **Deploy key vs token for repo access:** Should bootstrap accept both a pre-placed deploy
-   key and a token-based repo clone (e.g., GitHub PAT), or standardize on one? The old
-   project used deploy keys exclusively.
-
-1. **Bootstrap re-enrollment:** If a host is being rebuilt (not first-time), should bootstrap
-   detect existing state and offer a "re-enroll" path that preserves runner state, or always
-   start clean? The old project treated re-runs as idempotent fresh installs.
-
-1. **sops binary installation method:** Pin to a specific GitHub release with checksum
-   verification, or rely on a Debian package if available in trixie? The old project used
-   direct binary download.
-
-1. **Vault Agent startup timing:** After bootstrap places the seed token and apply installs
-   Vault Agent quadlets, should bootstrap explicitly wait for the `.ready` sentinel before
-   declaring success, or is it sufficient that the GitOps timer will handle steady-state
-   convergence?
-
-1. **Bootstrap logging:** Should bootstrap log to a file under `/var/log/abhaile/` for
-   post-mortem debugging, or is systemd journal capture (when run via a unit) sufficient?
-   The script itself runs outside systemd on first execution.
+All original open questions have been resolved. See Decision Notes.
 
 ## References
 

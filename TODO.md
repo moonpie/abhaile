@@ -4,9 +4,10 @@ Working scratchpad. Three jobs: what's next, where decisions live, how to start 
 
 ## Next Up
 
-**Bootstrap** — `docs/specs/proposed/0014-bootstrap.md`
+**Documentation** or **Phase 3 Services** — operator's choice.
 
-Move to `active/`, then implement. Runner and Ops Tooling are complete.
+Documentation (README refresh, architecture docs) is deferred until after deployment testing.
+Phase 3 services start with `docs/specs/proposed/0015-services-home-automation.md`.
 
 ## Progress
 
@@ -19,7 +20,7 @@ Move to `active/`, then implement. Runner and Ops Tooling are complete.
 | Validation & Testing | [x] | `docs/specs/accepted/0007-validation-pipeline.md` |
 | GitOps Runner | [x] | `docs/specs/accepted/0012-gitops-runner.md` |
 | Ops Tooling | [x] | `docs/specs/accepted/0013-ops-tooling.md` |
-| Bootstrap | [ ] | `docs/specs/proposed/0014-bootstrap.md` |
+| Bootstrap | [x] | `docs/specs/accepted/0014-bootstrap.md` |
 | Documentation | [ ] | ADRs 0001–0007 done. README refresh after Runner + Bootstrap. |
 | Services (Phase 3) | [ ] | See breakdown below |
 | Network Devices (Phase 4) | [ ] | `docs/specs/proposed/0021-network-devices.md` |
@@ -47,7 +48,7 @@ Acceptance criteria live in each spec. Don't duplicate them here.
 | Apply execution model | `0004` | `accepted/0009-apply-pipeline.md` |
 | Service authoring model | `0005` | `accepted/0005-service-composition.md` |
 | Secrets model, vault-agent boundary | `0006` | `accepted/0010-secrets-management.md` |
-| SOPS bootstrap policy | `0007` | `proposed/0014-bootstrap.md` |
+| SOPS bootstrap policy | `0007` | `accepted/0014-bootstrap.md` |
 | Render pipeline contracts | — | `accepted/0001-render-pipeline.md` |
 | Networking renderer | — | `accepted/0002-networking-renderer.md` |
 | DNS renderer | — | `accepted/0003-dns-renderer.md` |
