@@ -70,3 +70,9 @@ No secrets in git or rendered output. Vault Agent renders credentials at runtime
 | Secrets boundary | [ADR 0006](adr/0006-secrets-model-and-bootstrap-artifacts.md) |
 | Running render/apply locally | `make render`, `make apply HOST=<host>` |
 | Spec status | [docs/specs/README.md](specs/README.md) |
+| Operations runbook | [docs/OPERATIONS.md](OPERATIONS.md) |
+| Emergency procedures | [docs/BREAK-GLASS.md](BREAK-GLASS.md) |
+| Bootstrap a host | [docs/BOOTSTRAP.md](BOOTSTRAP.md) |
+| Add a new service | [docs/ADDING-A-SERVICE.md](ADDING-A-SERVICE.md) |
+| Credential reference | [docs/SECRETS.md](SECRETS.md) |
+| Network inventory | [docs/INVENTORY.md](INVENTORY.md) |
