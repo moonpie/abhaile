@@ -1,4 +1,4 @@
-.PHONY: help clean clean-venv clean-all install lint doccheck typecheck test test-fast coverage unit-test integration-test render render-host apply diff validate bootstrap-create bootstrap-edit bootstrap-rotate bootstrap-validate
+.PHONY: help clean clean-venv clean-all install lint doccheck typecheck test test-fast coverage unit-test integration-test render render-host apply diff validate bootstrap-create bootstrap-edit bootstrap-rotate bootstrap-validate docs
 
 PYTHON := python3
 VENV := .venv
@@ -105,3 +105,6 @@ bootstrap-rotate: $(VENV)
 
 bootstrap-validate:
 	scripts/sops-bootstrap validate
+
+docs: $(VENV)
+	$(VENV_PYTHON) -m abhaile.cli.inventory --format markdown --output docs/INVENTORY.md

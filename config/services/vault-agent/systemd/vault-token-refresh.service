@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh Vault Agent sink token
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '/usr/bin/vault login -method=approle -token-only role_id=@/home/abhaile/.config/vault-agent/role-id secret_id=@/home/abhaile/.config/vault-agent/secret-id > /home/abhaile/.config/vault-agent/token'
+ExecStartPost=/bin/systemctl --user restart vault-agent.service
+User=abhaile

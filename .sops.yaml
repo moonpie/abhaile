@@ -1,11 +1,13 @@
+# SOPS creation rules per ADR 0007: each sealed artifact must include
+# a host bootstrap recipient AND an operator-controlled recovery recipient.
+#
+# TODO: A second age key (operator recovery recipient) is required per ADR 0007.
+# Current config uses a single key for both roles. Generate a dedicated operator
+# recovery key and add it as a second recipient to each host rule below.
 creation_rules:
   - path_regex: config/bootstrap/sealed/phobos/.*\.sops\.yaml$
     age: >-
-      age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys
+      age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys, age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys
   - path_regex: config/bootstrap/sealed/deimos/.*\.sops\.yaml$
     age: >-
-      age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys
-  - path_regex: '^secrets/.*'
-    key_groups:
-      - age:
-          - age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys
+      age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys, age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys

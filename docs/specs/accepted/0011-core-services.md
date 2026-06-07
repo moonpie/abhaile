@@ -325,7 +325,7 @@ The secrets delivery path for core services:
 1. Operator provides bootstrap token at `/home/abhaile/.config/vault-agent/token`
    (out-of-band, never in git).
 1. vault-agent authenticates to Vault using AppRole (token refreshed by
-   `abhaile-vault-token-refresh@.service` every 12h).
+   `vault-token-refresh.timer` every 6h).
 1. vault-agent renders `.ctmpl` templates to `/srv/vault/agent/out/<filename>`.
 1. vault-agent writes `.ready` sentinel after all templates render successfully.
 1. `abhaile-secrets-ready.path` detects sentinel, starts `.service`.
