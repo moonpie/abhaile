@@ -29,7 +29,7 @@ Artifacts under `rendered/` are organized by apply method:
 
 - `rendered/system/` — atomic file placement artifacts such as systemd-networkd, resolved, and systemd units
 - `rendered/software/` — execution-required software artifacts such as `packages.txt`, downloads, builds, and commands
-- `rendered/users/` — execution-required user-management artifacts
+- `rendered/system/` — systemd-networkd, resolved, user/group management, sudoers (atomic file placement)
 - `rendered/services/<service>/` — service-specific artifacts such as quadlets, configs, and ingress material
 
 The desired manifest is written as `rendered/manifest.json`. The rendered tree is disposable and may be wiped before each render. Its layout is organizational only; apply uses manifest target paths to reconcile the host.
@@ -61,7 +61,6 @@ Single-host example:
 │   ├── manifest.json
 │   ├── system/
 │   ├── software/
-│   ├── users/
 │   └── services/
 └── state/
 ```

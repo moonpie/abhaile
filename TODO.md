@@ -6,8 +6,8 @@ Working scratchpad. Three jobs: what's next, where decisions live, how to start 
 
 **Documentation** or **Phase 3 Services** — operator's choice.
 
-Documentation (README refresh, architecture docs) is deferred until after deployment testing.
-Phase 3 services start with `docs/specs/proposed/0015-services-home-automation.md`.
+**Phase 3 Services** — next major feature work.
+Start with `docs/specs/proposed/0015-services-home-automation.md`.
 
 ## Progress
 
@@ -21,7 +21,8 @@ Phase 3 services start with `docs/specs/proposed/0015-services-home-automation.m
 | GitOps Runner | [x] | `docs/specs/accepted/0012-gitops-runner.md` |
 | Ops Tooling | [x] | `docs/specs/accepted/0013-ops-tooling.md` |
 | Bootstrap | [x] | `docs/specs/accepted/0014-bootstrap.md` |
-| Documentation | [ ] | ADRs 0001–0007 done. README refresh after Runner + Bootstrap. |
+| Documentation | [x] | 7 ops docs + inventory generator + logging audit |
+| Code Quality | [x] | Maintainability audit: 8 sprints complete |
 | Services (Phase 3) | [ ] | See breakdown below |
 | Network Devices (Phase 4) | [ ] | `docs/specs/proposed/0021-network-devices.md` |
 
