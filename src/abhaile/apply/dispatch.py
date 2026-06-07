@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ from abhaile.apply.vault import VaultExecutor
 from abhaile.models.kinds import KIND_FAMILIES
 from abhaile.plan.diff import PlanResult
 from abhaile.utils.errors import ApplyError
+
+LOG = logging.getLogger(__name__)
 
 _SYSTEMD_KINDS = KIND_FAMILIES["systemd"]
 _USER_KINDS = KIND_FAMILIES["user"]
@@ -270,6 +273,7 @@ def _run_systemd_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.systemd results=%d", len(owner_results))
     return owner_results
 
 
@@ -311,6 +315,7 @@ def _run_user_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.users results=%d", len(owner_results))
     return owner_results
 
 
@@ -381,6 +386,7 @@ def _run_coredns_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.coredns results=%d", len(owner_results))
     return owner_results
 
 
@@ -442,6 +448,7 @@ def _run_caddy_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.caddy results=%d", len(owner_results))
     return owner_results
 
 
@@ -544,6 +551,7 @@ def _run_vault_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.vault results=%d", len(owner_results))
     return owner_results
 
 
@@ -717,6 +725,7 @@ def _run_networkd_owner_actions(
                 }
             )
 
+    LOG.debug("dispatch.networkd results=%d", len(owner_results))
     return owner_results
 
 
@@ -901,6 +910,7 @@ def _run_quadlet_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.quadlet results=%d", len(owner_results))
     return owner_results
 
 
@@ -1025,6 +1035,7 @@ def _run_service_owner_actions(
             }
         )
 
+    LOG.debug("dispatch.service results=%d", len(owner_results))
     return owner_results
 
 

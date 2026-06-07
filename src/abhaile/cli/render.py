@@ -6,6 +6,7 @@ import argparse
 import logging
 import shutil
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -205,29 +206,17 @@ def render_host(
     network: NetworkConfig,
     host_services: dict[str, list[str]],
 ) -> Path:
-    """Render a single host.
-
-    Args:
-        host: Host name.
-        output_override: Optional output root override.
-        paths: Path configuration.
-        all_mode: True if rendering all hosts.
-        repo_root: Repository root path.
-        mapping: Mapping configuration.
-        network: Network configuration from network.yaml.
-        host_services: Mapping of host to services.
-
-    Returns:
-        Path to manifest.json.
-    """
+    """Render a single host and return the manifest path."""
     output_root = resolve_output_root(host, output_override, paths, all_mode)
     rendered_dir = _prepare_output_dirs(output_root, paths)
     config_root = repo_root / paths["config_root"]
 
+    t0 = time.monotonic()
     host_config, common_config = _load_host_configs(host, config_root, paths)
     collector = ArtifactCollector()
     system_dir, software_dir, services_output_dir = _prepare_host_artifact_dirs(rendered_dir, paths)
 
+    LOG.debug("render.phase.system host=%s", host)
     _render_host_system(
         host,
         host_config,
@@ -240,7 +229,9 @@ def render_host(
         host_services.get(host, []),
     )
 
+    LOG.debug("render.phase.software host=%s", host)
     _render_host_software(host, config_root, software_dir)
+    LOG.debug("render.phase.users host=%s", host)
     _render_host_users(
         host,
         config_root,
@@ -250,9 +241,11 @@ def render_host(
     )
 
     all_services = get_all_services_in_order(cast(dict[str, Any], mapping))
+    services = host_services.get(host, [])
+    LOG.debug("render.phase.services host=%s services=%d", host, len(services))
     _render_host_services(
         host,
-        host_services.get(host, []),
+        services,
         all_services,
         network,
         config_root,
@@ -266,6 +259,7 @@ def render_host(
     # Validate DNS serials after rendering so artifacts exist for troubleshooting
     validate_dns_serials(cast(dict[str, Any], network), all_services, config_root=config_root)
 
+    LOG.info("render.host.elapsed host=%s elapsed=%.1fs", host, time.monotonic() - t0)
     return manifest_path
 
 

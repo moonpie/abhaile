@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -11,19 +12,12 @@ from abhaile.models.artifact import OwnerMetadata, RenderMetadata, RenderedArtif
 from abhaile.models.kinds import ALL_KINDS
 from abhaile.utils.errors import RenderError
 
+LOG = logging.getLogger(__name__)
 MANIFEST_VERSION = "1"
 
 
 def build_manifest(host: str, metadata: RenderMetadata) -> dict[str, Any]:
-    """Build enriched manifest from collector metadata.
-
-    Args:
-        host: Hostname for manifest safety checks.
-        metadata: Collected render metadata with populated hashes/sizes.
-
-    Returns:
-        Manifest dictionary with version, host, rendered_at, entries, and owners.
-    """
+    """Build manifest dict from collected render metadata."""
     entries = _serialize_entries(metadata)
     owners = _serialize_owners(metadata)
 
@@ -99,17 +93,14 @@ def _serialize_owners(metadata: RenderMetadata) -> dict[str, dict[str, Any]]:
 
 
 def write_manifest(manifest: dict[str, Any], manifest_path: Path) -> None:
-    """Write manifest to JSON file.
-
-    Args:
-        manifest: Manifest dictionary.
-        manifest_path: Path to write manifest.
-
-    Raises:
-        RenderError: If write fails.
-    """
+    """Write manifest JSON to disk."""
     try:
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        LOG.debug(
+            "render.manifest entries=%d path=%s",
+            len(manifest.get("entries", [])),
+            manifest_path,
+        )
         with manifest_path.open("w", encoding="utf-8") as handle:
             json.dump(manifest, handle, indent=2, sort_keys=True)
             handle.write("\n")

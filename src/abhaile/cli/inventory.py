@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from abhaile.cli.common import configure_logging
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import PipelineError, RenderError
 from abhaile.utils.paths import get_repo_root, load_paths
@@ -28,6 +29,13 @@ def parse_inventory_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="Alias for --format json")
     parser.add_argument("--output", type=Path, help="Write output to file instead of stdout")
     parser.add_argument("--validate", action="store_true", help="Check service definitions exist")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase log verbosity (-v: info, -vv: debug)",
+    )
     return parser.parse_args(argv)
 
 
@@ -61,11 +69,9 @@ def _collect_service_access(
     """Collect user-facing FQDNs from CNAME records pointing through caddy."""
     access: list[dict[str, str]] = []
     services_net = network.get("services", {})
-    # Collect all deployed services
     deployed: set[str] = set()
     for svcs in host_services.values():
         deployed.update(svcs)
-    # Find services with ingress declarations
     ingress_services: set[str] = set()
     for svc in deployed:
         svc_path = config_root / "services" / svc / "service.yaml"
@@ -203,6 +209,7 @@ def _render_table(inv: dict[str, Any]) -> str:
 def main(argv: list[str] | None = None) -> int:
     """Run abhaile-inventory."""
     args = parse_inventory_args(argv)
+    configure_logging(args.verbose)
     fmt = "json" if args.json else args.format
 
     repo_root = get_repo_root(Path(__file__))

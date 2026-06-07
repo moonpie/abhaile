@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import grp
+import logging
 import os
 import pwd
 from pathlib import Path
@@ -16,6 +17,7 @@ from abhaile.apply.users import UserManagementExecutor
 from abhaile.models.kinds import KIND_FAMILIES
 from abhaile.utils.errors import ApplyError
 
+LOG = logging.getLogger(__name__)
 _USER_KINDS = KIND_FAMILIES["user"]
 
 
@@ -88,6 +90,8 @@ def _copy_artifact_for_apply(action: dict[str, object], rendered_dir: Path) -> N
         raise ApplyError("Write action missing render_path/target_path")
     if not isinstance(kind, str):
         raise ApplyError("Write action missing kind")
+
+    LOG.debug("staging.copy kind=%s target=%s", kind, target_path)
 
     if kind == "service.directory":
         return

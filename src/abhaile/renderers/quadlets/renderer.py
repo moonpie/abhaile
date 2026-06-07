@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
 
+LOG = logging.getLogger(__name__)
+
 
 def render_service_quadlets(
     host: str,
@@ -39,6 +42,8 @@ def render_service_quadlets(
     """Render quadlet files for container-based services."""
     if not services:
         return
+
+    LOG.debug("render.quadlets host=%s count=%d", host, len(services))
 
     services_root = config_root / "services"
     output_dir.mkdir(parents=True, exist_ok=True)

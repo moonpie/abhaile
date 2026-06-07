@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
 
 from abhaile.utils.hashing import sha256_file
 from abhaile.utils.errors import DiffError
+
+LOG = logging.getLogger(__name__)
 
 
 class SyncPlan(TypedDict):
@@ -493,6 +496,12 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
         applied_manifest_path,
         allow_missing=True,
         default_host=desired.host,
+    )
+
+    LOG.debug(
+        "plan.loaded desired_entries=%d applied_entries=%d",
+        len(desired.entries),
+        len(applied.entries),
     )
 
     if applied_manifest_path.exists() and applied.host != desired.host:

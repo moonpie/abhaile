@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import pwd
 import shutil
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from abhaile.utils.errors import ApplyError
+
+LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -48,18 +51,7 @@ def atomic_copy_file_with_perms(
     owner_user: str | None = None,
     owner_group: str | None = None,
 ) -> None:
-    """Copy source file to target atomically with optional ownership and mode enforcement.
-
-    Args:
-        source: Source file path (must exist and be regular).
-        target: Absolute target path.
-        mode: Optional file mode (e.g., 0o600). If None, preserves source mode.
-        owner_user: Optional owner username. If None, owner is not changed.
-        owner_group: Optional owner group name. If None, owner is not changed.
-
-    Raises:
-        ApplyError: On any failure (missing source, invalid target, ownership lookup, etc.).
-    """
+    """Copy source file to target atomically with optional ownership and mode enforcement."""
     if not source.exists() or not source.is_file():
         raise ApplyError(f"Missing rendered source file: {source}")
     if not target.is_absolute():
@@ -132,18 +124,7 @@ def run_command(
 ) -> ExecutionResult:
     """Execute a command and return structured result.
 
-    Args:
-        argv: Command argv (not shell-interpreted).
-        action_id: Caller-provided identifier for the action.
-        action_type: Type of action (e.g., 'validate', 'reload', 'restart').
-        run_as_user: Optional user to run command as (via `sudo -u`).
-        check: If True, raise ApplyError on non-zero exit.
-
-    Returns:
-        ExecutionResult with success/failure and captured output.
-
-    Raises:
-        ApplyError: If check=True and command exits non-zero.
+    argv is not shell-interpreted. If check is True, raises ApplyError on non-zero exit.
     """
     if not argv:
         raise ApplyError("Command argv is empty")
@@ -151,6 +132,8 @@ def run_command(
     actual_argv = argv
     if run_as_user:
         actual_argv = ["sudo", "-u", run_as_user, "--", *argv]
+
+    LOG.debug("exec cmd=%s action_id=%s", " ".join(actual_argv), action_id)
 
     try:
         result = subprocess.run(
@@ -167,6 +150,7 @@ def run_command(
     error_msg = ""
     if not success:
         error_msg = result.stderr.strip() or result.stdout.strip()
+        LOG.debug("exec.failed action_id=%s rc=%d", action_id, result.returncode)
         if check:
             raise ApplyError(
                 f"Command failed ({action_id}): " f"exit={result.returncode} error={error_msg}"
@@ -191,16 +175,7 @@ def run_validation(
 ) -> ExecutionResult:
     """Run a validation command and return result.
 
-    Args:
-        argv: Validation command argv.
-        action_id: Identifier for this validation.
-        is_blocker: If True, raise on failure (blocker); if False, log as diagnostic.
-
-    Returns:
-        ExecutionResult with validation outcome.
-
-    Raises:
-        ApplyError: If is_blocker=True and validation fails.
+    If is_blocker is True, raises on failure; otherwise logs as diagnostic.
     """
     return run_command(
         argv,
@@ -217,20 +192,7 @@ def run_systemctl_command(
     user: bool = False,
     run_as_user: str | None = None,
 ) -> ExecutionResult:
-    """Execute systemctl command for a unit.
-
-    Args:
-        action: systemctl action (e.g., 'start', 'stop', 'reload', 'try-restart').
-        unit_name: Full unit name (e.g., 'caddy.service').
-        user: If True, use `systemctl --user`.
-        run_as_user: If set (with user=True), run command as this user via sudo.
-
-    Returns:
-        ExecutionResult of the systemctl invocation.
-
-    Raises:
-        ApplyError: On command execution or non-zero exit.
-    """
+    """Execute systemctl command for a unit (e.g., 'caddy.service')."""
     argv = ["systemctl"]
     if user:
         argv.append("--user")
@@ -251,13 +213,7 @@ def check_destructive_gate(
 ) -> None:
     """Check if a destructive operation is allowed.
 
-    Args:
-        gate_name: Human-readable gate name (e.g., 'quadlet.volume.delete').
-        allow_destructive: Whether --allow-destructive flag is set.
-        escalations: List of escalations from owner_plan. If gate_name in escalations, require flag.
-
-    Raises:
-        ApplyError: If operation is blocked by gate.
+    Raises ApplyError if gate_name appears in escalations and --allow-destructive is not set.
     """
     escalations = escalations or []
     is_escalated = any(gate_name in esc for esc in escalations)

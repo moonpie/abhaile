@@ -2,7 +2,7 @@
 
 ## Overview
 
-Abhaile splits secrets into two phases: **bootstrap** (one-time trust establishment before Vault Agent runs) and **runtime** (ongoing secret delivery by Vault Agent after bootstrap completes). Bootstrap uses SOPS/age-encrypted artifacts decrypted ephemerally on the target host; runtime uses Vault Agent templates rendered to host-only paths. No plaintext secrets ever appear in git or in rendered output.
+Abhaile splits secrets into two phases: **bootstrap** (one-time trust before Vault Agent) and **runtime** (Vault Agent delivery after bootstrap). Bootstrap uses SOPS/age-encrypted artifacts decrypted ephemerally on the target host; runtime uses Vault Agent templates rendered to host-only paths. No plaintext secrets ever appear in git or in rendered output.
 
 ## Bootstrap Credentials
 

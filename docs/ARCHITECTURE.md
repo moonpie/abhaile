@@ -60,13 +60,13 @@ No secrets in git or rendered output. Vault Agent renders credentials at runtime
 
 ## Where to Look
 
-| I want to... | Go to |
+| Topic | Reference |
 |---|---|
-| Understand the reconciliation model | [README.md](../README.md) |
-| See which services run where | [config/mapping.yaml](../config/mapping.yaml) |
-| See IP/VLAN assignments | [config/network.yaml](../config/network.yaml) |
-| Add or modify a service | `config/services/<name>/service.yaml`, [ADR 0005](adr/0005-service-authoring-model.md) |
-| Understand apply phases | [Spec 0009](specs/accepted/0009-apply-pipeline.md) |
-| Understand secrets boundary | [ADR 0006](adr/0006-secrets-model-and-bootstrap-artifacts.md) |
-| Run render/apply locally | `make render`, `make apply HOST=<host>` |
-| Check spec status | [docs/specs/README.md](specs/README.md) |
+| Reconciliation model | [README.md](../README.md) |
+| Service-host mapping | [config/mapping.yaml](../config/mapping.yaml) |
+| IP/VLAN assignments | [config/network.yaml](../config/network.yaml) |
+| Adding or modifying a service | `config/services/<name>/service.yaml`, [ADR 0005](adr/0005-service-authoring-model.md) |
+| Apply phases | [Spec 0009](specs/accepted/0009-apply-pipeline.md) |
+| Secrets boundary | [ADR 0006](adr/0006-secrets-model-and-bootstrap-artifacts.md) |
+| Running render/apply locally | `make render`, `make apply HOST=<host>` |
+| Spec status | [docs/specs/README.md](specs/README.md) |

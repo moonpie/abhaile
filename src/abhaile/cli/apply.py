@@ -28,7 +28,7 @@ from abhaile.apply.dispatch import (
 )
 from abhaile.plan.diff import PlanResult, plan_manifest_drift
 from abhaile.state.history import update_state_manifests
-from abhaile.cli.common import print_diff_summary, resolve_cli_paths
+from abhaile.cli.common import configure_logging, print_diff_summary, resolve_cli_paths
 from abhaile.utils.errors import ApplyError, PipelineError
 
 LOG = logging.getLogger(__name__)
@@ -93,12 +93,20 @@ def parse_apply_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Allow destructive operations (volume/network recreate/delete)",
     )
     parser.add_argument("--json", action="store_true", help="Output structured JSON report")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase log verbosity (-v: info, -vv: debug)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run abhaile-apply."""
     args = parse_apply_args(argv)
+    configure_logging(args.verbose)
 
     if args.prune and args.force_prune:
         raise ApplyError("Use either --prune or --force-prune, not both")
@@ -119,6 +127,7 @@ def main(argv: list[str] | None = None) -> int:
         print_diff_summary(plan)
 
     if args.dry_run:
+        LOG.info("apply.dry_run writes_planned=%d", len(plan["sync"]["writes"]))
         validation_results: list[dict[str, object]] = []
         if args.dry_run_validations:
             validation_results = _run_dry_run_validations(
@@ -162,7 +171,13 @@ def main(argv: list[str] | None = None) -> int:
     write_count = 0
     remove_count = 0
 
-    LOG.info("apply.staging writes=%d", len(writes))
+    LOG.info(
+        "apply.plan host=%s writes=%d removals_safe=%d removals_drifted=%d",
+        plan["host"],
+        len(writes),
+        len(removals_safe),
+        len(removals_drifted),
+    )
     for action in writes:
         if not isinstance(action, dict):
             raise ApplyError("Invalid write action")
@@ -187,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
         remove_target_file(Path(target_path))
         remove_count += 1
 
-    LOG.info("apply.owners.begin")
+    LOG.info("apply.staging.complete staged=%d removed=%d", write_count, remove_count)
     # Phase ordering: systemd before vault (daemon-reload before user services),
     # service before networkd (configs before network changes),
     # networkd before quadlet (network interfaces before containers).
@@ -226,7 +241,8 @@ def main(argv: list[str] | None = None) -> int:
         owner_apply_hints=owner_apply_hints,
     )
 
-    LOG.info("apply.state_update")
+    LOG.info("apply.owners.complete")
+    LOG.info("apply.state_update dir=%s", state_dir)
     update_state_manifests(desired_path, state_dir)
 
     if args.json:
@@ -251,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"mode=apply writes={write_count} removals={remove_count} state_updated=true")
 
+    LOG.info("apply.complete writes=%d removals=%d", write_count, remove_count)
     return 0
 
 

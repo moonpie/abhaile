@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from abhaile.renderers.collector import ArtifactCollector
@@ -9,6 +10,8 @@ from abhaile.utils.composition import walk_mapping_includes
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
 from abhaile.utils.paths import normalize_service_prefixed_path
+
+LOG = logging.getLogger(__name__)
 
 
 def render_ingress_configs(
@@ -35,6 +38,8 @@ def render_ingress_configs(
 
     # Find base ingress services and their zones (only on this host)
     base_services = _find_base_ingress_services(services_root, host_services)
+
+    LOG.debug("render.ingress host=%s bases=%d", host, len(base_services))
 
     # For each base service, aggregate blocks and render
     for base_service, zones in base_services.items():

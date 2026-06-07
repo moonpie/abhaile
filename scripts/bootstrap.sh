@@ -478,16 +478,30 @@ main() {
     stage_preflight "$hostname"
     init_logging
 
+    SCRIPT_START=$(date +%s)
     log "Bootstrap started for host: ${hostname}"
     log "Timestamp: $(date --iso-8601=seconds)"
 
     stage_prerequisites
+    log "stage complete: prerequisites ($(( $(date +%s) - SCRIPT_START ))s elapsed)"
+
     stage_user_and_credentials "$hostname"
+    log "stage complete: user_and_credentials ($(( $(date +%s) - SCRIPT_START ))s elapsed)"
+
     stage_repo_and_env
+    log "stage complete: repo_and_env ($(( $(date +%s) - SCRIPT_START ))s elapsed)"
+
     stage_config_validation "$hostname"
+    log "stage complete: config_validation ($(( $(date +%s) - SCRIPT_START ))s elapsed)"
+
     stage_sealed_handoff "$hostname"
+    log "stage complete: sealed_handoff ($(( $(date +%s) - SCRIPT_START ))s elapsed)"
+
     stage_render_apply "$hostname"
+    log "stage complete: render_apply ($(( $(date +%s) - SCRIPT_START ))s elapsed)"
+
     stage_registration
+    log "bootstrap complete ($(( $(date +%s) - SCRIPT_START ))s total)"
 
     exit 0
 }

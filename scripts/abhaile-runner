@@ -7,6 +7,7 @@ set -euo pipefail
 readonly ABHAILE_BRANCH="${ABHAILE_BRANCH:-main}"
 readonly ABHAILE_REMOTE="${ABHAILE_REMOTE:-origin}"
 readonly ABHAILE_OUTPUT="${ABHAILE_OUTPUT:-/var/lib/abhaile}"
+ABHAILE_VERBOSE="${ABHAILE_VERBOSE:-0}"
 readonly RUNNER_STATE_DIR="${ABHAILE_OUTPUT}/runner"
 readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
 readonly LAST_COMMIT_FILE="${RUNNER_STATE_DIR}/last-successful-commit"
@@ -94,13 +95,19 @@ do_checkout() {
 
 do_render() {
     local host="$1"
+    local verbose_flag=""
+    [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
+    [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
     log "render: host=${host} output=${ABHAILE_OUTPUT}"
-    abhaile-render --host "$host" --output "$ABHAILE_OUTPUT"
+    abhaile-render --host "$host" --output "$ABHAILE_OUTPUT" $verbose_flag
 }
 
 do_apply() {
+    local verbose_flag=""
+    [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
+    [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
     log "apply: output=${ABHAILE_OUTPUT}"
-    sudo abhaile-apply --output "$ABHAILE_OUTPUT"
+    sudo abhaile-apply --output "$ABHAILE_OUTPUT" $verbose_flag
 }
 
 return_to_branch() {

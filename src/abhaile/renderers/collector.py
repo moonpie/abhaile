@@ -85,7 +85,6 @@ class ArtifactCollector:
 
         Called after all artifacts are registered but before manifest serialization.
         """
-        # Assert target_path uniqueness across all artifacts
         seen_targets: dict[str, str] = {}
         for artifact in self._metadata.artifacts.values():
             target = artifact.target_path
@@ -127,17 +126,14 @@ class ArtifactCollector:
                     f"(render_path={artifact.render_path})"
                 )
 
-            # Compute hash
             digest = hashlib.sha256()
             with artifact_path.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
                     digest.update(chunk)
             file_hash = digest.hexdigest()
 
-            # Get size
             file_size = artifact_path.stat().st_size
 
-            # Update artifact with computed values
             # Since RenderedArtifact is frozen, we need to reconstruct it
             updated = RenderedArtifact(
                 render_path=artifact.render_path,

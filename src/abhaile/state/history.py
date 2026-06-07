@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import shutil
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 
 from abhaile.utils.errors import ApplyError
 
+LOG = logging.getLogger(__name__)
 DEFAULT_HISTORY_KEEP = 10
 
 
@@ -69,6 +71,8 @@ def update_state_manifests(
         _atomic_copy(desired_manifest_path, current_path)
     except OSError as exc:
         raise ApplyError(f"Failed writing current state manifest in {state_dir} ({exc})") from exc
+
+    LOG.info("state.updated dir=%s", state_dir)
 
     history_files = sorted(history_dir.glob("manifest-*.json"))
     if len(history_files) > keep_history:

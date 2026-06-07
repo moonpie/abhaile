@@ -10,8 +10,6 @@ from abhaile.plan.diff import PlanResult
 from abhaile.utils.errors import PipelineError
 from abhaile.utils.paths import get_repo_root, load_paths
 
-LOG = logging.getLogger(__name__)
-
 
 def configure_logging(verbosity: int) -> None:
     """Configure CLI logging verbosity."""

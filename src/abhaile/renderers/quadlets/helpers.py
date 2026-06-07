@@ -16,14 +16,7 @@ _QUADLET_KIND_BY_SUFFIX: dict[str, str] = {
 
 
 def _quadlet_kind_from_filename(filename: str) -> str:
-    """Return the quadlet artifact kind for a given output filename.
-
-    Args:
-        filename: Quadlet output filename (e.g., ``blocky.container``).
-
-    Returns:
-        Artifact kind string (e.g., ``quadlet.container``).
-    """
+    """Return the quadlet artifact kind for a given output filename (e.g., ``blocky.container`` → ``quadlet.container``)."""
     suffix = Path(filename).suffix
     return _QUADLET_KIND_BY_SUFFIX.get(suffix, "quadlet.unknown")
 
@@ -34,12 +27,6 @@ def _quadlet_unit_name(filename: str) -> str:
     Containers and pods map ``{stem}.{ext}`` → ``{stem}.service``.
     Volumes, networks, images, and builds append the extension type as a
     suffix to distinguish them from container units.
-
-    Args:
-        filename: Quadlet output filename (e.g., ``blocky.container``).
-
-    Returns:
-        Systemd unit name (e.g., ``blocky.service``).
     """
     stem = Path(filename).stem
     suffix = Path(filename).suffix
@@ -88,10 +75,6 @@ def _register_quadlet_artifact(
 
 def _validate_trailing_newline(path: Path, *, context: str) -> None:
     """Validate text source file has a trailing newline.
-
-    Args:
-        path: Source file path to validate.
-        context: Human-readable context for error messages.
 
     Raises:
         RenderError: If file is non-empty and does not end with a newline.

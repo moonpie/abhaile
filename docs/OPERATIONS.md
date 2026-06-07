@@ -19,7 +19,7 @@ machinectl shell abhaile@ /bin/systemctl --user restart vault-agent.service
 
 # Verify secrets rendered (both hosts):
 test -f /srv/vault/agent/out/.ready && echo "OK" || echo "NOT READY"
-```bash
+```
 
 ## Quick Reference
 
@@ -34,7 +34,7 @@ sudo abhaile-apply --output /var/lib/abhaile --dry-run
 
 # Live apply
 sudo abhaile-apply --output /var/lib/abhaile
-```bash
+```
 
 <details>
 <summary>Full Command Reference</summary>
@@ -58,7 +58,7 @@ sudo abhaile-apply --output /var/lib/abhaile --force-prune --allow-destructive
 # JSON output for scripting
 abhaile-diff --output /var/lib/abhaile --json
 sudo abhaile-apply --output /var/lib/abhaile --dry-run --json
-```bash
+```
 
 </details>
 
@@ -80,7 +80,7 @@ journalctl -u abhaile-runner.service --no-pager -n 50
 
 # Trigger manual run
 sudo systemctl start abhaile-runner.service
-```bash
+```
 
 ## Service Operations
 
@@ -104,7 +104,7 @@ podman exec -it systemd-<service>-app-<container> /bin/sh         # pod
 # Container logs
 podman logs systemd-<service>                                     # simple
 podman logs systemd-<service>-app-<container>                     # pod
-```bash
+```
 
 **Host mapping:**
 
@@ -123,7 +123,7 @@ machinectl shell abhaile@ /bin/systemctl --user restart vault-agent.service
 
 # Alternative (if machinectl unavailable):
 sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) systemctl --user status vault-agent.service
-```bash
+```
 
 ### Host-Daemon Services (chrony, coredns-filtered, coredns-clean)
 
@@ -131,7 +131,7 @@ sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) systemctl --user stat
 systemctl status <service>.service
 journalctl -u <service>.service --no-pager -n 50
 systemctl restart <service>.service
-```bash
+```
 
 - chrony-a → `chrony.service` (phobos only)
 - chrony-b → `chrony.service` (deimos only)
@@ -148,7 +148,7 @@ systemctl status abhaile-secrets-ready.service
 
 # List rendered secrets
 ls -la /srv/vault/agent/out/
-```bash
+```
 
 ## Diagnostics
 
@@ -175,7 +175,7 @@ journalctl -u coredns-zones.service -n 5
 
 # Blocky logs (phobos)
 podman logs systemd-blocky --tail 30
-```bash
+```
 
 ### Networking
 
@@ -201,7 +201,7 @@ ping -c 1 172.20.20.204   # vault
 # Cross-host check
 ping -c1 172.20.20.11     # deimos from phobos
 ping -c1 172.20.20.10     # phobos from deimos
-```bash
+```
 
 #### Network Interface Recovery
 
@@ -213,7 +213,7 @@ systemctl restart systemd-networkd
 # Wait ~5s, then verify:
 ip -4 addr show dev ipvlan-l2 | grep "inet "
 # All /32 addresses should reappear
-```bash
+```
 
 ### Vault and Vault-Agent
 
@@ -230,7 +230,7 @@ stat /srv/vault/agent/out/.ready
 
 # Vault-agent template render errors
 machinectl shell abhaile@ /bin/journalctl --user -u vault-agent.service --grep "error" --no-pager
-```bash
+```
 
 ### Caddy
 
@@ -244,7 +244,7 @@ podman exec systemd-caddy-internal /usr/bin/caddy reload -c /etc/caddy/Caddyfile
 
 # Check TLS certificate expiry (from host, no container needed)
 openssl s_client -connect 172.20.20.200:443 -servername vault.abhaile.home.arpa </dev/null 2>/dev/null | openssl x509 -noout -dates
-```bash
+```
 
 ### Quadlets
 
@@ -264,7 +264,7 @@ systemctl list-units '*-app*' --no-pager
 # Check why a container won't start
 systemctl status <unit>.service
 podman logs systemd-<container-name>
-```bash
+```
 
 ## Decision Tree: Service Unreachable
 
@@ -302,7 +302,7 @@ Service unreachable?
 │   └── Check DNS resolves the FQDN: dig <service>.abhaile.home.arpa
 └── Is Authelia blocking?
     └── Check Authelia logs: podman logs systemd-authelia-app-authelia --tail 20
-```bash
+```
 
 ## Nuclear Option: Full Reconvergence
 
@@ -330,7 +330,7 @@ machinectl shell abhaile@ /bin/systemctl --user restart vault-agent.service
 # Wait for secrets:
 while [ ! -f /srv/vault/agent/out/.ready ]; do sleep 2; done
 echo "Secrets ready, services should converge"
-```bash
+```
 
 **Dependency order for full restart:**
 
@@ -349,7 +349,7 @@ echo "Secrets ready, services should converge"
 cd /opt/abhaile && git pull
 abhaile-render --host $(hostname -s) --output /var/lib/abhaile
 sudo abhaile-apply --output /var/lib/abhaile
-```bash
+```
 
 ### DNS Serial Workflow
 
@@ -363,10 +363,11 @@ When zone records change in `config/network.yaml`:
 1. `abhaile-render --host $(hostname -s) --output /tmp/dns-check` — should succeed.
 1. Commit and push.
 1. Verify propagation after apply:
-   ```bash
+
+```bash
    dig @172.20.20.235 svc.abhaile.home.arpa SOA +short   # serial should match
    dig @172.20.20.236 svc.abhaile.home.arpa SOA +short   # both resolvers
-   ```bash
+```
 
 ### Image Updates
 
@@ -385,16 +386,17 @@ ls /var/lib/abhaile/state/history/
 # Podman image pruning (manual, not automated)
 sudo podman image prune -a
 sudo -u abhaile podman image prune -a
-```bash
+```
 
 ### NTP Verification
 
 ```bash
 chronyc tracking        # chrony-a on phobos, chrony-b on deimos
 chronyc sources -v
-```bash
+```
 
 ## Break-Glass: ER605 Console
 
 If network is completely unreachable, the ER605 management interface is on VLAN 99 (172.20.99.1). Physical access: ER605 port 5 is the management fallback port (untagged VLAN 99).
+
 ````

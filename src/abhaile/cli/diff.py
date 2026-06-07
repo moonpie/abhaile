@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Any
 
 from abhaile.plan.diff import PlanResult, plan_manifest_drift
-from abhaile.cli.common import print_diff_summary, resolve_cli_paths
+from abhaile.cli.common import configure_logging, print_diff_summary, resolve_cli_paths
 from abhaile.utils.errors import PipelineError
+
+LOG = logging.getLogger(__name__)
 
 
 def parse_diff_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -26,6 +29,13 @@ def parse_diff_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--desired-manifest", help="Path to desired rendered manifest")
     parser.add_argument("--applied-manifest", help="Path to last applied manifest")
     parser.add_argument("--json", action="store_true", help="Print JSON diff output")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="count",
+        default=0,
+        help="Increase log verbosity (-v: info, -vv: debug)",
+    )
     return parser.parse_args(argv)
 
 
@@ -96,6 +106,7 @@ def _detect_metadata_changes(
 def main(argv: list[str] | None = None) -> int:
     """Run abhaile-diff."""
     args = parse_diff_args(argv)
+    configure_logging(args.verbose)
     _, _, desired_path, applied_path = resolve_cli_paths(
         args.output,
         args.desired_manifest,
@@ -105,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     plan = plan_manifest_drift(desired_path, applied_path)
     metadata_changes = _detect_metadata_changes(plan, applied_path)
+
+    summary = plan["summary"]
+    added = summary.get("added", 0) if isinstance(summary, dict) else 0
+    changed = summary.get("changed", 0) if isinstance(summary, dict) else 0
+    removed = summary.get("removed", 0) if isinstance(summary, dict) else 0
+    LOG.info("diff.result added=%d changed=%d removed=%d", added, changed, removed)
 
     if args.json:
         output = dict(plan)

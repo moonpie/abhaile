@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ from abhaile.utils.errors import RenderError
 from abhaile.utils.paths import normalize_service_prefixed_path
 from abhaile.utils.placeholders import resolve_placeholders
 from abhaile.utils.templating import create_jinja_env
+
+LOG = logging.getLogger(__name__)
 
 
 def render_vault_agent_configs(
@@ -79,6 +82,7 @@ def render_vault_agent_configs(
     )
 
     specs = collect_vault_agent_template_specs(host_services, services_root)
+    LOG.debug("render.vault_agent host=%s templates=%d", host, len(specs))
     templates = copy_vault_agent_templates(
         specs,
         services_root,

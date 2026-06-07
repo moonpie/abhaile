@@ -71,11 +71,10 @@ Reference: `config/services/blocky/service.yaml`
 
 - [ ] Set `podman.user: root` and `podman.network: ipvlan-l2`
 - [ ] Add `composition.container.named_volumes[]` for persistent data
+  - If multiple services use the same `host_path`, all must set `shared: true`
 - [ ] Add `composition.container.mounted_files[]` for bind-mounted config files
 - [ ] Add `composition.config[]` for rendered config files
 - [ ] Create `quadlets/container.container.j2` and `quadlets/image.image`
-
-Shared volumes: if multiple services use the same `host_path`, all must set `shared: true`.
 
 ## Pattern: Pod Service
 

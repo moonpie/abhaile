@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from abhaile.utils.composition import walk_service_includes
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
 from abhaile.utils.placeholders import resolve_placeholders
+
+LOG = logging.getLogger(__name__)
 
 
 def render_service_configs(
@@ -27,6 +30,8 @@ def render_service_configs(
     """Render per-service configuration files for a host."""
     if not services:
         return
+
+    LOG.debug("render.services host=%s count=%d", host, len(services))
 
     services_root = config_root / "services"
     output_dir.mkdir(parents=True, exist_ok=True)
