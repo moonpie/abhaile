@@ -1,4 +1,4 @@
-.PHONY: help clean clean-venv clean-all install lint doccheck typecheck test test-fast coverage unit-test integration-test
+.PHONY: help clean clean-venv clean-all install lint doccheck typecheck test test-fast coverage unit-test integration-test render render-host apply diff validate bootstrap-create bootstrap-edit bootstrap-rotate bootstrap-validate
 
 PYTHON := python3
 VENV := .venv
@@ -69,3 +69,39 @@ unit-test: $(VENV)
 
 integration-test: $(VENV)
 	$(VENV)/bin/pytest tests/integration/
+
+render: $(VENV)
+	$(VENV_PYTHON) -m abhaile.cli.render --all --output ./out
+
+render-host: $(VENV)
+	@test -n "$(HOST)" || (echo "Usage: make render-host HOST=phobos" >&2; exit 1)
+	$(VENV_PYTHON) -m abhaile.cli.render --host $(HOST) --output ./out
+
+apply: $(VENV)
+	@test -n "$(HOST)" || (echo "Usage: make apply HOST=phobos" >&2; exit 1)
+	$(VENV_PYTHON) -m abhaile.cli.render --host $(HOST) --output ./out
+	$(VENV_PYTHON) -m abhaile.cli.apply --host $(HOST) --output ./out --dry-run
+
+diff: $(VENV)
+	$(VENV_PYTHON) -m abhaile.cli.diff --output ./out
+
+validate: $(VENV)
+	$(VENV_PYTHON) -m abhaile.cli.render --all --output ./out
+
+bootstrap-create: $(VENV)
+	@test -n "$(HOST)" || (echo "Usage: make bootstrap-create HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+	@test -n "$(NAME)" || (echo "Usage: make bootstrap-create HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+	scripts/sops-bootstrap create $(HOST) $(NAME)
+
+bootstrap-edit: $(VENV)
+	@test -n "$(HOST)" || (echo "Usage: make bootstrap-edit HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+	@test -n "$(NAME)" || (echo "Usage: make bootstrap-edit HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+	scripts/sops-bootstrap edit $(HOST) $(NAME)
+
+bootstrap-rotate: $(VENV)
+	@test -n "$(HOST)" || (echo "Usage: make bootstrap-rotate HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+	@test -n "$(NAME)" || (echo "Usage: make bootstrap-rotate HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+	scripts/sops-bootstrap rotate $(HOST) $(NAME)
+
+bootstrap-validate:
+	scripts/sops-bootstrap validate

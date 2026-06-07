@@ -79,7 +79,7 @@ class TestApplyCli:
         )
 
         output = capsys.readouterr().out
-        assert rc == 0
+        assert rc == 1
         assert "diff added=1 changed=0 removed=0" in output
 
     def test_apply_dry_run_does_not_write_target_or_state(

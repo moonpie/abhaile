@@ -25,6 +25,7 @@ dev = [
 abhaile-render = "abhaile.cli.render:main"
 abhaile-apply = "abhaile.cli.apply:main"
 abhaile-diff = "abhaile.cli.diff:main"
+abhaile-inventory = "abhaile.cli.inventory:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

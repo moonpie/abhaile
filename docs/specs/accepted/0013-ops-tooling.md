@@ -5,7 +5,7 @@
 ```yaml
 id: SPEC-2026-013
 title: Ops Tooling
-status: proposed
+status: accepted
 owner: moonpie
 created: 2026-06-05
 updated: 2026-06-05
@@ -37,15 +37,15 @@ create/edit/rotate workflows that prevent accidental plaintext commits.
 
 ## Requirements
 
-- [ ] Makefile provides `render`, `apply`, and `validate` targets that call canonical CLI
+- [x] Makefile provides `render`, `apply`, and `validate` targets that call canonical CLI
   entrypoints and return non-zero on failure.
-- [ ] A host inventory command prints host-to-services mapping from `config/mapping.yaml` in
+- [x] A host inventory command prints host-to-services mapping from `config/mapping.yaml` in
   deterministic order.
-- [ ] `abhaile-diff` defines predictable exit codes for automation (no diff, diff found,
+- [x] `abhaile-diff` defines predictable exit codes for automation (no diff, diff found,
   error).
-- [ ] Sealed bootstrap artifact tooling provides create, edit, and rotate workflows without
+- [x] Sealed bootstrap artifact tooling provides create, edit, and rotate workflows without
   exposing plaintext in git.
-- [ ] All new tooling is documented with usage examples.
+- [x] All new tooling is documented with usage examples.
 
 ## Constraints
 
@@ -255,58 +255,77 @@ Design decisions:
   Rationale: `sops` is an interactive CLI tool; Python adds no value for path/recipient orchestration.
   Impact: Requires `sops` and `age` installed on operator workstation.
 
+- Decision: `make validate` is equivalent to a full render (no separate validate-only mode).
+  Rationale: Validation is tightly coupled to rendering. Splitting them duplicates setup for negligible speed gain on a 2-node homelab.
+  Impact: None — validation already runs as part of render.
+
+- Decision: `abhaile-inventory --validate` checks service definition existence only, not network.yaml cross-references.
+  Rationale: Network-level validation belongs to the render pipeline. Inventory answers one question: are mapping.yaml references broken?
+  Impact: Simple, fast, single-concern validation.
+
+- Decision: Metadata-only manifest changes (kind/owner_ref differ but sha256 matches) produce exit 0 from `abhaile-diff`.
+  Rationale: Metadata differences don't indicate host filesystem drift. Exit 1 means "host needs reconciliation."
+  Impact: Metadata changes are reported in output but do not trigger non-zero exit.
+
+- Decision: `.sops.yaml` creation rules are the exclusive recipient source. No `--recipient` override.
+  Rationale: One source of truth prevents operator mistakes. Ad-hoc recipients bypass the per-host model.
+  Impact: Testing with different recipients requires editing `.sops.yaml` temporarily.
+
+- Decision: `bootstrap-validate` runs in CI only, not pre-commit.
+  Rationale: `sops` is not a standard dev dependency. Pre-commit should work with Python + standard tools only.
+  Impact: Developers without `sops` are not blocked; CI catches issues.
+
 ## Acceptance Criteria
 
 ### Acceptance: Make Targets
 
-- [ ] `make render` renders all hosts and exits non-zero on validation or render failure.
-- [ ] `make render-host HOST=phobos` renders a single host.
-- [ ] `make apply HOST=phobos` runs render then dry-run apply for the specified host.
-- [ ] `make validate` runs a full render pass (exercising all validation) and exits non-zero on failure.
-- [ ] `make diff` runs `abhaile-diff` with default output root paths.
-- [ ] All targets print clear error messages when required variables are missing.
+- [x] `make render` renders all hosts and exits non-zero on validation or render failure.
+- [x] `make render-host HOST=phobos` renders a single host.
+- [x] `make apply HOST=phobos` runs render then dry-run apply for the specified host.
+- [x] `make validate` runs a full render pass (exercising all validation) and exits non-zero on failure.
+- [x] `make diff` runs `abhaile-diff` with default output root paths.
+- [x] All targets print clear error messages when required variables are missing.
 
 ### Host Inventory
 
-- [ ] `abhaile-inventory` prints all hosts and their mapped services in deterministic order.
-- [ ] `--json` outputs machine-readable JSON with host keys and service list values.
-- [ ] `--validate` exits non-zero and reports missing service definitions.
-- [ ] Entrypoint registered in `pyproject.toml`.
-- [ ] Unit tests cover normal output, JSON mode, and validation failure.
+- [x] `abhaile-inventory` prints all hosts and their mapped services in deterministic order.
+- [x] `--json` outputs machine-readable JSON with host keys and service list values.
+- [x] `--validate` exits non-zero and reports missing service definitions.
+- [x] Entrypoint registered in `pyproject.toml`.
+- [x] Unit tests cover normal output, JSON mode, and validation failure.
 
 ### Diff Tool
 
-- [ ] `abhaile-diff` exits 0 when manifests are identical.
-- [ ] `abhaile-diff` exits 1 when differences (added/changed/removed) are present.
-- [ ] `abhaile-diff` exits 2 on invalid input (missing file, malformed manifest).
-- [ ] Metadata-only changes are reported distinctly from content changes.
-- [ ] Existing JSON output and human-readable summary remain functional.
-- [ ] `make diff` target calls `abhaile-diff` correctly.
-- [ ] Unit tests cover all three exit code paths and metadata-only detection.
+- [x] `abhaile-diff` exits 0 when manifests are identical.
+- [x] `abhaile-diff` exits 1 when differences (added/changed/removed) are present.
+- [x] `abhaile-diff` exits 2 on invalid input (missing file, malformed manifest).
+- [x] Metadata-only changes are reported distinctly from content changes.
+- [x] Existing JSON output and human-readable summary remain functional.
+- [x] `make diff` target calls `abhaile-diff` correctly.
+- [x] Unit tests cover all three exit code paths and metadata-only detection.
 
 ### Sealed Bootstrap Artifact Tooling
 
-- [ ] `scripts/sops-bootstrap create <host> <name>` creates an encrypted artifact at the
+- [x] `scripts/sops-bootstrap create <host> <name>` creates an encrypted artifact at the
   canonical path with correct recipients.
-- [ ] `scripts/sops-bootstrap edit <host> <name>` opens the artifact for editing without
+- [x] `scripts/sops-bootstrap edit <host> <name>` opens the artifact for editing without
   writing plaintext to disk.
-- [ ] `scripts/sops-bootstrap rotate <host> <name>` re-encrypts with current recipients from
+- [x] `scripts/sops-bootstrap rotate <host> <name>` re-encrypts with current recipients from
   `.sops.yaml`.
-- [ ] `scripts/sops-bootstrap validate` checks all sealed artifacts are encrypted and
+- [x] `scripts/sops-bootstrap validate` checks all sealed artifacts are encrypted and
   correctly named.
-- [ ] `validate` subcommand is integrated as a pre-commit hook.
-- [ ] `.sops.yaml` creation rules define per-host recipient sets.
-- [ ] `create` refuses to overwrite existing files without `--force`.
-- [ ] Make targets `bootstrap-create`, `bootstrap-edit`, `bootstrap-rotate`, and
+- [x] `validate` subcommand is suitable for CI integration (not pre-commit; sops is not a
+  standard dev dependency).
+- [x] `.sops.yaml` creation rules define per-host recipient sets.
+- [x] `create` refuses to overwrite existing files without `--force`.
+- [x] Make targets `bootstrap-create`, `bootstrap-edit`, `bootstrap-rotate`, and
   `bootstrap-validate` call the wrapper with correct arguments.
-- [ ] No plaintext secret material is written to repo-managed paths at any point.
+- [x] No plaintext secret material is written to repo-managed paths at any point.
 
 ### Evidence
 
-For each completed criterion, include:
-
-- Implementation evidence: [commit or PR link]
-- Validation evidence: [test, dry-run, or equivalent]
+- Implementation evidence: `Makefile` (targets), `src/abhaile/cli/inventory.py`, `src/abhaile/cli/diff.py` (exit codes), `scripts/sops-bootstrap`, `.sops.yaml`
+- Validation evidence: `tests/unit/python/cli/test_inventory.py`, `tests/unit/python/cli/test_diff_exit_codes.py`, `bash -n` syntax checks, `make test` 510 passed
 
 ## Out of Scope
 
@@ -318,24 +337,7 @@ For each completed criterion, include:
 
 ## Open Questions
 
-1. **Make validate vs render:** Should `make validate` be a distinct validate-only mode
-   (faster, no artifact output) or remain equivalent to a full render? A validate-only mode
-   requires refactoring render to separate validation from artifact generation.
-
-1. **Inventory service existence check:** Should `--validate` in `abhaile-inventory` also
-   check that services referenced in `config/mapping.yaml` appear in `config/network.yaml`,
-   or is structural schema validation sufficient?
-
-1. **Diff metadata-only threshold:** Should metadata-only changes (kind/owner_ref/apply_hints
-   differ but sha256 matches) produce exit code 1, or should only content drift trigger a
-   non-zero exit?
-
-1. **SOPS recipient source:** Should the wrapper accept explicit `--recipient` overrides for
-   ad-hoc testing, or enforce `.sops.yaml` creation rules exclusively?
-
-1. **Bootstrap validate in CI:** Should `bootstrap-validate` run in the standard pre-commit
-   suite or only in a dedicated CI step (to avoid requiring `sops` on all developer
-   workstations)?
+All original open questions have been resolved. See Decision Notes.
 
 ## References
 

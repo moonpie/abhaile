@@ -1,4 +1,10 @@
 creation_rules:
+  - path_regex: config/bootstrap/sealed/phobos/.*\.sops\.yaml$
+    age: >-
+      age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys
+  - path_regex: config/bootstrap/sealed/deimos/.*\.sops\.yaml$
+    age: >-
+      age15ffqmsgjkxxye7pf3g9tlehv4jaka6tuajhgjt8m6ke70d534gpqqe4fys
   - path_regex: '^secrets/.*'
     key_groups:
       - age:

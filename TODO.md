@@ -4,9 +4,9 @@ Working scratchpad. Three jobs: what's next, where decisions live, how to start 
 
 ## Next Up
 
-**Ops Tooling** — `docs/specs/proposed/0013-ops-tooling.md`
+**Bootstrap** — `docs/specs/proposed/0014-bootstrap.md`
 
-Move to `active/`, then implement. Runner is now complete.
+Move to `active/`, then implement. Runner and Ops Tooling are complete.
 
 ## Progress
 
@@ -18,7 +18,7 @@ Move to `active/`, then implement. Runner is now complete.
 | Secrets | [x] | `docs/specs/accepted/0010-secrets-management.md` |
 | Validation & Testing | [x] | `docs/specs/accepted/0007-validation-pipeline.md` |
 | GitOps Runner | [x] | `docs/specs/accepted/0012-gitops-runner.md` |
-| Ops Tooling | [ ] | `docs/specs/proposed/0013-ops-tooling.md` |
+| Ops Tooling | [x] | `docs/specs/accepted/0013-ops-tooling.md` |
 | Bootstrap | [ ] | `docs/specs/proposed/0014-bootstrap.md` |
 | Documentation | [ ] | ADRs 0001–0007 done. README refresh after Runner + Bootstrap. |
 | Services (Phase 3) | [ ] | See breakdown below |

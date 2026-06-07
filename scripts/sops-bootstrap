@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# scripts/sops-bootstrap — Sealed bootstrap artifact lifecycle management.
+# Usage: scripts/sops-bootstrap {create|edit|rotate|validate} [HOST] [NAME]
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SEALED_DIR="$REPO_ROOT/config/bootstrap/sealed"
+
+die() { echo "error: $*" >&2; exit 1; }
+
+cmd_create() {
+    local host="${1:-}" name="${2:-}"
+    [ -n "$host" ] || die "Usage: sops-bootstrap create <host> <name>"
+    [ -n "$name" ] || die "Usage: sops-bootstrap create <host> <name>"
+
+    local target="$SEALED_DIR/$host/${name}.sops.yaml"
+
+    if [ -f "$target" ]; then
+        if [ "${FORCE:-}" != "1" ] && [ "${3:-}" != "--force" ]; then
+            die "File already exists: $target (use --force to overwrite)"
+        fi
+    fi
+
+    command -v sops >/dev/null 2>&1 || die "sops is not installed"
+
+    mkdir -p "$(dirname "$target")"
+    echo "# Managed by Abhaile. Encrypted with sops/age." | \
+        sops --encrypt --input-type yaml --output-type yaml /dev/stdin > "$target"
+    echo "created: $target"
+}
+
+cmd_edit() {
+    local host="${1:-}" name="${2:-}"
+    [ -n "$host" ] || die "Usage: sops-bootstrap edit <host> <name>"
+    [ -n "$name" ] || die "Usage: sops-bootstrap edit <host> <name>"
+
+    local target="$SEALED_DIR/$host/${name}.sops.yaml"
+    [ -f "$target" ] || die "File not found: $target"
+
+    command -v sops >/dev/null 2>&1 || die "sops is not installed"
+    sops "$target"
+}
+
+cmd_rotate() {
+    local host="${1:-}" name="${2:-}"
+    [ -n "$host" ] || die "Usage: sops-bootstrap rotate <host> <name>"
+    [ -n "$name" ] || die "Usage: sops-bootstrap rotate <host> <name>"
+
+    local target="$SEALED_DIR/$host/${name}.sops.yaml"
+    [ -f "$target" ] || die "File not found: $target"
+
+    command -v sops >/dev/null 2>&1 || die "sops is not installed"
+    sops updatekeys -y "$target"
+    echo "rotated: $target"
+}
+
+cmd_validate() {
+    command -v sops >/dev/null 2>&1 || die "sops is not installed"
+
+    local errors=0
+
+    if [ ! -d "$SEALED_DIR" ]; then
+        echo "No sealed directory found at $SEALED_DIR — nothing to validate."
+        exit 0
+    fi
+
+    while IFS= read -r -d '' file; do
+        # Check naming convention
+        if [[ ! "$file" == *.sops.yaml ]]; then
+            echo "FAIL naming: $file (expected .sops.yaml suffix)" >&2
+            errors=$((errors + 1))
+            continue
+        fi
+
+        # Check that file has sops metadata (is encrypted)
+        if ! grep -q '"sops"\|sops:' "$file" 2>/dev/null; then
+            echo "FAIL plaintext: $file (missing sops metadata — may be unencrypted)" >&2
+            errors=$((errors + 1))
+        fi
+    done < <(find "$SEALED_DIR" -type f -print0)
+
+    if [ "$errors" -gt 0 ]; then
+        die "Validation failed: $errors error(s)"
+    fi
+
+    echo "validate: all sealed artifacts OK"
+}
+
+case "${1:-}" in
+    create)  shift; cmd_create "$@" ;;
+    edit)    shift; cmd_edit "$@" ;;
+    rotate)  shift; cmd_rotate "$@" ;;
+    validate) shift; cmd_validate "$@" ;;
+    *)
+        echo "Usage: sops-bootstrap {create|edit|rotate|validate} [args...]" >&2
+        exit 1
+        ;;
+esac
