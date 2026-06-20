@@ -26,7 +26,7 @@ When normal operations fail. Use direct IPs. No DNS, no Vault, no runner require
 | deimos | 172.20.20.11 | `ssh root@172.20.20.11` | Rack top shelf, right unit. Label: "DEIMOS" |
 | ER605 | 172.20.99.1 | Web UI only (HTTPS) | Rack, physical port 5 = mgmt fallback |
 
-Physical access: Both hosts have HDMI + USB ports. No IPMI, no serial console (HDMI only). Console login uses root password (set during bootstrap).
+Physical access: Both hosts have VGA, HDMI + USB ports. No IPMI. Console login uses root password (set during bootstrap).
 
 Gateway: 172.20.20.1 (ER605, VLAN 20 interface).
 
@@ -39,23 +39,22 @@ Gateway: 172.20.20.1 (ER605, VLAN 20 interface).
 1. Set environment:
 
    ```bash
-   export VAULT_ADDR=https://172.20.20.204:8200
-   export VAULT_CACERT=/etc/ssl/certs/ca-certificates.crt
+   export VAULT_ADDR=http://172.20.20.204:8200
    ```
 
-1. Verify sealed: `curl -sk https://172.20.20.204:8200/v1/sys/seal-status | jq .sealed`
+1. Verify sealed: `curl -s http://172.20.20.204:8200/v1/sys/seal-status | jq .sealed`
 
 1. If `true` → unseal (repeat for each key if multi-key threshold):
 
    ```bash
-   vault operator unseal
+   /usr/local/bin/vault operator unseal
    ```
 
    Alternative (no vault CLI needed):
 
    ```bash
-   curl -sk --cacert /etc/ssl/certs/ca-certificates.crt \
-     -X PUT https://172.20.20.204:8200/v1/sys/unseal \
+   curl -s \
+     -X PUT http://172.20.20.204:8200/v1/sys/unseal \
      -H "Content-Type: application/json" \
      -d '{"key": "PASTE_KEY_HERE"}'
    ```
@@ -213,9 +212,8 @@ systemctl restart systemd-networkd
    ```bash
    systemctl restart vault.service
    # Wait 10s, then unseal (set env first):
-   export VAULT_ADDR=https://172.20.20.204:8200
-   export VAULT_CACERT=/etc/ssl/certs/ca-certificates.crt
-   vault operator unseal
+   export VAULT_ADDR=http://172.20.20.204:8200
+   /usr/local/bin/vault operator unseal
    ```
 
 1. **Bring vault-agent up** (secret-dependent services CANNOT start without this):
@@ -241,7 +239,7 @@ systemctl restart systemd-networkd
    systemctl restart omada-controller.service
    ```
 
-1. **Verify:** `curl -sk https://172.20.20.204:8200/v1/sys/seal-status | jq .sealed`
+1. **Verify:** `curl -s http://172.20.20.204:8200/v1/sys/seal-status | jq .sealed`
 
 1. **Re-render and re-apply if state is suspect:**
 

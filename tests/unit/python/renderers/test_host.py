@@ -5,9 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-
-from abhaile.renderers.host import render_host_config
 from abhaile.renderers.collector import ArtifactCollector
+from abhaile.renderers.host import render_host_config
 
 
 class TestRenderHostConfig:
@@ -126,3 +125,139 @@ class TestRenderHostConfig:
 
         content = (output_dir / "etc/chrony/chrony.conf").read_text()
         assert "server local.ntp" in content
+
+    def test_renders_host_systemd_entries_with_apply_hints(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Host composition.systemd entries render with systemd metadata."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "output"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "hosts" / "common" / "systemd" / "demo.service",
+            "[Service]\nType=oneshot\n",
+        )
+        common_config = {
+            "composition": {
+                "config": [],
+                "systemd": [
+                    {
+                        "source": "common/systemd/demo.service",
+                        "destination": "/etc/systemd/system/demo.service",
+                        "enable": True,
+                        "start": True,
+                    }
+                ],
+            }
+        }
+        host_config: dict[str, Any] = {"composition": {"config": [], "systemd": []}}
+
+        render_host_config(
+            "phobos",
+            host_config,
+            common_config,
+            {},
+            config_root,
+            rendered_root,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifact = collector.get_all_artifacts()[0]
+        assert artifact.target_path == "/etc/systemd/system/demo.service"
+        assert artifact.kind == "systemd.unit"
+        assert artifact.owner_ref == "unit:demo.service"
+        assert artifact.apply_hints == {
+            "enable_mode": "enable",
+            "activation_mode": "start",
+        }
+
+    def test_host_systemd_templates_receive_host_services(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Host systemd templates receive mapped host services."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+
+        write_file(
+            config_root / "hosts" / "common" / "systemd" / "demo.service.j2",
+            'After={% if "vault" in host_services %}vault.service {% endif %}'
+            "network-online.target\n"
+            "Vault={{ vault_addr | strip_cidr }}\n",
+        )
+        common_config = {
+            "composition": {
+                "config": [],
+                "systemd": [
+                    {
+                        "source": {
+                            "template": "common/systemd/demo.service.j2",
+                            "variables": {
+                                "vault_addr": "%%network.services.vault.address%%",
+                            },
+                        },
+                        "destination": "/etc/systemd/system/demo.service",
+                    }
+                ],
+            }
+        }
+        host_config: dict[str, Any] = {"composition": {"config": [], "systemd": []}}
+        network = {"services": {"vault": {"address": "172.20.20.204/32"}}}
+
+        render_host_config(
+            "phobos",
+            host_config,
+            common_config,
+            network,
+            config_root,
+            output_dir,
+            host_services=["vault", "vault-agent"],
+        )
+
+        content = (output_dir / "etc/systemd/system/demo.service").read_text()
+        assert "After=vault.service network-online.target" in content
+        assert "Vault=172.20.20.204" in content
+
+    def test_host_systemd_dropins_do_not_receive_lifecycle_hints(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Host systemd drop-ins do not receive independent enable/start hints."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "output"
+        collector = ArtifactCollector()
+
+        write_file(
+            config_root / "hosts" / "common" / "systemd" / "demo.conf",
+            "[Service]\nEnvironment=DEMO=1\n",
+        )
+        common_config = {
+            "composition": {
+                "config": [],
+                "systemd": [
+                    {
+                        "source": "common/systemd/demo.conf",
+                        "destination": "/etc/systemd/system/demo.service.d/override.conf",
+                        "enable": True,
+                        "start": True,
+                    }
+                ],
+            }
+        }
+        host_config: dict[str, Any] = {"composition": {"config": [], "systemd": []}}
+
+        render_host_config(
+            "phobos",
+            host_config,
+            common_config,
+            {},
+            config_root,
+            rendered_root,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifact = collector.get_all_artifacts()[0]
+        assert artifact.kind == "systemd.dropin"
+        assert artifact.owner_ref == "unit:demo.service"
+        assert artifact.apply_hints is None

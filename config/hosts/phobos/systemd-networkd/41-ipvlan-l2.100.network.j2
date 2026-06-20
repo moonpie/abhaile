@@ -1,5 +1,8 @@
 [Match]
 Name=ipvlan-l2.100
 
+[Link]
+RequiredForOnline=no
+
 [Network]
 Address={{ network.hosts[host_name].interfaces["ipvlan-l2.100"].address }}

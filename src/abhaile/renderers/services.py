@@ -6,13 +6,16 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from abhaile.renderers.config import render_config_entries
+from abhaile.renderers.config import (
+    annotate_systemd_entries_with_apply_hints,
+    render_config_entries,
+    resolve_config_entry_variables,
+)
 from abhaile.renderers.metadata import classify_service_artifact, classify_systemd_artifact
 from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.composition import walk_service_includes
 from abhaile.utils.config import read_yaml
 from abhaile.utils.errors import RenderError
-from abhaile.utils.placeholders import resolve_placeholders
 
 LOG = logging.getLogger(__name__)
 
@@ -59,7 +62,7 @@ def render_service_configs(
         }
 
         if config_entries:
-            resolved_entries = _resolve_config_entry_variables(config_entries, network)
+            resolved_entries = resolve_config_entry_variables(config_entries, network)
             annotated_entries = _annotate_config_entries_with_apply_hints(
                 resolved_entries,
                 apply_hints,
@@ -83,8 +86,8 @@ def render_service_configs(
             )
 
         if systemd_entries:
-            resolved_systemd_entries = _resolve_config_entry_variables(systemd_entries, network)
-            annotated_systemd_entries = _annotate_systemd_entries_with_apply_hints(
+            resolved_systemd_entries = resolve_config_entry_variables(systemd_entries, network)
+            annotated_systemd_entries = annotate_systemd_entries_with_apply_hints(
                 resolved_systemd_entries,
             )
 
@@ -132,38 +135,6 @@ def _collect_service_composition_entries(
             entries.append(copied)
 
     return entries
-
-
-def _resolve_config_entry_variables(
-    entries: list[dict[str, Any]],
-    network: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Resolve %%...%% placeholders in template variables using network data."""
-    resolved: list[dict[str, Any]] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            resolved.append(entry)
-            continue
-
-        source = entry.get("source")
-        if not isinstance(source, dict):
-            resolved.append(entry)
-            continue
-
-        variables = source.get("variables", {})
-        if not isinstance(variables, dict):
-            resolved.append(entry)
-            continue
-
-        resolved_vars = resolve_placeholders(variables, network)
-
-        updated = dict(entry)
-        updated_source = dict(source)
-        updated_source["variables"] = resolved_vars
-        updated["source"] = updated_source
-        resolved.append(updated)
-
-    return resolved
 
 
 def _service_config_apply_hints(service: str, service_data: dict[str, Any]) -> dict[str, Any]:
@@ -226,27 +197,6 @@ def _annotate_config_entries_with_apply_hints(
 
         if entry_hints:
             merged["_abhaile_apply_hints"] = entry_hints
-        annotated.append(merged)
-
-    return annotated
-
-
-def _annotate_systemd_entries_with_apply_hints(entries: list[dict[str, Any]]) -> list[Any]:
-    """Attach internal apply hints to composition.systemd entries."""
-    annotated: list[Any] = []
-    for entry in entries:
-        if not isinstance(entry, dict):
-            annotated.append(entry)
-            continue
-
-        merged = dict(entry)
-        hints: dict[str, Any] = {}
-        if merged.get("enable") is True:
-            hints["enable_mode"] = "enable"
-        if merged.get("start") is True:
-            hints["activation_mode"] = "start"
-        if hints:
-            merged["_abhaile_apply_hints"] = hints
         annotated.append(merged)
 
     return annotated

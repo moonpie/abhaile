@@ -345,6 +345,7 @@ def _render_host_system(
         system_dir,
         collector=collector,
         rendered_root=rendered_dir,
+        host_services=services,
     )
     render_networkd_config(
         host,

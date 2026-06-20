@@ -58,7 +58,7 @@ test: $(VENV)
 	$(VENV)/bin/pytest tests/
 
 test-fast: $(VENV)
-	$(VENV)/bin/pytest tests/unit -m "not slow"
+	$(VENV)/bin/pytest tests/unit -m "not slow" --no-cov
 
 coverage: $(VENV)
 	$(VENV)/bin/pytest tests/ --cov --cov-report=html

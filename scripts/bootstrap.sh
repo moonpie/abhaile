@@ -9,6 +9,8 @@ set -euo pipefail
 readonly SOPS_VERSION="v3.9.4"
 readonly SOPS_SHA256="4540307a0889c4e4bcbec4079b67050b4e49e9937e7a0543a40cb2e33e63a596"
 readonly SOPS_URL="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
+readonly VAULT_VERSION="1.21"
+readonly VAULT_RELEASE_API="https://api.releases.hashicorp.com/v1/releases/vault/${VAULT_VERSION}?license_class=oss"
 
 readonly REPO_URL="${ABHAILE_REPO_URL:-git@github.com:moonpie/abhaile.git}"
 readonly REPO_DIR="/opt/abhaile"
@@ -17,7 +19,7 @@ readonly OUTPUT_DIR="/var/lib/abhaile"
 readonly LOG_DIR="/var/log/abhaile"
 readonly LOG_FILE="${LOG_DIR}/bootstrap.log"
 
-readonly VAULT_ADDR="${VAULT_ADDR:-https://vault.svc.abhaile.home.arpa:8200}"
+readonly VAULT_ADDR="${VAULT_ADDR:-http://vault.svc.abhaile.home.arpa:8200}"
 readonly VAULT_TOKEN_PATH="/home/abhaile/.config/vault-agent/token"
 readonly READY_SENTINEL="/srv/vault/agent/out/.ready"
 readonly BOOTSTRAP_READY_TIMEOUT="${BOOTSTRAP_READY_TIMEOUT:-60}"
@@ -44,6 +46,20 @@ die() { log "FATAL: $*"; exit 1; }
 # --- Token handling ----------------------------------------------------------
 
 _bootstrap_token=""
+
+validate_hostname_arg() {
+    local hostname="${1:-}"
+
+    if [[ -z "$hostname" ]]; then
+        echo "Usage: bootstrap.sh <hostname>" >&2
+        echo "  hostname: short host name present in config/mapping.yaml and config/network.yaml" >&2
+        exit 1
+    fi
+
+    if [[ ! "$hostname" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; then
+        die "Invalid hostname: '${hostname}'. Use a short DNS label from host config."
+    fi
+}
 
 acquire_bootstrap_token() {
     if [[ -n "${BOOTSTRAP_TOKEN:-}" ]]; then
@@ -95,6 +111,38 @@ cleanup_ephemeral() {
 
 trap cleanup_ephemeral EXIT
 
+install_vault_cli() {
+    if [[ -x /usr/local/bin/vault ]] &&
+        /usr/local/bin/vault version 2>/dev/null | grep -Eq "Vault v${VAULT_VERSION}(\\.|$)"; then
+        log "Vault CLI ${VAULT_VERSION} already installed"
+        return 0
+    fi
+
+    log "Installing Vault CLI ${VAULT_VERSION}"
+
+    local vault_release
+    vault_release=$(curl -fsSL "$VAULT_RELEASE_API" | jq -r .version)
+
+    local version_regex
+    version_regex="^${VAULT_VERSION//./\\.}(\\.[0-9]+)?$"
+    if [[ ! "$vault_release" =~ $version_regex ]]; then
+        die "Unexpected Vault release version from HashiCorp API: ${vault_release}"
+    fi
+
+    ensure_ephemeral_dir
+    local vault_zip="${_ephemeral_dir}/vault.zip"
+    local vault_bin="${_ephemeral_dir}/vault"
+
+    curl -fsSL -o "$vault_zip" \
+        "https://releases.hashicorp.com/vault/${vault_release}/vault_${vault_release}_linux_amd64.zip"
+    unzip -p "$vault_zip" vault >"$vault_bin"
+    install -m 0755 "$vault_bin" /usr/local/bin/vault
+    rm -f "$vault_zip" "$vault_bin"
+
+    /usr/local/bin/vault version >/dev/null
+    log "Vault CLI ${vault_release} installed"
+}
+
 # --- Stage 1: Preflight -----------------------------------------------------
 
 stage_preflight() {
@@ -104,16 +152,7 @@ stage_preflight() {
         die "Must run as root"
     fi
 
-    if [[ -z "${1:-}" ]]; then
-        echo "Usage: bootstrap.sh <hostname>" >&2
-        echo "  hostname: phobos or deimos" >&2
-        exit 1
-    fi
-
-    # Validate hostname against known hosts (prevents injection in downstream commands)
-    if [[ "$1" != "phobos" && "$1" != "deimos" ]]; then
-        die "Invalid hostname: '$1'. Must be 'phobos' or 'deimos'."
-    fi
+    validate_hostname_arg "${1:-}"
 
     # Verify Debian 13 (trixie)
     if [[ -f /etc/os-release ]]; then
@@ -141,7 +180,7 @@ stage_preflight() {
 stage_prerequisites() {
     log "=== Stage 2: Prerequisites ==="
 
-    local packages=(git python3 python3-venv podman crun age jq curl)
+    local packages=(git python3 python3-venv podman crun age jq curl unzip)
     local to_install=()
 
     for pkg in "${packages[@]}"; do
@@ -176,6 +215,8 @@ stage_prerequisites() {
         rm -f "$sops_tmp"
         log "sops ${SOPS_VERSION} installed (checksum verified)"
     fi
+
+    install_vault_cli
 
     # Enable systemd-networkd and systemd-resolved
     systemctl enable --now systemd-networkd 2>/dev/null || true
@@ -321,33 +362,38 @@ stage_sealed_handoff() {
     local role_id
     role_id=$(python3 -c "
 import yaml, sys
-data = yaml.safe_load(open('$decrypted'))
+data = yaml.safe_load(open('$decrypted')) or {}
 print(data.get('role_id', ''), end='')
 ")
     if [[ -z "$role_id" ]]; then
         die "role_id not found in sealed artifact"
     fi
 
-    # Vault unseal (phobos only — has unseal keys in sealed artifact)
-    if [[ "$hostname" == "phobos" ]]; then
-        log "Vault unseal (phobos only)"
-        local unseal_keys
-        unseal_keys=$(python3 -c "
-import yaml, sys, json
-data = yaml.safe_load(open('$decrypted'))
+    local unseal_keys_count
+    unseal_keys_count=$(python3 -c "
+import yaml, sys
+data = yaml.safe_load(open('$decrypted')) or {}
 keys = data.get('unseal_keys', [])
-print(json.dumps(keys))
+print(len(keys) if isinstance(keys, list) else 0)
 ")
-        if [[ "$unseal_keys" != "[]" ]]; then
-            local key
-            for key in $(echo "$unseal_keys" | python3 -c "import json,sys; [print(k) for k in json.load(sys.stdin)]"); do
+
+    if [[ "$unseal_keys_count" -gt 0 ]]; then
+        log "Applying Vault unseal keys from sealed artifact"
+        while IFS= read -r key; do
+            python3 -c "import json,sys; print(json.dumps({'key': sys.stdin.read().rstrip('\n')}))" <<<"$key" |
                 curl -fsSo /dev/null --cacert /etc/ssl/certs/ca-certificates.crt \
                     -X PUT "${VAULT_ADDR}/v1/sys/unseal" \
                     -H "Content-Type: application/json" \
-                    -d "{\"key\": \"${key}\"}" 2>/dev/null || true
-            done
-            log "Vault unseal keys applied"
-        fi
+                    -d @- 2>/dev/null || true
+        done < <(python3 -c "
+import yaml, sys
+data = yaml.safe_load(open('$decrypted')) or {}
+keys = data.get('unseal_keys', [])
+if isinstance(keys, list):
+    for key in keys:
+        print(key)
+")
+        log "Vault unseal keys applied"
     fi
 
     # Mint seed token via AppRole login
@@ -506,4 +552,6 @@ main() {
     exit 0
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

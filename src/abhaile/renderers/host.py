@@ -6,10 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from abhaile.renderers.config import (
+    annotate_systemd_entries_with_apply_hints,
     filter_config_entries_by_destination_prefix,
     render_config_entries,
+    resolve_config_entry_variables,
 )
 from abhaile.renderers.collector import ArtifactCollector
+from abhaile.renderers.metadata import classify_systemd_artifact
 
 
 def render_host_config(
@@ -22,15 +25,16 @@ def render_host_config(
     *,
     collector: ArtifactCollector | None = None,
     rendered_root: Path | None = None,
+    host_services: list[str] | None = None,
 ) -> None:
-    """Render host configuration files (systemd units, resolved, etc).
+    """Render host configuration files and host-owned systemd artifacts.
 
     Processes composition.config entries EXCEPT those for systemd-networkd,
     which has its own renderer due to drop-in generation.
 
     Handles:
     - /etc/systemd/resolved.conf and /etc/systemd/resolved.conf.d/*
-    - /etc/systemd/system/*.service, *.timer, *.path, etc.
+    - composition.systemd units and drop-ins
     - Any other host configuration files
 
     Args:
@@ -48,6 +52,7 @@ def render_host_config(
     context = {
         "network": network,
         "host_name": host,
+        "host_services": host_services or [],
     }
 
     # Process common first (implicit include)
@@ -86,4 +91,40 @@ def render_host_config(
         collector=collector,
         rendered_root=rendered_root,
         default_owner_ref=f"host:{host}",
+    )
+
+    common_systemd_entries = resolve_config_entry_variables(
+        common_config.get("composition", {}).get("systemd", []),
+        network,
+    )
+    render_config_entries(
+        annotate_systemd_entries_with_apply_hints(common_systemd_entries),
+        config_root / "hosts",
+        config_root / "hosts",
+        output_dir,
+        context,
+        collector=collector,
+        rendered_root=rendered_root,
+        default_owner_ref=f"host:{host}",
+        classify_artifact=lambda destination, _owner_ref, _is_directory: classify_systemd_artifact(
+            destination,
+        ),
+    )
+
+    host_systemd_entries = resolve_config_entry_variables(
+        host_config.get("composition", {}).get("systemd", []),
+        network,
+    )
+    render_config_entries(
+        annotate_systemd_entries_with_apply_hints(host_systemd_entries),
+        config_root / "hosts",
+        config_root / "hosts",
+        output_dir,
+        context,
+        collector=collector,
+        rendered_root=rendered_root,
+        default_owner_ref=f"host:{host}",
+        classify_artifact=lambda destination, _owner_ref, _is_directory: classify_systemd_artifact(
+            destination,
+        ),
     )

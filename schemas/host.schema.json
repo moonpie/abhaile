@@ -25,7 +25,12 @@
         "config": {
           "type": "array",
           "description": "Configuration files to deploy (static, templated, or directories)",
-          "items": {"$ref": "common.schema.json#/definitions/configEntry"}
+          "items": {"$ref": "#/definitions/hostConfigEntry"}
+        },
+        "systemd": {
+          "type": "array",
+          "description": "Host-owned systemd units and drop-ins to deploy",
+          "items": {"$ref": "common.schema.json#/definitions/systemdEntry"}
         },
         "software": {"$ref": "#/definitions/software"},
         "user_management": {"$ref": "#/definitions/userManagement"}
@@ -35,6 +40,63 @@
   },
   "additionalProperties": false,
   "definitions": {
+    "hostConfigSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Static source file path"
+        },
+        {
+          "$ref": "common.schema.json#/definitions/templateSource"
+        }
+      ]
+    },
+    "hostConfigFileEntry": {
+      "type": "object",
+      "description": "Plain copied or templated host config file",
+      "required": ["source", "destination"],
+      "properties": {
+        "source": {
+          "$ref": "#/definitions/hostConfigSource"
+        },
+        "destination": {
+          "type": "string",
+          "description": "Destination path on target system (absolute path)",
+          "not": {
+            "pattern": "^/etc/systemd/system/.+"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "hostConfigDirectoryEntry": {
+      "type": "object",
+      "description": "Directory to ensure exists for host-owned files",
+      "required": ["destination"],
+      "properties": {
+        "destination": {
+          "type": "string",
+          "description": "Destination path on target system (absolute path)",
+          "not": {
+            "pattern": "^/etc/systemd/system/.+"
+          }
+        }
+      },
+      "not": {
+        "required": ["source"]
+      },
+      "additionalProperties": false
+    },
+    "hostConfigEntry": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/hostConfigFileEntry"
+        },
+        {
+          "$ref": "#/definitions/hostConfigDirectoryEntry"
+        }
+      ]
+    },
     "software": {
       "type": "object",
       "properties": {

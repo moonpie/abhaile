@@ -398,7 +398,7 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 ### Evidence
 
-- Implementation evidence: `scripts/abhaile-runner`, `config/services/abhaile-runner/`
+- Implementation evidence: `scripts/abhaile-runner`, `config/hosts/common/systemd/`
 - Validation evidence: `tests/integration/test_runner.py` (6 tests, all passing), `bash -n` syntax check, `make test` 500 passed
 
 ## Out of Scope

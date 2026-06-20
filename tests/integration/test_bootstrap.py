@@ -26,25 +26,56 @@ class TestBootstrapPreflight:
         assert result.returncode != 0
 
     def test_invalid_hostname_rejected(self) -> None:
-        """Bootstrap rejects hostnames not in the allowlist."""
-        # Source the script functions and call stage_preflight with bad hostname
-        # This will fail at the root check, but we can test the function directly
+        """Bootstrap rejects hostnames that are not valid short DNS labels."""
         result = subprocess.run(
             [
                 "bash",
                 "-c",
                 (
                     "set -euo pipefail; "
-                    "EUID=0; "  # Fake root for testing
-                    f"source <(grep -A50 'stage_preflight()' {BOOTSTRAP_SCRIPT} "
-                    "| head -20); "
-                    "stage_preflight invalid-host"
+                    f"source {BOOTSTRAP_SCRIPT}; "
+                    "validate_hostname_arg invalid_host"
                 ),
             ],
             capture_output=True,
             text=True,
         )
         assert result.returncode != 0
+
+    def test_arbitrary_valid_hostname_accepted(self) -> None:
+        """Bootstrap accepts valid hostnames without a hard-coded allowlist."""
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -euo pipefail; "
+                    "log() { :; }; die() { exit 1; }; "
+                    f"source {BOOTSTRAP_SCRIPT}; "
+                    "validate_hostname_arg europa-1"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+
+    def test_default_vault_addr_uses_http_listener(self) -> None:
+        """Bootstrap default Vault address matches the rendered HTTP listener."""
+        env = os.environ.copy()
+        env.pop("VAULT_ADDR", None)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"set -euo pipefail; source {BOOTSTRAP_SCRIPT}; printf '%s' \"$VAULT_ADDR\"",
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        assert result.returncode == 0
+        assert result.stdout == "http://vault.svc.abhaile.home.arpa:8200"
 
     def test_script_syntax_valid(self) -> None:
         """Bootstrap script has valid bash syntax."""
@@ -68,7 +99,7 @@ class TestBootstrapPreflight:
                 (
                     "set -euo pipefail; "
                     "log() { :; }; die() { exit 1; }; "
-                    f"source <(sed -n '/^acquire_bootstrap_token/,/^}}/p' {BOOTSTRAP_SCRIPT}); "
+                    f"source {BOOTSTRAP_SCRIPT}; "
                     "acquire_bootstrap_token"
                 ),
             ],
@@ -92,7 +123,7 @@ class TestBootstrapPreflight:
                     "set -euo pipefail; "
                     "log() { :; }; die() { exit 1; }; "
                     "_bootstrap_token=''; "
-                    f"source <(sed -n '/^acquire_bootstrap_token/,/^}}/p' {BOOTSTRAP_SCRIPT}); "
+                    f"source {BOOTSTRAP_SCRIPT}; "
                     "acquire_bootstrap_token; "
                     'test -n "$_bootstrap_token"'
                 ),

@@ -12,6 +12,7 @@ from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 from abhaile.renderers.metadata import classify_config_artifact
 from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.errors import RenderError
+from abhaile.utils.placeholders import resolve_placeholders
 from abhaile.utils.templating import create_jinja_env
 
 
@@ -163,6 +164,62 @@ def render_config_entries(
                 apply_hints=apply_hints,
                 classify_artifact=classify_artifact,
             )
+
+
+def annotate_systemd_entries_with_apply_hints(entries: list[dict[str, Any]]) -> list[Any]:
+    """Attach internal apply hints to composition.systemd unit entries."""
+    annotated: list[Any] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            annotated.append(entry)
+            continue
+
+        merged = dict(entry)
+        hints: dict[str, Any] = {}
+        destination = merged.get("destination")
+        is_dropin = isinstance(destination, str) and ".d/" in destination
+        if not is_dropin:
+            if merged.get("enable") is True:
+                hints["enable_mode"] = "enable"
+            if merged.get("start") is True:
+                hints["activation_mode"] = "start"
+        if hints:
+            merged["_abhaile_apply_hints"] = hints
+        annotated.append(merged)
+
+    return annotated
+
+
+def resolve_config_entry_variables(
+    entries: list[dict[str, Any]],
+    network: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Resolve %%...%% placeholders in template variables using network data."""
+    resolved: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            resolved.append(entry)
+            continue
+
+        source = entry.get("source")
+        if not isinstance(source, dict):
+            resolved.append(entry)
+            continue
+
+        variables = source.get("variables", {})
+        if not isinstance(variables, dict):
+            resolved.append(entry)
+            continue
+
+        resolved_vars = resolve_placeholders(variables, network)
+
+        updated = dict(entry)
+        updated_source = dict(source)
+        updated_source["variables"] = resolved_vars
+        updated["source"] = updated_source
+        resolved.append(updated)
+
+    return resolved
 
 
 def _entry_apply_hints(entry: dict[str, Any]) -> dict[str, Any] | None:

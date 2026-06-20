@@ -6,14 +6,21 @@ Abhaile splits secrets into two phases: **bootstrap** (one-time trust before Vau
 
 ## Bootstrap Credentials
 
-| Artifact | Host | Path | Purpose |
+| Artifact | Scope | Path | Purpose |
 | --- | --- | --- | --- |
-| Vault bootstrap (sealed) | phobos | `config/bootstrap/sealed/phobos/vault-bootstrap.sops.yaml` | Unseal keys + AppRole role_id for seed token minting |
-| Vault bootstrap (sealed) | deimos | `config/bootstrap/sealed/deimos/vault-bootstrap.sops.yaml` | AppRole role_id for seed token minting against phobos Vault |
-| Repo bootstrap (sealed, optional) | per-host | `config/bootstrap/sealed/<host>/repo-bootstrap.sops.yaml` | Repo access token (fallback if deploy key unavailable) |
-| Age decryption identity | per-host | `/home/abhaile/.config/sops/age/keys.txt` | Decrypts sealed artifacts during bootstrap |
+| Vault bootstrap (sealed) | per-host | `config/bootstrap/sealed/<host>/vault-bootstrap.sops.yaml` | AppRole and optional unseal material |
+| Repo bootstrap (sealed, optional) | per-host | `config/bootstrap/sealed/<host>/repo-bootstrap.sops.yaml` | Repo access token fallback |
+| Age decryption identity | per-host | `/home/abhaile/.config/sops/age/keys.txt` | Decrypts sealed artifacts |
 | Git deploy key | per-host | `/home/abhaile/.ssh/gitops_ed25519` | Read-only repo clone/pull |
 | Vault Agent seed token | per-host | `/home/abhaile/.config/vault-agent/token` | Initial AppRole auth for Vault Agent |
+
+The sealed Vault bootstrap artifact must include `role_id`. It may include `unseal_keys` when the
+host is authorized to unseal Vault during bootstrap or early boot. Omit `unseal_keys` on hosts that
+should only consume Vault after it is already unsealed.
+
+On managed hosts, the sealed Vault bootstrap artifact is available at
+`/opt/abhaile/config/bootstrap/sealed/<host>/vault-bootstrap.sops.yaml`. The host-owned
+`abhaile-vault-unseal.service` checks that path and skips unseal work when the artifact is absent.
 
 Sealed artifacts use age encryption with per-host + operator-recovery recipients defined in `.sops.yaml`.
 

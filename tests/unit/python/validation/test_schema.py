@@ -110,8 +110,30 @@ class TestServiceCompositionSchema:
         assert details["properties"]["enable"]["type"] == "boolean"
         assert details["properties"]["start"]["type"] == "boolean"
 
-    def test_host_schema_accepts_config_entries_without_apply(self) -> None:
-        """host schema continues to accept common config entries without apply blocks."""
+    def test_host_schema_accepts_plain_config_entries_without_apply(self) -> None:
+        """host schema accepts non-systemd config entries without apply blocks."""
+        repo_root = self._repo_root()
+        host_schema_path = repo_root / "schemas" / "host.schema.json"
+        host_schema = read_json(host_schema_path)
+
+        host_data: dict[str, Any] = {
+            "name": "phobos",
+            "composition": {
+                "software": {},
+                "user_management": {},
+                "config": [
+                    {
+                        "source": "common/etc/example.conf",
+                        "destination": "/etc/example/example.conf",
+                    }
+                ],
+            },
+        }
+
+        validate_schema(host_data, host_schema, "host.yaml", host_schema_path)
+
+    def test_host_schema_rejects_systemd_destination_in_config(self) -> None:
+        """host composition.config rejects systemd unit destinations."""
         repo_root = self._repo_root()
         host_schema_path = repo_root / "schemas" / "host.schema.json"
         host_schema = read_json(host_schema_path)
@@ -125,6 +147,31 @@ class TestServiceCompositionSchema:
                     {
                         "source": "common/systemd/system/example.service",
                         "destination": "/etc/systemd/system/example.service",
+                    }
+                ],
+            },
+        }
+
+        with pytest.raises(RenderError):
+            validate_schema(host_data, host_schema, "host.yaml", host_schema_path)
+
+    def test_host_schema_accepts_systemd_entries(self) -> None:
+        """host schema accepts composition.systemd entries with lifecycle flags."""
+        repo_root = self._repo_root()
+        host_schema_path = repo_root / "schemas" / "host.schema.json"
+        host_schema = read_json(host_schema_path)
+
+        host_data: dict[str, Any] = {
+            "name": "phobos",
+            "composition": {
+                "software": {},
+                "user_management": {},
+                "systemd": [
+                    {
+                        "source": "common/systemd/example.service",
+                        "destination": "/etc/systemd/system/example.service",
+                        "enable": True,
+                        "start": True,
                     }
                 ],
             },

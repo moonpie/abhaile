@@ -29,20 +29,18 @@ Generated: 2026-06-07T15:32:38Z
 
 ## Services by Host
 
-### deimos (4 services)
+### deimos (3 services)
 
 | Service | Address | VLAN | Network Mode |
 |---------|---------|------|--------------|
-| abhaile-runner | - | - | none |
 | chrony-b | 172.20.20.238/32 | services | service-32 |
 | coredns-clean | 172.20.20.236/32 | services | service-32 |
 | vault-agent | - | - | host |
 
-### phobos (11 services)
+### phobos (10 services)
 
 | Service | Address | VLAN | Network Mode |
 |---------|---------|------|--------------|
-| abhaile-runner | - | - | none |
 | ddclient | - | - | host |
 | chrony-a | 172.20.20.237/32 | services | service-32 |
 | coredns-filtered | 172.20.20.235/32 | services | service-32 |

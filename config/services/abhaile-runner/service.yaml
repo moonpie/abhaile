@@ -1,9 +1,0 @@
-name: abhaile-runner
-composition:
-  systemd:
-    - source: abhaile-runner/systemd/abhaile-runner.service
-      destination: /etc/systemd/system/abhaile-runner.service
-    - source: abhaile-runner/systemd/abhaile-runner.timer
-      destination: /etc/systemd/system/abhaile-runner.timer
-      enable: true
-      start: true

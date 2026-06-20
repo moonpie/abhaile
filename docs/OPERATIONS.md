@@ -6,10 +6,10 @@ Quick-reference for daily operations and incident response. See `docs/INVENTORY.
 
 ````bash
 # Check seal status (phobos only)
-curl -sk https://172.20.20.204:8200/v1/sys/seal-status | jq .sealed
+curl -s http://172.20.20.204:8200/v1/sys/seal-status | jq .sealed
 
 # If sealed → unseal (phobos only, manual):
-vault operator unseal    # paste unseal key from bootstrap
+/usr/local/bin/vault operator unseal    # paste unseal key from bootstrap
 
 # After unseal → restart vault-agent on BOTH hosts:
 # phobos:
@@ -219,7 +219,7 @@ ip -4 addr show dev ipvlan-l2 | grep "inet "
 
 ```bash
 # Vault seal status (phobos only — vault only runs on phobos)
-curl -sk https://172.20.20.204:8200/v1/sys/seal-status | jq .sealed
+curl -s http://172.20.20.204:8200/v1/sys/seal-status | jq .sealed
 
 # Vault-agent logs (both hosts)
 machinectl shell abhaile@ /bin/journalctl --user -u vault-agent.service --no-pager -n 50

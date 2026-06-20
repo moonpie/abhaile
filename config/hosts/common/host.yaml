@@ -6,6 +6,22 @@ composition:
         template: common/systemd-resolved/resolved.conf.j2
         variables: {}
       destination: /etc/systemd/resolved.conf
+    - source: common/tools/vault-unseal.sh
+      destination: /opt/abhaile/tools/bash/vault-unseal.sh
+  systemd:
+    - source:
+        template: common/systemd/abhaile-vault-unseal.service.j2
+        variables:
+          vault_addr: '%%network.services.vault.address%%'
+      destination: /etc/systemd/system/abhaile-vault-unseal.service
+      enable: true
+      start: true
+    - source: common/systemd/abhaile-runner.service
+      destination: /etc/systemd/system/abhaile-runner.service
+    - source: common/systemd/abhaile-runner.timer
+      destination: /etc/systemd/system/abhaile-runner.timer
+      enable: true
+      start: true
   software:
     packages:
       - podman
@@ -26,6 +42,7 @@ composition:
       - jq
     downloads:
       - sops
+      - vault-cli
     builds: []
     commands:
       - unattended-upgrades

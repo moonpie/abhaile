@@ -1,6 +1,9 @@
 [Match]
 Name=enp0s31f6
 
+[Link]
+RequiredForOnline=routable
+
 [Network]
 Address={{ network.hosts[host_name].interfaces['enp0s31f6'].address }}
 Gateway={{ network.vlans.services.gateway }}

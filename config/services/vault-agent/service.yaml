@@ -10,7 +10,10 @@ composition:
       destination: /etc/systemd/system/abhaile-secrets-ready.path
       enable: true
       start: true
-    - source: vault-agent/systemd/vault-token-refresh.service
+    - source:
+        template: vault-agent/systemd/vault-token-refresh.service.j2
+        variables:
+          vault_addr: '%%network.services.vault.address%%'
       destination: /etc/systemd/system/vault-token-refresh.service
     - source: vault-agent/systemd/vault-token-refresh.timer
       destination: /etc/systemd/system/vault-token-refresh.timer

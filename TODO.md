@@ -12,7 +12,7 @@ Start with `docs/specs/proposed/0015-services-home-automation.md`.
 ## Progress
 
 | Phase | Status | Spec / Authority |
-|-------|--------|------------------|
+| --- | --- | --- |
 | Foundations | [x] | `AGENTS.md`, `README.md`, repo tooling |
 | Render Pipeline | [x] | `docs/specs/accepted/0001-render-pipeline.md` |
 | Apply Pipeline | [x] | `docs/specs/accepted/0009-apply-pipeline.md` |
@@ -29,7 +29,7 @@ Start with `docs/specs/proposed/0015-services-home-automation.md`.
 ### Services (Phase 3)
 
 | Spec | Scope |
-|------|-------|
+| --- | --- |
 | `proposed/0015-services-home-automation.md` | Home Assistant, Mosquitto, Zigbee2MQTT, ESPHome, Frigate, Go2rtc |
 | `proposed/0016-services-monitoring.md` | Prometheus, Grafana, Loki, Alertmanager, exporters |
 | `proposed/0017-services-media.md` | Immich, Jellyfin, Tdarr, \*arr stack, Jellyseerr, Flaresolverr |
@@ -39,10 +39,15 @@ Start with `docs/specs/proposed/0015-services-home-automation.md`.
 
 Acceptance criteria live in each spec. Don't duplicate them here.
 
-## Decision Index
+## Implementation decisions
+
+- Record in the active spec's Decision Notes section.
+- Promote to ADR when a decision crosses service/host/agent boundaries or is expensive to reverse.
+
+### Decision Index
 
 | Concern | ADR | Spec |
-|---------|-----|------|
+| --- | --- | --- |
 | Output paths, environment modes | `0001` | `accepted/0001-render-pipeline.md` |
 | Drift detection, state/manifest | `0002` | `accepted/0009-apply-pipeline.md` |
 | Runner vs render/apply boundary | `0003` | `accepted/0012-gitops-runner.md` |
@@ -60,12 +65,6 @@ Acceptance criteria live in each spec. Don't duplicate them here.
 | Core services (Phase 1) | — | `accepted/0011-core-services.md` |
 
 All paths relative to `docs/specs/`. ADR paths: `docs/adr/000N-*.md`.
-
-Future implementation decisions: record in the active spec's Decision Notes section. Promote to ADR when a decision crosses service/host/agent boundaries or is expensive to reverse.
-
-## Historical Decisions
-
-Decisions from 2026-01-31 through 2026-05-04 are incorporated into accepted specs and ADRs 0001–0007. Archive: `.old_docs/decision-log-archive.md`.
 
 ## Working With Agents
 

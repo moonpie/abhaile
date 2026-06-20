@@ -1,0 +1,18 @@
+id: vault-cli
+name: "Install Vault CLI"
+description: "Download Vault 1.21 from HashiCorp releases and install it into /usr/local/bin"
+commands:
+  - |
+    sudo bash -euo pipefail -c '
+      VAULT_VER=1.21
+      echo "Installing Vault ${VAULT_VER}"
+      release_api="https://api.releases.hashicorp.com/v1/releases/vault/${VAULT_VER}?license_class=oss"
+      VAULT_RELEASE=$(curl -fsSL "$release_api" | jq -r .version)
+      release_url="https://releases.hashicorp.com/vault/${VAULT_RELEASE}/vault_${VAULT_RELEASE}_linux_amd64.zip"
+      tmpdir=$(mktemp -d)
+      trap '"'"'rm -rf "$tmpdir"'"'"' EXIT
+      curl -fLo "$tmpdir/vault.zip" "$release_url"
+      unzip -p "$tmpdir/vault.zip" vault >"$tmpdir/vault"
+      install -m 0755 "$tmpdir/vault" /usr/local/bin/vault
+    '
+  - '/usr/local/bin/vault version'
