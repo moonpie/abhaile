@@ -385,7 +385,7 @@ Bootstrap requires explicit credential input and refuses to proceed without it.
 
 ### Evidence
 
-- Implementation evidence: `scripts/bootstrap.sh`, `docs/BOOTSTRAP.md`
+- Implementation evidence: `scripts/bootstrap.sh`, `docs/guides/bootstrap.md`
 - Validation evidence: `tests/integration/test_bootstrap.py` (5 tests), `bash -n` syntax check, `make test` 515 passed
 
 ## Out of Scope

@@ -69,11 +69,11 @@ All outputs are owned `abhaile:abhaile` with mode `0640`. Consuming services use
 1. Add a systemd `.path`/`.service` pair to watch the output and reload the consumer.
 1. Re-render and apply — vault-agent collects the new template automatically.
 
-See [ADDING-A-SERVICE.md](ADDING-A-SERVICE.md) for the full service onboarding checklist.
+See [Adding a Service](../guides/adding-a-service.md) for the full service onboarding checklist.
 
 ## Emergency Access
 
-If Vault is sealed or secrets are not rendering, see [BREAK-GLASS.md](BREAK-GLASS.md) §1 (Vault Sealed Recovery) and §6 (Token Expiry).
+If Vault is sealed or secrets are not rendering, see [Break-Glass](../runbooks/break-glass.md) §1 (Vault Sealed Recovery) and §6 (Token Expiry).
 
 ## Vault Policies
 

@@ -33,7 +33,7 @@ Render transforms `config/` into host-scoped artifacts. Apply compares them agai
 
 Key rules:
 
-- No secrets in git or rendered output — see [Secrets](docs/SECRETS.md)
+- No secrets in git or rendered output — see [Secrets](docs/reference/secrets.md)
 - Environment paths are configurable — see [ADR 0001](docs/adr/0001-output-root-and-environment-paths.md)
 - State is apply-owned, updated only after success — see [ADR 0002](docs/adr/0002-hash-based-drift-detection-and-state-model.md)
 
@@ -71,6 +71,9 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 - `tests/` - unit and integration pytest suites
 - `docs/` - documentation and runbooks
   - `adr/` - architecture decision records for major changes
+  - `guides/` - procedural walkthroughs and authoring checklists
+  - `reference/` - stable behavior and model references
+  - `runbooks/` - operational and recovery procedures
 - `scripts/` - executable shell utilities/wrappers
 - `paths.ini` - project-wide tooling path configuration
 - `out/` - generated artifacts and state (disposable, not source of truth)
@@ -101,19 +104,19 @@ This keeps common defaults (for example `system: false`) centralized while allow
 
 ## Bootstrap
 
-Hosts are initially enrolled via a bootstrap script. See [Bootstrap](docs/BOOTSTRAP.md) for details.
+Hosts are initially enrolled via a bootstrap script. See [Bootstrap](docs/guides/bootstrap.md) for details.
 
 ## Documentation
 
 | Document | Purpose |
 |----------|---------|
 | [Architecture](docs/ARCHITECTURE.md) | System design, pipeline diagrams, component map |
-| [Operations](docs/OPERATIONS.md) | Day-to-day commands, diagnostics, decision trees |
-| [Break-Glass](docs/BREAK-GLASS.md) | Emergency recovery when normal paths are broken |
-| [Bootstrap](docs/BOOTSTRAP.md) | Host enrollment from bare metal |
-| [Secrets](docs/SECRETS.md) | Credential model, vault-agent, rotation |
+| [Operations](docs/runbooks/operations.md) | Day-to-day commands, diagnostics, decision trees |
+| [Break-Glass](docs/runbooks/break-glass.md) | Emergency recovery when normal paths are broken |
+| [Bootstrap](docs/guides/bootstrap.md) | Host enrollment from bare metal |
+| [Secrets](docs/reference/secrets.md) | Credential model, vault-agent, rotation |
 | [Inventory](docs/INVENTORY.md) | Service IPs, VLANs, DNS (generated) |
-| [Adding a Service](docs/ADDING-A-SERVICE.md) | Step-by-step service authoring checklist |
+| [Adding a Service](docs/guides/adding-a-service.md) | Step-by-step service authoring checklist |
 | [Adding a Kind](docs/guides/adding-a-kind.md) | New artifact kind end-to-end |
 | [ADRs](docs/adr/) | Architecture decision records |
 | [Specs](docs/specs/) | Feature specs (proposed → active → accepted) |

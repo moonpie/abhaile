@@ -44,4 +44,4 @@ Apply uses typed owner-based execution driven by planner output and renderer-int
 
 - ADR 0003: GitOps Runner Responsibility Boundary
 - ADR 0005: Service Authoring Model
-- `docs/APPLY.md`
+- `docs/reference/apply.md`

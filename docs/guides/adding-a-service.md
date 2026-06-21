@@ -1,7 +1,8 @@
 # Adding a New Service
 
 Sequential checklist for adding a service to Abhaile. For design rationale, see
-`docs/specs/accepted/0005-service-composition.md` and `docs/adr/0005-service-authoring-model.md`.
+[Spec 0005](../specs/accepted/0005-service-composition.md) and
+[ADR 0005](../adr/0005-service-authoring-model.md).
 
 ## Prerequisites
 

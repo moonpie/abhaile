@@ -380,7 +380,7 @@ Criterion: Decision capture for manifests, state, and drift.
 - `docs/specs/GOVERNANCE.md`
 - `docs/specs/accepted/0001-render-pipeline.md`
 - `README.md`
-- `docs/APPLY.md`
+- `docs/reference/apply.md`
 - `TODO.md`
 - `src/abhaile/renderers/manifest.py`
 - `src/abhaile/models/artifact.py`

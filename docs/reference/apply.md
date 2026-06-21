@@ -60,5 +60,5 @@ The April 2026 audit of rendered `service.config` / `service.env` entries produc
 
 ## Related files
 
-- [schemas/service.schema.json](../schemas/service.schema.json)
-- [docs/specs/accepted/0009-apply-pipeline.md](specs/accepted/0009-apply-pipeline.md)
+- [schemas/service.schema.json](../../schemas/service.schema.json)
+- [docs/specs/accepted/0009-apply-pipeline.md](../specs/accepted/0009-apply-pipeline.md)

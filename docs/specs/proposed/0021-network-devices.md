@@ -542,7 +542,7 @@ For each completed criterion, include:
 - `config/services/omada-controller/service.yaml` (Omada Controller service definition)
 - `docs/net/PORTS.md` (port mapping documentation)
 - `docs/NETWORK.md` (network topology overview)
-- `docs/OPERATIONS.md` (break-glass procedures reference ER605 port 5)
+- `docs/runbooks/operations.md` (break-glass procedures reference ER605 port 5)
 - `.old_docs/TODO.md` Phase 4 (original task breakdown)
 - Home Assistant TP-Link Omada integration:
   `https://www.home-assistant.io/integrations/tplink_omada/`
