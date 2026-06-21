@@ -8,8 +8,11 @@ title: Network Device Configuration
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
-related_adrs: []
+updated: 2026-06-21
+related_adrs:
+  - 0001-output-root-and-environment-paths
+  - 0002-hash-based-drift-detection-and-state-model
+  - 0004-apply-execution-model
 supersedes: null
 superseded_by: null
 scope:
@@ -24,11 +27,14 @@ ER605 gateway, managed switches (SG2218, SG2016P, SG2008P), and four EAP653
 access points. This equipment forms the physical and logical network layer that
 all Abhaile services depend on.
 
-This spec documents the desired network configuration state. Omada Controller
-manages this state through its UI/API, not through the Abhaile GitOps
-render/apply pipeline. The spec serves as a reference for what the network
-should look like when correctly configured and as a validation target for drift
-detection.
+This spec defines how Abhaile should manage controller-owned network
+configuration. The preferred end state is vendor-neutral network intent in git,
+live-state discovery from the network controller, drift reporting, and
+controlled apply through a dedicated network automation tool. Omada Controller
+is the first target controller, but the intent model should not require an
+overhaul if the network later moves to another controller-backed vendor such as
+Ubiquiti. Manual controller UI changes remain a break-glass path, not the
+desired steady state.
 
 The services VLAN (ID 20, 172.20.20.0/24) and DMZ VLAN (ID 100,
 172.20.100.0/24) are already defined in `config/network.yaml` and used by
@@ -36,8 +42,31 @@ host networking and service addressing. This spec covers the full VLAN set
 including client and device VLANs not represented in the Abhaile render
 pipeline.
 
+The first implementation targets Omada and depends on API capability. Home
+Assistant's TP-Link Omada integration confirms that local Omada Controller
+access can read and control Omada devices through a controller account, but it
+exposes only a limited operational surface. The `tplink-omada-client` Python
+package confirms a local controller API exists, with support for login,
+controller/site/device discovery, firmware actions, switch port
+status/configuration, access point LAN port configuration, and some gateway port
+controls. It also documents that only a subset of controller features is
+currently exposed and that the Omada platform is transitioning toward a newer
+OpenAPI API.
+
+Because of that uncertainty, Phase 4 starts with API capability discovery before
+committing to automated writes for VLANs, DHCP, ACLs, SSIDs, VPN, backups, or
+other high-impact network state.
+
 ## Requirements
 
+- [ ] Discover and document controller API capabilities for each desired resource type
+- [ ] Define a machine-readable desired-state model for controller-owned network configuration
+- [ ] Store network desired state under `config/networks/`
+- [ ] Keep desired network intent vendor-neutral where practical
+- [ ] Render or normalize desired network state deterministically
+- [ ] Read live network state using an adapter for the target controller
+- [ ] Produce dry-run drift reports before any write support
+- [ ] Apply only resource types that have proven idempotent API support
 - [ ] Document ER605 VLAN and routing configuration
 - [ ] Document DHCP scope configuration for all VLANs
 - [ ] Document inter-VLAN ACL policy with explicit allow/deny rules
@@ -50,17 +79,118 @@ pipeline.
 
 ## Constraints
 
-- All configuration changes go through Omada Controller — no CLI or direct
-  device management.
+- All automated configuration changes go through a controller adapter. The
+  initial adapter targets Omada Controller. Do not manage ER605, switches, or
+  access points through direct device CLI or per-device web UIs.
 - `config/network.yaml` remains the source of truth for service addressing
-  and DNS records. This spec documents the broader network state that Omada
-  owns.
-- No rendered artifacts are produced. This spec is documentation and
-  validation only.
+  and DNS records.
+- `config/networks/` owns network infrastructure intent such as VLAN
+  interfaces, DHCP scopes, ACLs, port profiles, SSIDs, VPN profiles, backup
+  policy, and QoS. `config/network.yaml` may be referenced by network config,
+  but must not be duplicated.
+- Vendor-specific controller details belong in adapter configuration, not in
+  the core network intent model unless the capability cannot be represented
+  generically.
+- Render and diff must be deterministic and must not query the controller
+  during render.
+- Network apply must default to dry-run. Live writes require an explicit operator
+  request and should be limited to resource types with proven idempotent
+  endpoints.
+- Controller credentials are secrets. Store them in Vault or operator-owned
+  runtime material, never in git or rendered artifacts.
 - ER605 firmware must support WireGuard (firmware v2.2+ or Omada Controller
   5.14+).
 - Switch and AP firmware must be Omada SDN compatible for centralized
   management.
+
+## Automation Design
+
+### Source Of Truth
+
+Network intent lives under `config/networks/`. Proposed files:
+
+```text
+config/networks/
+  site.yaml
+  vlans.yaml
+  dhcp.yaml
+  acl.yaml
+  port-profiles.yaml
+  controllers.yaml
+  devices.yaml
+  wireless.yaml
+  vpn.yaml
+  qos.yaml
+  backups.yaml
+```
+
+`config/network.yaml` remains authoritative for Abhaile service addresses, DNS
+records, and host interfaces. Network config may reference values from
+`config/network.yaml` by stable keys, but should not copy service IPs or VLAN
+CIDRs when a reference can be resolved deterministically.
+
+Core files describe intent in generic terms: VLANs, networks, DHCP options,
+security policies, wireless networks, port roles, and backup expectations.
+`controllers.yaml` binds that intent to the active controller implementation,
+including vendor, controller URL reference, site identity, adapter settings, and
+capability overrides.
+
+### Tooling Model
+
+Add a dedicated network automation tool rather than extending host apply
+directly at first. The tool should support:
+
+- `discover`: authenticate through the selected controller adapter and report
+  controller version, sites, supported endpoint groups, and discovered resource
+  identifiers
+- `render`: validate and normalize `config/networks/` intent without contacting
+  the controller
+- `diff`: compare normalized desired state with live controller state
+- `apply --dry-run`: default mode; print the write plan without changing the
+  controller
+- `apply --live`: explicit live mode for supported, idempotent resource types
+
+The network tool should expose a stable internal desired-state model and place
+vendor-specific translation behind adapters. The initial adapter is Omada. A
+future Ubiquiti or other controller adapter should be able to reuse the same
+intent files when the concepts map cleanly, while rejecting unsupported
+capabilities explicitly.
+
+The network tool should write any comparison state under the normal Abhaile
+state root only after successful live operations. It must not write
+`out/state/` directly outside the established apply/state mechanisms.
+
+### Controller Capability Matrix
+
+Each resource type must be classified for each controller adapter before
+implementation:
+
+| Resource Type | Desired Support | Initial Mode |
+| --- | --- | --- |
+| Controller/site identity | read | discover |
+| Devices and ports | read, limited write | diff first |
+| VLAN interfaces | read/write if supported | spike |
+| DHCP scopes/options | read/write if supported | spike |
+| ACLs/firewall rules | read/write if supported | spike |
+| Switch port profiles | read/write if supported | spike |
+| SSIDs/wireless networks | read/write if supported | spike |
+| WireGuard VPN | read/write if supported | spike |
+| QoS policy | read/write if supported | spike |
+| Controller backups | read/trigger/download if supported | spike |
+
+Unsupported or unstable resources remain documented/manual until the controller
+adapter surface is proven.
+
+### Safety Model
+
+- Dry-run is the default and must be read-only.
+- Live apply requires an explicit flag.
+- Apply should group changes by resource type and stop on first failed write.
+- High-risk changes such as management VLAN, gateway interface, WAN, ACL default
+  deny, and controller access paths require an additional confirmation flag.
+- The tool must never delete unknown live resources until prune semantics are
+  explicitly specified and tested.
+- A backup should exist before high-risk live changes.
 
 ## Design
 
@@ -271,11 +401,39 @@ Allows trusted devices to discover casting targets without full L2 bridging.
 
 ## Decision Notes
 
-- Decision: Omada Controller manages all network device configuration.
+- Decision: Controller-backed automation is the only automated management path
+  for network devices.
 
-- Rationale: TP-Link Omada SDN provides a single management plane for ER605, switches, and APs with centralized policy, firmware management, and backup. GitOps-rendering switch port configs would require unsupported API interaction and gain nothing over the Omada UI.
+- Rationale: Controller platforms provide centralized policy, firmware
+  management, and backup. Automation should interact with the controller, not
+  bypass it through direct device management.
 
-- Impact: Network device state is not tracked in git diffs. This spec and Omada backups serve as the reference and recovery mechanism.
+- Impact: Direct device CLI/web management is out of scope. Controller adapter
+  capability spikes decide which resource types can be managed automatically.
+
+- ADR: null
+
+- Decision: Phase 4 uses `config/networks/` for network infrastructure intent.
+
+- Rationale: `config/network.yaml` already exists as a file and remains the
+  source of truth for host/service networking. A separate `config/networks/`
+  namespace avoids a disruptive path migration while keeping infrastructure
+  network intent separate from vendor-specific controller adapters.
+
+- Impact: Cross-file references are required where network policy depends on
+  service IPs or VLAN CIDRs from `config/network.yaml`. Adapter configuration
+  must bind generic network intent to concrete controller resources.
+
+- ADR: null
+
+- Decision: Network automation starts read-only and dry-run-first.
+
+- Rationale: Controller API coverage for full network configuration is not yet
+  proven. Discovery and drift reporting are useful without risking gateway,
+  switch, wireless, or ACL changes.
+
+- Impact: Some Phase 4 criteria may remain documented/manual until API support
+  is verified.
 
 - ADR: null
 
@@ -306,6 +464,13 @@ Allows trusted devices to discover casting targets without full L2 bridging.
 ## Acceptance Criteria
 
 - [ ] Document ER605 VLAN and routing configuration
+- [ ] Controller API capability discovery records controller version, sites, and supported endpoint groups
+- [ ] Controller capability matrix classifies each resource type as read-only, writable, or manual
+- [ ] `config/networks/` desired-state schemas are drafted for all in-scope resource types
+- [ ] Network intent schemas separate vendor-neutral intent from adapter-specific bindings
+- [ ] Network render/normalization produces deterministic output without contacting the controller
+- [ ] Network diff compares desired state with live controller state in read-only mode
+- [ ] Network apply defaults to dry-run and requires an explicit live flag for writes
 - [ ] Document DHCP scopes with correct DNS, NTP, and domain options per VLAN
 - [ ] Document inter-VLAN ACL rules with explicit allow/deny matrix
 - [ ] Document WireGuard VPN configuration and validate admin/user/travel profiles
@@ -327,29 +492,43 @@ Allows trusted devices to discover casting targets without full L2 bridging.
 For each completed criterion, include:
 
 - Implementation evidence: [screenshot, Omada export, or configuration description]
-- Validation evidence: [connectivity test, ACL test matrix, or backup restore test]
+- Validation evidence: [API discovery output, dry-run diff, connectivity test, ACL test matrix, or backup restore test]
 
 ## Out of Scope
 
-- Abhaile render/apply pipeline changes — this is manual Omada configuration.
+- Direct Abhaile host apply integration for network controller writes. Phase 4
+  starts with a dedicated network tool and may integrate with host apply only
+  after the adapter model is proven.
 - Host networking (systemd-networkd, ipvlan-l2) — already handled by the
   render pipeline and `config/network.yaml`.
 - Service-level DNS records — managed by CoreDNS via render pipeline.
-- Firmware upgrade scheduling — handled operationally outside this spec.
+- Automated firmware upgrade scheduling. Firmware status discovery may be
+  included, but unattended firmware writes require a separate decision.
 - Physical cabling and rack layout.
 - ISP router/modem configuration upstream of ER605.
 
 ## Open Questions
 
-1. **Validation approach** — How do we verify that live Omada configuration
-   matches this spec? Options: (a) manual checklist walkthrough, (b) Omada API
-   queries compared against a machine-readable version of this spec,
-   (c) SNMP-based auditing via snmp-exporter + Prometheus alerting on drift.
+1. **API coverage** — Which Omada Controller API endpoints can safely read and
+   write VLANs, DHCP, ACLs, SSIDs, port profiles, WireGuard, QoS, and backups on
+   the deployed controller version?
+
+1. **Client implementation** — Should Abhaile call Omada endpoints directly or
+   vendor/adapt an existing client library behind an Omada adapter? Current
+   `tplink-omada-client` releases require Python 3.13, while Abhaile currently
+   targets Python 3.10+.
+
+1. **Config granularity** — Should `config/networks/` use one file per resource
+   type, one file per device/site, or a generated normalized model split by
+   both type and device?
+
+1. **Vendor-neutral boundary** — Which capabilities are common enough to belong
+   in the generic network intent model, and which should remain adapter-specific
+   extensions?
 
 1. **Backup automation** — Omada Controller supports scheduled backups
-   internally. Should we also pull backups via the Omada API to a separate
-   location (e.g., git-tracked export minus secrets, or rsync to a second
-   host)?
+   internally. If an API can trigger or download backups, should Abhaile also
+   copy backups to a second host outside the controller?
 
 1. **CrowdSec bouncer on ER605** — CrowdSec can push blocklists to the ER605
    via ACL updates through the Omada API. Is this feasible with the current
@@ -359,8 +538,13 @@ For each completed criterion, include:
 ## References
 
 - `config/network.yaml` (VLAN 20 and 100 definitions, service addressing)
+- `config/networks/` (planned network desired-state root)
 - `config/services/omada-controller/service.yaml` (Omada Controller service definition)
 - `docs/net/PORTS.md` (port mapping documentation)
 - `docs/NETWORK.md` (network topology overview)
 - `docs/OPERATIONS.md` (break-glass procedures reference ER605 port 5)
 - `.old_docs/TODO.md` Phase 4 (original task breakdown)
+- Home Assistant TP-Link Omada integration:
+  `https://www.home-assistant.io/integrations/tplink_omada/`
+- `tplink-omada-client` PyPI project:
+  `https://pypi.org/project/tplink-omada-client/`
