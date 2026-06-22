@@ -1,4 +1,6 @@
-FROM golang:1.24-bookworm AS build
+ARG GO_VERSION
+
+FROM golang:${GO_VERSION} AS build
 
 RUN apt update && apt install git curl jq -y
 
@@ -8,16 +10,17 @@ ARG COREDNS_OMADA_VERSION
 WORKDIR /src
 
 RUN git clone https://github.com/coredns/coredns.git && \
-    git -C coredns checkout ${COREDNS_VERSION} && \
-    git clone https://github.com/dougbw/coredns_omada.git && \
-    git -C coredns_omada checkout ${COREDNS_OMADA_VERSION}
+    git -C coredns checkout ${COREDNS_VERSION}
 
 WORKDIR /src/coredns
 
 # Insert the omada plugin just ABOVE the route53 line in plugin.cfg
 RUN sed -i '/^route53:route53$/i omada:github.com/dougbw/coredns_omada' /src/coredns/plugin.cfg
 
-# Generate & build (will fetch the omada module)
+# Pin the external plugin module before generating the CoreDNS build.
+RUN go get github.com/dougbw/coredns_omada@${COREDNS_OMADA_VERSION}
+
+# Generate & build.
 RUN make
 
 # --- Dist stage ---

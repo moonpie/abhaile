@@ -18,6 +18,7 @@ Add one row per ADR. Keep links current when ADR status changes.
 | [0006](0006-secrets-model-and-bootstrap-artifacts.md) | Secrets Model and Bootstrap Artifacts | Accepted | 2026-05-05 | - | - | 001, 005, 007, 010, 011, 014, 015, 018, 019, 020 |
 | [0007](0007-sops-bootstrap-policy-and-layout.md) | SOPS Bootstrap Policy and Layout | Accepted | 2026-05-05 | - | - | 010, 013, 014 |
 | [0008](0008-host-infrastructure-authoring-model.md) | Host Infrastructure Authoring Model | Accepted | 2026-06-19 | - | - | 023 |
+| [0009](0009-vault-agent-approle-auto-auth.md) | Vault Agent AppRole Auto-Auth | Accepted | 2026-06-22 | - | - | 025 |
 
 ## Status Values
 

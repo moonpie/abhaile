@@ -13,6 +13,42 @@ pytestmark = pytest.mark.integration
 class TestVaultTemplatesIntegration:
     """Integration tests using actual repository configuration."""
 
+    def test_vault_agent_approle_config_for_phobos_and_deimos(self, tmp_path: Path) -> None:
+        """Render phobos and deimos vault-agent configs with native AppRole auto-auth."""
+        repo_root = Path(__file__).parent.parent.parent
+        config_root = repo_root / "config"
+
+        mapping_yaml = config_root / "mapping.yaml"
+        network_yaml = config_root / "network.yaml"
+        if not mapping_yaml.exists() or not network_yaml.exists():
+            pytest.skip("Test requires mapping.yaml and network.yaml")
+
+        mapping = read_yaml(mapping_yaml)
+        network = read_yaml(network_yaml)
+        host_services: dict[str, list[str]] = {}
+        for entries in mapping.get("abhaile", []):
+            for host, services in entries.items():
+                if isinstance(services, list):
+                    host_services[host] = services
+
+        for host in ("phobos", "deimos"):
+            services = host_services.get(host, [])
+            if "vault-agent" not in services:
+                pytest.skip(f"vault-agent not mapped to {host}")
+
+            output_dir = tmp_path / host / "services"
+            render_vault_agent_configs(host, services, network, config_root, output_dir)
+
+            config_file = output_dir / "vault-agent" / "srv/vault/agent/config.hcl"
+            content = config_file.read_text(encoding="utf-8")
+
+            assert 'method "approle"' in content
+            assert 'role_id_file_path = "/agent/role-id"' in content
+            assert 'secret_id_file_path = "/agent/secret-id"' in content
+            assert "remove_secret_id_file_after_reading = false" in content
+            assert 'method "token_file"' not in content
+            assert "token_file_path" not in content
+
     @pytest.mark.slow
     def test_render_actual_phobos_vault_templates(self, tmp_path: Path) -> None:
         """Test rendering vault-agent for phobos with actual config."""

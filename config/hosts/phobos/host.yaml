@@ -28,6 +28,16 @@ composition:
         variables: {}
       destination: /etc/systemd/network/41-ipvlan-l2.100.network
     - destination: /etc/systemd/network/41-ipvlan-l2.100.network.d/
+    - source: phobos/tools/vault-unseal.sh
+      destination: /opt/abhaile/tools/bash/vault-unseal.sh
+  systemd:
+    - source:
+        template: phobos/systemd/abhaile-vault-unseal.service.j2
+        variables:
+          vault_addr: '%%network.services.vault.address%%'
+      destination: /etc/systemd/system/abhaile-vault-unseal.service
+      enable: true
+      start: true
   software:
     builds:
       - gasket-dkms

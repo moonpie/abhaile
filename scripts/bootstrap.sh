@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/bootstrap.sh — Abhaile host bootstrap (curl-bash entry point).
 # Enrolls a fresh Debian 13 host into GitOps-managed desired state.
-# See: docs/specs/active/0014-bootstrap.md
+# See: docs/specs/accepted/0014-bootstrap.md
 set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
@@ -20,11 +20,13 @@ readonly LOG_DIR="/var/log/abhaile"
 readonly LOG_FILE="${LOG_DIR}/bootstrap.log"
 
 readonly VAULT_ADDR="${VAULT_ADDR:-http://vault.svc.abhaile.home.arpa:8200}"
-readonly VAULT_TOKEN_PATH="/home/abhaile/.config/vault-agent/token"
+readonly VAULT_AGENT_DIR="/home/abhaile/.config/vault-agent"
+readonly VAULT_ROLE_ID_PATH="${VAULT_AGENT_DIR}/role-id"
+readonly VAULT_SECRET_ID_PATH="${VAULT_AGENT_DIR}/secret-id"
 readonly READY_SENTINEL="/srv/vault/agent/out/.ready"
 readonly BOOTSTRAP_READY_TIMEOUT="${BOOTSTRAP_READY_TIMEOUT:-60}"
 
-readonly SEALED_DIR="config/bootstrap/sealed"
+readonly SECRETS_DIR="secrets"
 readonly AGE_KEY_PATH="/home/abhaile/.config/sops/age/keys.txt"
 readonly DEPLOY_KEY_PATH="/home/abhaile/.ssh/gitops_ed25519"
 
@@ -43,9 +45,9 @@ init_logging() {
 log() { printf '[bootstrap] %s\n' "$*"; }
 die() { log "FATAL: $*"; exit 1; }
 
-# --- Token handling ----------------------------------------------------------
+# --- SecretID handoff --------------------------------------------------------
 
-_bootstrap_token=""
+_secret_id_handoff=""
 
 validate_hostname_arg() {
     local hostname="${1:-}"
@@ -61,29 +63,33 @@ validate_hostname_arg() {
     fi
 }
 
-acquire_bootstrap_token() {
+acquire_secret_id_handoff() {
     if [[ -n "${BOOTSTRAP_TOKEN:-}" ]]; then
-        _bootstrap_token="$BOOTSTRAP_TOKEN"
+        _secret_id_handoff="$BOOTSTRAP_TOKEN"
         unset BOOTSTRAP_TOKEN
-        log "Token acquired from BOOTSTRAP_TOKEN env"
+        log "SecretID handoff acquired from BOOTSTRAP_TOKEN env"
         return 0
     fi
 
     if [[ -n "${BOOTSTRAP_TOKEN_FD:-}" ]]; then
-        _bootstrap_token=$(cat <&"${BOOTSTRAP_TOKEN_FD}")
-        log "Token acquired from BOOTSTRAP_TOKEN_FD"
+        _secret_id_handoff=$(cat <&"${BOOTSTRAP_TOKEN_FD}")
+        log "SecretID handoff acquired from BOOTSTRAP_TOKEN_FD"
         return 0
     fi
 
     if [[ -t 0 ]]; then
-        log "No token found in env or fd; prompting..."
-        read -rsp "[bootstrap] Enter bootstrap token (AppRole secret_id): " _bootstrap_token
+        log "No SecretID handoff found in env or fd; prompting..."
+        local prompt="[bootstrap] Enter response-wrapped AppRole SecretID handoff: "
+        if [[ "${BOOTSTRAP_DIRECT_SECRET_ID:-}" == "1" ]]; then
+            prompt="[bootstrap] Enter direct AppRole SecretID recovery handoff: "
+        fi
+        read -rsp "$prompt" _secret_id_handoff
         echo
-        log "Token acquired from interactive prompt"
+        log "SecretID handoff acquired from interactive prompt"
         return 0
     fi
 
-    die "No bootstrap token provided. Set BOOTSTRAP_TOKEN, BOOTSTRAP_TOKEN_FD, or run interactively."
+    die "No SecretID handoff provided. Set BOOTSTRAP_TOKEN, BOOTSTRAP_TOKEN_FD, or run interactively."
 }
 
 # --- Ephemeral tmpdir management ---------------------------------------------
@@ -105,8 +111,67 @@ cleanup_ephemeral() {
         rm -rf "$_ephemeral_dir"
         _ephemeral_dir=""
     fi
-    # Wipe token from memory
-    _bootstrap_token=""
+    # Wipe SecretID handoff from memory
+    _secret_id_handoff=""
+}
+
+write_vault_agent_secret_file() {
+    local path="$1"
+    local value="$2"
+    local secret_dir
+    secret_dir=$(dirname "$path")
+
+    install -d -m 0700 -o abhaile -g abhaile "$secret_dir"
+
+    local secret_tmp
+    secret_tmp=$(mktemp "${secret_dir}/.$(basename "$path").tmp.XXXXXX")
+    if ! (umask 077 && printf '%s' "$value" >"$secret_tmp"); then
+        rm -f "$secret_tmp"
+        return 1
+    fi
+    if ! chown abhaile:abhaile "$secret_tmp"; then
+        rm -f "$secret_tmp"
+        return 1
+    fi
+    if ! chmod 0600 "$secret_tmp"; then
+        rm -f "$secret_tmp"
+        return 1
+    fi
+    if ! mv "$secret_tmp" "$path"; then
+        rm -f "$secret_tmp"
+        return 1
+    fi
+}
+
+resolve_secret_id_handoff() {
+    local handoff="$1"
+    local unwrap_response=""
+    local secret_id=""
+
+    if unwrap_response=$(VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$handoff" \
+        /usr/local/bin/vault unwrap -format=json 2>/dev/null); then
+        secret_id=$(printf '%s' "$unwrap_response" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(data.get('data', {}).get('secret_id', ''), end='')
+")
+        if [[ -z "$secret_id" ]]; then
+            log "Wrapped SecretID response did not contain secret_id" >&2
+            return 1
+        fi
+        printf '%s' "$secret_id"
+        return 0
+    fi
+
+    if [[ "${BOOTSTRAP_DIRECT_SECRET_ID:-}" != "1" ]]; then
+        log "SecretID handoff did not unwrap; direct SecretID recovery requires BOOTSTRAP_DIRECT_SECRET_ID=1" \
+            >&2
+        return 1
+    fi
+
+    log "SecretID handoff did not unwrap; BOOTSTRAP_DIRECT_SECRET_ID=1 set, treating it as a direct SecretID" \
+        >&2
+    printf '%s' "$handoff"
 }
 
 trap cleanup_ephemeral EXIT
@@ -129,7 +194,7 @@ install_vault_cli() {
         die "Unexpected Vault release version from HashiCorp API: ${vault_release}"
     fi
 
-    ensure_ephemeral_dir
+    create_ephemeral_dir
     local vault_zip="${_ephemeral_dir}/vault.zip"
     local vault_bin="${_ephemeral_dir}/vault"
 
@@ -180,7 +245,7 @@ stage_preflight() {
 stage_prerequisites() {
     log "=== Stage 2: Prerequisites ==="
 
-    local packages=(git python3 python3-venv podman crun age jq curl unzip)
+    local packages=(git python3 python3-venv podman crun age jq curl unzip systemd-container)
     local to_install=()
 
     for pkg in "${packages[@]}"; do
@@ -242,10 +307,10 @@ stage_user_and_credentials() {
         log "Created user abhaile (uid=1001)"
     fi
 
-    # Require bootstrap token
-    acquire_bootstrap_token
-    if [[ -z "$_bootstrap_token" ]]; then
-        die "Bootstrap token is empty"
+    # Require SecretID handoff material.
+    acquire_secret_id_handoff
+    if [[ -z "$_secret_id_handoff" ]]; then
+        die "SecretID handoff is empty"
     fi
 
     # Verify age decryption identity
@@ -253,14 +318,9 @@ stage_user_and_credentials() {
         die "Age decryption key not found at ${AGE_KEY_PATH}. Place the key before running bootstrap."
     fi
 
-    # Verify repo access credential (deploy key preferred)
+    # Verify repo access credential.
     if [[ ! -f "$DEPLOY_KEY_PATH" ]]; then
-        log "WARNING: Deploy key not found at ${DEPLOY_KEY_PATH}"
-        log "Will attempt sealed repo-bootstrap.sops.yaml fallback after clone"
-        # If no deploy key exists, we can't clone. Check if repo already exists.
-        if [[ ! -d "$REPO_DIR/.git" ]]; then
-            die "Deploy key missing at ${DEPLOY_KEY_PATH} and repo not yet cloned. Place the deploy key first."
-        fi
+        die "Deploy key missing at ${DEPLOY_KEY_PATH}. Place the read-only deploy key first."
     fi
 
     log "Credentials OK"
@@ -337,25 +397,25 @@ if host not in n.get('hosts', {}):
     log "Configuration validation OK: host '${hostname}' defined in mapping and network"
 }
 
-# --- Stage 6: Sealed Artifact Handoff ----------------------------------------
+# --- Stage 6: Sealed Vault Agent Artifact Handoff ----------------------------
 
 stage_sealed_handoff() {
     local hostname="$1"
-    log "=== Stage 6: Sealed Artifact Handoff ==="
+    log "=== Stage 6: Sealed Vault Agent Artifact Handoff ==="
 
     cd "$REPO_DIR"
 
-    local sealed_path="${SEALED_DIR}/${hostname}/vault-bootstrap.sops.yaml"
+    local sealed_path="${SECRETS_DIR}/${hostname}/vault-agent.sops.yaml"
     if [[ ! -f "$sealed_path" ]]; then
-        die "Sealed artifact not found: ${sealed_path}"
+        die "Sealed Vault Agent artifact not found: ${sealed_path}"
     fi
 
     create_ephemeral_dir
-    log "Decrypting sealed artifacts to ephemeral dir"
+    log "Decrypting sealed Vault Agent artifact to ephemeral dir"
 
-    local decrypted="${_ephemeral_dir}/vault-bootstrap.yaml"
+    local decrypted="${_ephemeral_dir}/vault-agent.yaml"
     if ! SOPS_AGE_KEY_FILE="$AGE_KEY_PATH" sops --decrypt --output "$decrypted" "$sealed_path"; then
-        die "Sealed artifact decryption failed. Verify age key at ${AGE_KEY_PATH}"
+        die "Sealed Vault Agent artifact decryption failed. Verify age key at ${AGE_KEY_PATH}"
     fi
 
     # Extract role_id from decrypted artifact
@@ -366,79 +426,34 @@ data = yaml.safe_load(open('$decrypted')) or {}
 print(data.get('role_id', ''), end='')
 ")
     if [[ -z "$role_id" ]]; then
-        die "role_id not found in sealed artifact"
+        die "role_id not found in sealed Vault Agent artifact"
     fi
 
-    local unseal_keys_count
-    unseal_keys_count=$(python3 -c "
-import yaml, sys
-data = yaml.safe_load(open('$decrypted')) or {}
-keys = data.get('unseal_keys', [])
-print(len(keys) if isinstance(keys, list) else 0)
-")
-
-    if [[ "$unseal_keys_count" -gt 0 ]]; then
-        log "Applying Vault unseal keys from sealed artifact"
-        while IFS= read -r key; do
-            python3 -c "import json,sys; print(json.dumps({'key': sys.stdin.read().rstrip('\n')}))" <<<"$key" |
-                curl -fsSo /dev/null --cacert /etc/ssl/certs/ca-certificates.crt \
-                    -X PUT "${VAULT_ADDR}/v1/sys/unseal" \
-                    -H "Content-Type: application/json" \
-                    -d @- 2>/dev/null || true
-        done < <(python3 -c "
-import yaml, sys
-data = yaml.safe_load(open('$decrypted')) or {}
-keys = data.get('unseal_keys', [])
-if isinstance(keys, list):
-    for key in keys:
-        print(key)
-")
-        log "Vault unseal keys applied"
+    log "Preparing Vault Agent AppRole files"
+    local secret_id
+    if ! secret_id=$(resolve_secret_id_handoff "$_secret_id_handoff"); then
+        die "Failed to resolve SecretID handoff"
+    fi
+    if [[ -z "$secret_id" ]]; then
+        die "Resolved SecretID is empty"
     fi
 
-    # Mint seed token via AppRole login
-    log "Minting Vault Agent seed token via AppRole"
-    local login_payload="{\"role_id\": \"${role_id}\", \"secret_id\": \"${_bootstrap_token}\"}"
-    local login_response
-    login_response=$(curl -fsS --cacert /etc/ssl/certs/ca-certificates.crt \
-        -X POST "${VAULT_ADDR}/v1/auth/approle/login" \
-        -H "Content-Type: application/json" \
-        -d "$login_payload") || die "Vault AppRole login failed (is Vault running and accessible?)"
+    write_vault_agent_secret_file "$VAULT_ROLE_ID_PATH" "$role_id" \
+        || die "Failed to write Vault Agent role-id"
+    write_vault_agent_secret_file "$VAULT_SECRET_ID_PATH" "$secret_id" \
+        || die "Failed to write Vault Agent secret-id"
 
-    local seed_token
-    seed_token=$(echo "$login_response" | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-token = data.get('auth', {}).get('client_token', '')
-print(token, end='')
-")
-
-    if [[ -z "$seed_token" ]]; then
-        die "Failed to extract client_token from Vault AppRole login response"
-    fi
-
-    # Place seed token at handoff path
-    local token_dir
-    token_dir=$(dirname "$VAULT_TOKEN_PATH")
-    install -d -m 0700 -o abhaile -g abhaile "$token_dir"
-    # Write token atomically — use temp file to avoid exposing value in process args
-    local token_tmp="${token_dir}/.token.tmp.$$"
-    (umask 077 && printf '%s' "$seed_token" > "$token_tmp")
-    chown abhaile:abhaile "$token_tmp"
-    mv "$token_tmp" "$VAULT_TOKEN_PATH"
-
-    log "Seed token placed at ${VAULT_TOKEN_PATH}"
+    log "Vault Agent AppRole files placed at ${VAULT_AGENT_DIR}"
 
     # Wipe sensitive variables
     role_id=""
-    seed_token=""
-    login_payload=""
-    login_response=""
+    secret_id=""
+    _secret_id_handoff=""
 
     # Shred and remove ephemeral dir (also handled by EXIT trap)
     cleanup_ephemeral
 
-    log "Sealed artifact handoff OK"
+    log "Sealed Vault Agent artifact handoff OK"
 }
 
 # --- Stage 7: First Render and Apply -----------------------------------------
@@ -465,9 +480,15 @@ stage_render_apply() {
         done
     fi
 
-    # Initialize podman storage for abhaile user
-    if ! sudo -u abhaile podman system info &>/dev/null; then
-        sudo -u abhaile podman system migrate 2>/dev/null || true
+    local abhaile_uid
+    abhaile_uid=$(id -u abhaile)
+    local abhaile_runtime_dir="/run/user/${abhaile_uid}"
+    local abhaile_env=(HOME=/home/abhaile XDG_RUNTIME_DIR="$abhaile_runtime_dir")
+
+    # Initialize podman storage for abhaile user from a readable cwd with a stable user runtime.
+    if ! sudo -H -u abhaile env "${abhaile_env[@]}" bash -lc 'cd /tmp && podman system info' &>/dev/null; then
+        sudo -H -u abhaile env "${abhaile_env[@]}" bash -lc 'cd /tmp && podman system migrate' \
+            2>/dev/null || true
     fi
 
     # Render

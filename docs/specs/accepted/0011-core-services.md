@@ -126,8 +126,8 @@ addresses. coredns-common and chrony-common are composition-only targets
   file at `/srv/vault/agent/out/.ready`.
 - Aggregates `vault_agent.templates` from all same-host services that declare them.
 - Named volumes: `templates`, `run`, `out`, `host-certs`.
-- Mounted files: bootstrap token at `/home/abhaile/.config/vault-agent/token`
-  and rendered `config.hcl`.
+- Mounted files: AppRole material at `/home/abhaile/.config/vault-agent/role-id` and
+  `/home/abhaile/.config/vault-agent/secret-id`, plus rendered `config.hcl`.
 
 **authelia** — SSO/authentication on phobos.
 
@@ -289,10 +289,10 @@ systemd-networkd (host interfaces + ipvlan-l2 + VLANs)
     → coredns-filtered (DNS, via coredns.service)
       → blocky.service (ad-filtering upstream)
         → vault.service (secret store)
-          → abhaile-vault-unseal.service (SOPS decrypt + API unseal)
-            → vault-agent (rootless, secret delivery)
-              → abhaile-secrets-ready.path/.service (sentinel watch)
-                → caddy-dmz, authelia (After=abhaile-secrets-ready)
+          → abhaile-vault-unseal.service (phobos-only SOPS recovery + API unseal)
+          → vault-agent (rootless, secret delivery; retries/restarts until Vault is usable)
+            → abhaile-secrets-ready.path/.service (sentinel watch)
+              → caddy-dmz, authelia (After=abhaile-secrets-ready)
           → caddy-internal (After=vault)
             → omada-controller (After=caddy-internal, needs internal CA cert)
 ```
@@ -322,10 +322,9 @@ Key dependency semantics:
 
 The secrets delivery path for core services:
 
-1. Operator provides bootstrap token at `/home/abhaile/.config/vault-agent/token`
-   (out-of-band, never in git).
-1. vault-agent authenticates to Vault using AppRole (token refreshed by
-   `vault-token-refresh.timer` every 6h).
+1. Bootstrap writes AppRole material to `/home/abhaile/.config/vault-agent/role-id` and
+   `/home/abhaile/.config/vault-agent/secret-id` (host-local, never in git).
+1. vault-agent authenticates to Vault with AppRole auto-auth and manages its runtime sink token.
 1. vault-agent renders `.ctmpl` templates to `/srv/vault/agent/out/<filename>`.
 1. vault-agent writes `.ready` sentinel after all templates render successfully.
 1. `abhaile-secrets-ready.path` detects sentinel, starts `.service`.

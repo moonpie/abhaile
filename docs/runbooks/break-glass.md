@@ -34,7 +34,25 @@ Gateway: 172.20.20.1 (ER605, VLAN 20 interface).
 
 **Prereq:** SSH or physical access to phobos. Unseal keys — see below.
 
-**Unseal key location:** Decrypt from `config/bootstrap/sealed/phobos/vault-bootstrap.sops.yaml` using the age key at `/home/abhaile/.config/sops/age/keys.txt` on phobos. Threshold: all keys in the artifact are needed (Shamir threshold from Vault init). Alternative: retrieve from operator password manager entry "Abhaile Vault Unseal Keys".
+**Automated unseal location:** On the Vault host, `abhaile-vault-unseal.service` decrypts
+`/opt/abhaile/secrets/phobos/vault-unseal.sops.yaml` with the root-owned age identity at
+`/root/.config/sops/age/vault-unseal.keys.txt`.
+
+**Manual unseal key location:** Retrieve the keys from the operator password manager entry
+"Abhaile Vault Unseal Keys". If host-local recovery material is intact, root on phobos can decrypt
+`/opt/abhaile/secrets/phobos/vault-unseal.sops.yaml`. If phobos is unavailable, use the offline
+operator recovery age key from the password manager or encrypted offline backup to decrypt the repo
+copy of `secrets/phobos/vault-unseal.sops.yaml`.
+
+Do not use the `abhaile` user's age identity for Vault unseal recovery. Vault unseal is a root/admin
+recovery activity, not Vault Agent runtime auth.
+
+**If Vault moves to another host:** provision a new root-owned unseal age identity on the new Vault
+host, add or update the `.sops.yaml` recipient rule for
+`secrets/<new-host>/vault-unseal.sops.yaml`, and re-encrypt or recreate the unseal artifact for the
+new host. Remove the old host's local unseal age identity and sealed unseal artifact when it should
+no longer be able to unseal Vault. The operator recovery age identity must remain available offline
+so this migration can be performed when the old Vault host is unavailable.
 
 1. Set environment:
 
@@ -251,9 +269,10 @@ systemctl restart systemd-networkd
 
 1. **Re-enable runner:** `systemctl start abhaile-runner.timer`
 
-## 6. Vault-Agent Token Expiry
+## 6. Vault-Agent AppRole Auth Recovery
 
-**Symptoms:** `.ready` sentinel missing or stale. vault-agent logs show authentication errors. Services waiting on secrets indefinitely.
+**Symptoms:** `.ready` sentinel missing or stale. Vault Agent logs show AppRole authentication
+errors. Services wait on secrets indefinitely.
 
 **Prereq:** SSH to affected host.
 
@@ -263,19 +282,23 @@ systemctl restart systemd-networkd
    machinectl shell abhaile@ /bin/journalctl --user -u vault-agent.service --no-pager -n 20
    ```
 
-1. If token expired/invalid, the seed token at `/home/abhaile/.config/vault-agent/token` needs replacement. This requires re-bootstrap of the token:
+1. If the AppRole SecretID is expired, revoked, or otherwise invalid, replace
+   `/home/abhaile/.config/vault-agent/secret-id`:
 
-   - Mint a new AppRole SecretID from Vault (phobos, with a valid Vault token).
-   - Re-run the token-minting step from bootstrap, or manually place a new wrapped token.
+   - Create a new SecretID for the host AppRole in Vault.
+   - Prefer re-running bootstrap with a response-wrapped SecretID handoff.
+   - For break-glass recovery, write the direct SecretID to the host file with owner
+     `abhaile:abhaile` and mode `0600`.
 
-1. Restart vault-agent after token replacement:
+1. Restart vault-agent after SecretID replacement:
 
    ```bash
    machinectl shell abhaile@ /bin/systemctl --user restart vault-agent.service
    while [ ! -f /srv/vault/agent/out/.ready ]; do sleep 2; done
    ```
 
-**If the 6h token refresh (`vault-token-refresh.timer`) is failing**, check its journal for auth errors and ensure Vault is unsealed (§1).
+If the RoleID also changed, replace `/home/abhaile/.config/vault-agent/role-id` through bootstrap
+or write it with the same ownership and mode.
 
 ## 7. Resource Exhaustion
 

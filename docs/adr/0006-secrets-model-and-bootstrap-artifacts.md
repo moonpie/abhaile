@@ -2,12 +2,16 @@
 
 ## Status
 
+2026-06-22: Updated Accepted
 2026-05-05: Updated Accepted
 2026-05-05: Accepted
 
 ## Context
 
-Abhaile needs to manage secret-dependent services without turning the git repo or rendered output into a secret store. The project also needs a minimal bootstrap path for fresh hosts before Vault Agent can assume runtime secret delivery.
+Abhaile needs to manage secret-dependent services without turning the git repo or rendered output
+into a secret store. The project also needs a minimal bootstrap path for fresh hosts before Vault
+Agent can assume runtime secret delivery and a recovery path for privileged host actions that must
+run before Vault Agent is available.
 
 ## Decision
 
@@ -16,7 +20,7 @@ Abhaile uses a split secret model:
 - runtime secrets are rendered on-host by Vault Agent
 - repo-managed render output may include templates, placeholders, destination metadata, and non-secret control-plane config only
 - runtime secret values must never appear in git or repo-managed render output
-- `sops` is reserved for sealed bootstrap artifacts needed before Vault Agent can take over
+- `sops` is reserved for sealed bootstrap and recovery artifacts needed before Vault Agent can take over
 
 ### Artifact Classes
 
@@ -46,7 +50,9 @@ Abhaile recognizes three artifact classes:
 
 ### Ownership Boundary
 
-- **Bootstrap** owns initial trust establishment and may consume sealed bootstrap artifacts.
+- **Bootstrap** owns initial trust establishment and may consume sealed Vault Agent bootstrap artifacts.
+- **Recovery** owns privileged host recovery actions, such as automated Vault unseal, and may consume
+  sealed recovery artifacts.
 - **Apply** owns privileged host reconciliation and wiring but does not materialize resolved secret values into repo-managed output.
 - **Runtime (Vault Agent)** owns rendering resolved secrets into host-only destinations.
 
@@ -58,6 +64,14 @@ This preserves the render/apply privilege boundary: render stays unprivileged an
 - decrypted bootstrap material must not be committed and should not persist on disk unless explicitly intended by the design
 - external key material and bootstrap credentials are documented separately from runtime Vault-managed secrets
 - external secret material is required at bootstrap/runtime and is delivered outside git
+
+### Recovery Boundary
+
+- recovery may consume sealed artifacts for privileged host recovery before Vault Agent is available
+- Vault unseal material belongs to the Vault host root/admin recovery boundary, not the Vault Agent
+  runtime boundary
+- automated unseal artifacts must not be decryptable solely by the `abhaile` Vault Agent identity
+- operator recovery recipients provide a manual migration and break-glass path if the Vault host changes
 
 ### Runtime Boundary
 
@@ -71,7 +85,9 @@ Concrete host paths are split by lifecycle and ownership:
 
 | Artifact / Path | Class | Owner:Group | Mode | Producer / Provisioning | Responsible phase |
 | --- | --- | --- | --- | --- | --- |
-| `/home/abhaile/.config/vault-agent/token` | Bootstrap-only input (Vault auth seed token file) | `abhaile:abhaile` | `0600` | Operator/bootstrap host-local provisioning (out-of-band) | Bootstrap + Operator |
+| `/home/abhaile/.config/vault-agent/role-id` | Bootstrap-provisioned host auth input (Vault AppRole RoleID) | `abhaile:abhaile` | `0600` | Bootstrap from `secrets/<host>/vault-agent.sops.yaml` | Bootstrap + Operator |
+| `/home/abhaile/.config/vault-agent/secret-id` | Bootstrap-provisioned host auth input (Vault AppRole SecretID) | `abhaile:abhaile` | `0600` | Bootstrap from out-of-band SecretID or response-wrapped SecretID | Bootstrap + Operator |
+| `/root/.config/sops/age/vault-unseal.keys.txt` | Host recovery age identity | `root:root` | `0600` | Operator provisioned on the Vault host | Recovery + Operator |
 | `/srv/vault/agent/run/vault-agent-token` | Runtime secret output (Vault Agent sink token) | `abhaile:abhaile` | `0600` | Vault Agent sink runtime write | Runtime (Vault Agent) |
 | `/srv/vault/agent/out/.ready` | Runtime readiness sentinel (non-secret) | `abhaile:abhaile` | `0640` | Vault Agent template render | Runtime (Vault Agent) |
 | `/srv/vault/agent/out/<template-out>` (for example `authelia.configuration.yml`, `authelia-redis.conf`, `ddclient.conf`, `coredns-omada.env`, `caddy-dns-desec.env`) | Runtime secret-bearing service inputs | `abhaile:abhaile` | `0640` (from `composition.vault_agent.templates[].perms`) | Vault Agent template rendering from committed `*.ctmpl` sources | Runtime (Vault Agent) |
@@ -79,6 +95,10 @@ Concrete host paths are split by lifecycle and ownership:
 | `/srv/omada-controller/cert` | Runtime certificate bundle destination for Omada | `root:root` | `0750` directory, file modes set by rebuild script | Host-local rebuild workflow (`rebuild-omada-cert.sh`) | Runtime + Operator |
 
 This separates bootstrap-only inputs from long-lived runtime material and makes path ownership explicit.
+
+Vault Agent uses native AppRole auto-auth as described in ADR 0009. The host-local AppRole SecretID
+is durable machine credential material. It is never emitted into rendered output and must not be
+committed to git, including as a SOPS-encrypted artifact.
 
 ### Apply Validation Stance for External Material
 
@@ -102,7 +122,8 @@ Runtime secret outputs remain host-only and are never materialized during render
 
 - **Store runtime service secrets in git encrypted with `sops`**: rejected because it makes git a parallel runtime secret store and weakens the Vault-based operating model.
 - **Allow render output to materialize resolved secret values**: rejected because rendered output is repo-managed and should remain safe to inspect and regenerate.
-- **Avoid any sealed bootstrap artifacts in git**: rejected because some bootstrap flows need a minimal sealed handoff before Vault Agent is available.
+- **Avoid any sealed artifacts in git**: rejected because some bootstrap and recovery flows need a
+  minimal sealed handoff before Vault Agent is available.
 
 ## Consequences
 

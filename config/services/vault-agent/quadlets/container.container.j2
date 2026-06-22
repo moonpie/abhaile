@@ -1,7 +1,7 @@
 [Unit]
 Description=Vault Agent (rootless, templates)
-After=network-online.target abhaile-vault-unseal.service
-Wants=network-online.target abhaile-vault-unseal.service
+After=network-online.target
+Wants=network-online.target
 
 [Container]
 Image={{ image }}

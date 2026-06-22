@@ -1,0 +1,15 @@
+[Unit]
+Description=Unseal Vault using host sealed recovery artifact
+After=vault.service network-online.target
+Wants=vault.service network-online.target
+
+[Service]
+Type=oneshot
+Environment=SOPS_AGE_KEY_FILE=/root/.config/sops/age/vault-unseal.keys.txt
+Environment=VAULT_ADDR=http://{{ vault_addr | strip_cidr }}:8200
+Environment=UNSEAL_FILE=/opt/abhaile/secrets/{{ host_name }}/vault-unseal.sops.yaml
+ExecStart=/bin/bash /opt/abhaile/tools/bash/vault-unseal.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

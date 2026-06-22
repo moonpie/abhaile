@@ -27,12 +27,12 @@ repos:
         files: \.md$
         exclude: ^\.github/agents/.*\.agent\.md$
   - repo: https://github.com/psf/black
-    rev: 26.1.0
+    rev: 26.5.1
     hooks:
       - id: black
         name: Format Python (black)
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         name: Type Check Python (mypy)
@@ -40,7 +40,7 @@ repos:
         args: ["--config-file=pyproject.toml", "src/abhaile", "tests"]
         additional_dependencies: ["types-PyYAML>=6.0", "types-jsonschema>=4.23.0", "types-Jinja2>=2.11.9", "pytest>=7.4.0"]
   - repo: https://github.com/python-jsonschema/check-jsonschema
-    rev: 0.36.1
+    rev: 0.37.3
     hooks:
       - id: check-jsonschema
         name: Validate Mapping.yaml Against Schema
@@ -73,14 +73,14 @@ repos:
       - id: yamllint
         name: Lint YAML (yamllint)
   - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.35
+    rev: v0.9.38
     hooks:
       - id: pymarkdown
         name: Lint Markdown (pymarkdown)
         args: ["-d", "md013", "scan", "-e", ".github/agents/*.agent.md", "."]
         files: \.md$
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.14.14
+    rev: v0.15.18
     hooks:
       - id: ruff
         name: Lint Python (ruff)

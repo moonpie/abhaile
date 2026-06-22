@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# scripts/sops-bootstrap — Sealed bootstrap artifact lifecycle management.
+# scripts/sops-bootstrap — Sealed host secret artifact lifecycle management.
 # Usage: scripts/sops-bootstrap {create|edit|rotate|validate} [HOST] [NAME]
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SEALED_DIR="$REPO_ROOT/config/bootstrap/sealed"
+SECRETS_DIR="$REPO_ROOT/secrets"
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -13,7 +13,7 @@ cmd_create() {
     [ -n "$host" ] || die "Usage: sops-bootstrap create <host> <name>"
     [ -n "$name" ] || die "Usage: sops-bootstrap create <host> <name>"
 
-    local target="$SEALED_DIR/$host/${name}.sops.yaml"
+    local target="$SECRETS_DIR/$host/${name}.sops.yaml"
 
     if [ -f "$target" ]; then
         if [ "${FORCE:-}" != "1" ] && [ "${3:-}" != "--force" ]; then
@@ -34,7 +34,7 @@ cmd_edit() {
     [ -n "$host" ] || die "Usage: sops-bootstrap edit <host> <name>"
     [ -n "$name" ] || die "Usage: sops-bootstrap edit <host> <name>"
 
-    local target="$SEALED_DIR/$host/${name}.sops.yaml"
+    local target="$SECRETS_DIR/$host/${name}.sops.yaml"
     [ -f "$target" ] || die "File not found: $target"
 
     command -v sops >/dev/null 2>&1 || die "sops is not installed"
@@ -46,7 +46,7 @@ cmd_rotate() {
     [ -n "$host" ] || die "Usage: sops-bootstrap rotate <host> <name>"
     [ -n "$name" ] || die "Usage: sops-bootstrap rotate <host> <name>"
 
-    local target="$SEALED_DIR/$host/${name}.sops.yaml"
+    local target="$SECRETS_DIR/$host/${name}.sops.yaml"
     [ -f "$target" ] || die "File not found: $target"
 
     command -v sops >/dev/null 2>&1 || die "sops is not installed"
@@ -59,12 +59,16 @@ cmd_validate() {
 
     local errors=0
 
-    if [ ! -d "$SEALED_DIR" ]; then
-        echo "No sealed directory found at $SEALED_DIR — nothing to validate."
+    if [ ! -d "$SECRETS_DIR" ]; then
+        echo "No secrets directory found at $SECRETS_DIR; nothing to validate."
         exit 0
     fi
 
     while IFS= read -r -d '' file; do
+        if [ "$(basename "$file")" = ".gitkeep" ]; then
+            continue
+        fi
+
         # Check naming convention
         if [[ ! "$file" == *.sops.yaml ]]; then
             echo "FAIL naming: $file (expected .sops.yaml suffix)" >&2
@@ -77,13 +81,13 @@ cmd_validate() {
             echo "FAIL plaintext: $file (missing sops metadata — may be unencrypted)" >&2
             errors=$((errors + 1))
         fi
-    done < <(find "$SEALED_DIR" -type f -print0)
+    done < <(find "$SECRETS_DIR" -type f -print0)
 
     if [ "$errors" -gt 0 ]; then
         die "Validation failed: $errors error(s)"
     fi
 
-    echo "validate: all sealed artifacts OK"
+    echo "validate: all sealed secret artifacts OK"
 }
 
 case "${1:-}" in

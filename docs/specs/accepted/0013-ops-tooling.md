@@ -23,7 +23,7 @@ scope:
 The render and apply pipelines are complete with working CLI entrypoints (`abhaile-render`,
 `abhaile-apply`, `abhaile-diff`). The project lacks operator-facing convenience tooling for
 common workflows: Make targets for render/apply/validate, a host inventory view, full diff
-capabilities, and sealed bootstrap artifact lifecycle management.
+capabilities, and sealed artifact lifecycle management.
 
 The diff entrypoint (`src/abhaile/cli/diff.py`) exists and compares desired vs applied
 manifests using `plan_manifest_drift`. It accepts two manifest paths, supports `--json`
@@ -31,7 +31,7 @@ output, and prints a human-readable summary. What remains is defining exit-code 
 for automation, explicit two-positional-path mode documentation, and integration into Make
 targets.
 
-Sealed bootstrap artifacts follow the layout in ADR 0007 (`config/bootstrap/sealed/<host>/`)
+Sealed artifacts follow the layout in ADR 0007 (`secrets/<host>/`)
 with `.sops.yaml` suffix and age-based recipient model. Operators need canonical tooling for
 create/edit/rotate workflows that prevent accidental plaintext commits.
 
@@ -43,7 +43,7 @@ create/edit/rotate workflows that prevent accidental plaintext commits.
   deterministic order.
 - [x] `abhaile-diff` defines predictable exit codes for automation (no diff, diff found,
   error).
-- [x] Sealed bootstrap artifact tooling provides create, edit, and rotate workflows without
+- [x] Sealed artifact tooling provides create, edit, and rotate workflows without
   exposing plaintext in git.
 - [x] All new tooling is documented with usage examples.
 
@@ -167,25 +167,25 @@ Design decisions:
 
 ### Task 4: Sealed Bootstrap Artifact Tooling
 
-Provide Make targets and a thin wrapper script for `sops` operations on sealed bootstrap
-artifacts under `config/bootstrap/sealed/`.
+Provide Make targets and a thin wrapper script for `sops` operations on sealed artifacts under
+`secrets/<host>/`.
 
 #### Make Targets
 
 ```makefile
 bootstrap-create:
-    @test -n "$(HOST)" || (echo "Usage: make bootstrap-create HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
-    @test -n "$(NAME)" || (echo "Usage: make bootstrap-create HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+    @test -n "$(HOST)" || (echo "Usage: make bootstrap-create HOST=phobos NAME=vault-agent" >&2; exit 1)
+    @test -n "$(NAME)" || (echo "Usage: make bootstrap-create HOST=phobos NAME=vault-agent" >&2; exit 1)
     scripts/sops-bootstrap create $(HOST) $(NAME)
 
 bootstrap-edit:
-    @test -n "$(HOST)" || (echo "Usage: make bootstrap-edit HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
-    @test -n "$(NAME)" || (echo "Usage: make bootstrap-edit HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+    @test -n "$(HOST)" || (echo "Usage: make bootstrap-edit HOST=phobos NAME=vault-agent" >&2; exit 1)
+    @test -n "$(NAME)" || (echo "Usage: make bootstrap-edit HOST=phobos NAME=vault-agent" >&2; exit 1)
     scripts/sops-bootstrap edit $(HOST) $(NAME)
 
 bootstrap-rotate:
-    @test -n "$(HOST)" || (echo "Usage: make bootstrap-rotate HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
-    @test -n "$(NAME)" || (echo "Usage: make bootstrap-rotate HOST=phobos NAME=vault-bootstrap" >&2; exit 1)
+    @test -n "$(HOST)" || (echo "Usage: make bootstrap-rotate HOST=phobos NAME=vault-agent" >&2; exit 1)
+    @test -n "$(NAME)" || (echo "Usage: make bootstrap-rotate HOST=phobos NAME=vault-agent" >&2; exit 1)
     scripts/sops-bootstrap rotate $(HOST) $(NAME)
 
 bootstrap-validate:
@@ -196,13 +196,13 @@ bootstrap-validate:
 
 A shell script that enforces:
 
-- Correct path derivation: `config/bootstrap/sealed/<host>/<name>.sops.yaml`.
+- Correct path derivation: `secrets/<host>/<name>.sops.yaml`.
 - Correct `.sops.yaml` configuration for age recipients (reads from a project-level
   `.sops.yaml` creation rules file or explicit recipient arguments).
 - `create` — initializes a new encrypted file with the correct recipients.
 - `edit` — opens the encrypted file with `sops edit` (decrypts in memory via editor).
 - `rotate` — runs `sops updatekeys` to apply new/changed recipients from `.sops.yaml`.
-- `validate` — verifies all files under `config/bootstrap/sealed/` are encrypted (not
+- `validate` — verifies all files under `secrets/` are encrypted (not
   plaintext), have valid SOPS metadata, and match the expected naming convention.
 
 Safety guarantees:
@@ -217,13 +217,17 @@ A repo-root `.sops.yaml` defines creation rules:
 
 ```yaml
 creation_rules:
-  - path_regex: config/bootstrap/sealed/phobos/.*\.sops\.yaml$
+  - path_regex: secrets/phobos/vault-agent\.sops\.yaml$
     age: >-
       <phobos-host-recipient>,
       <operator-recovery-recipient>
-  - path_regex: config/bootstrap/sealed/deimos/.*\.sops\.yaml$
+  - path_regex: secrets/deimos/vault-agent\.sops\.yaml$
     age: >-
       <deimos-host-recipient>,
+      <operator-recovery-recipient>
+  - path_regex: secrets/phobos/vault-unseal\.sops\.yaml$
+    age: >-
+      <phobos-root-unseal-recipient>,
       <operator-recovery-recipient>
 ```
 

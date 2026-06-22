@@ -50,7 +50,8 @@ Implemented behavior spans:
 - No plaintext secrets in git or repo-managed render output.
 - Render is unprivileged and deterministic; it never reads or writes resolved secret values.
 - Vault-agent template aggregation is host-local only (not cross-host).
-- SOPS usage is limited to sealed bootstrap artifacts needed before Vault Agent is online.
+- SOPS usage is limited to sealed bootstrap or recovery artifacts needed before Vault Agent is
+  online.
 - Apply references external secret paths but does not install secret payloads.
 - Runtime secret outputs remain host-only and are produced by Vault Agent at runtime.
 
@@ -115,7 +116,8 @@ The boundary between render-safe and host-only material:
 
 - Resolved outputs from Vault Agent template rendering (env files, app configs with credentials)
 - Vault Agent sink token (`/srv/vault/agent/run/vault-agent-token`)
-- Bootstrap seed token (`/home/abhaile/.config/vault-agent/token`)
+- Vault Agent AppRole files (`/home/abhaile/.config/vault-agent/role-id`,
+  `/home/abhaile/.config/vault-agent/secret-id`)
 - Any decrypted SOPS bootstrap material
 
 ### Vault-Agent Template Render Pipeline
@@ -243,13 +245,15 @@ path/service units that watch the output path and trigger config reload:
 
 ### SOPS Bootstrap Policy
 
-SOPS is allowed only for sealed bootstrap artifacts needed before Vault Agent can render
-runtime secrets.
+SOPS is allowed only for sealed bootstrap or recovery artifacts needed before Vault Agent can
+render runtime secrets.
 
 **Allowed in git (encrypted):**
 
 - Host-scoped, bootstrap-phase credentials for initial trust establishment.
 - Short-lived access material for reaching control-plane dependencies pre-Vault.
+- Host recovery material required before Vault Agent can run, such as Vault unseal keys for the
+  Vault host.
 
 **Forbidden in git (even encrypted):**
 
@@ -260,13 +264,16 @@ runtime secrets.
 **Layout:**
 
 ```text
-config/bootstrap/sealed/<host>/<artifact-name>.sops.yaml
+secrets/<host>/<artifact-name>.sops.yaml
 ```
 
 **Recipient model:**
 
 - Encryption uses age identities.
-- Each artifact requires a target-host bootstrap recipient and at least one operator recovery recipient.
+- Each artifact requires a target-host recipient appropriate to the artifact owner and at least one
+  operator recovery recipient.
+- Vault Agent bootstrap artifacts use the `abhaile` user's age identity.
+- Vault unseal recovery artifacts use a root/admin age identity on the Vault host.
 - Decryption occurs locally on the target host with an operator-provided identity (not from git).
 
 **Plaintext handling:**
@@ -283,7 +290,9 @@ in the owning runtime unit, not in render output.
 
 | Path | Class | Owner:Group | Mode | Producer |
 | --- | --- | --- | --- | --- |
-| `/home/abhaile/.config/vault-agent/token` | Bootstrap input | `abhaile:abhaile` | `0600` | Operator (out-of-band) |
+| `/home/abhaile/.config/vault-agent/role-id` | Bootstrap input | `abhaile:abhaile` | `0600` | Bootstrap from `secrets/<host>/vault-agent.sops.yaml` |
+| `/home/abhaile/.config/vault-agent/secret-id` | Bootstrap input | `abhaile:abhaile` | `0600` | Bootstrap from out-of-band SecretID handoff |
+| `/root/.config/sops/age/vault-unseal.keys.txt` | Recovery input | `root:root` | `0600` | Operator-provisioned Vault unseal age identity |
 | `/srv/vault/agent/run/vault-agent-token` | Runtime output | `abhaile:abhaile` | `0600` | Vault Agent sink |
 | `/srv/vault/agent/out/.ready` | Runtime sentinel | `abhaile:abhaile` | `0640` | Vault Agent template |
 | `/srv/vault/agent/out/<file>` | Runtime secret | `abhaile:abhaile` | `0640` | Vault Agent template |
@@ -338,11 +347,12 @@ Vault contributes an internal ingress block to caddy-internal. It does not defin
 
 - ADR: 0006-secrets-model-and-bootstrap-artifacts
 
-- Decision: SOPS is bootstrap-only, host-scoped, and uses age encryption with operator recovery recipients.
+- Decision: SOPS is limited to bootstrap/recovery artifacts, host-scoped, and uses age encryption
+  with operator recovery recipients.
 
 - Rationale: Minimal sealed handoff before Vault Agent is available; host-scoping limits blast radius.
 
-- Impact: Sealed artifacts at `config/bootstrap/sealed/<host>/`; no runtime secrets in git even encrypted.
+- Impact: Sealed artifacts at `secrets/<host>/`; no runtime secrets in git even encrypted.
 
 - ADR: 0007-sops-bootstrap-policy-and-layout
 

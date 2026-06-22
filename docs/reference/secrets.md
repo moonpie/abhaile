@@ -2,25 +2,35 @@
 
 ## Overview
 
-Abhaile splits secrets into two phases: **bootstrap** (one-time trust before Vault Agent) and **runtime** (Vault Agent delivery after bootstrap). Bootstrap uses SOPS/age-encrypted artifacts decrypted ephemerally on the target host; runtime uses Vault Agent templates rendered to host-only paths. No plaintext secrets ever appear in git or in rendered output.
+Abhaile splits secrets into three phases: **bootstrap** (one-time trust before Vault Agent),
+**recovery** (privileged host recovery such as Vault unseal), and **runtime** (Vault Agent delivery
+after bootstrap). Bootstrap and recovery use SOPS/age-encrypted artifacts decrypted ephemerally by
+the appropriate host identity; runtime uses Vault Agent templates rendered to host-only paths. No
+plaintext secrets ever appear in git or in rendered output.
 
 ## Bootstrap Credentials
 
 | Artifact | Scope | Path | Purpose |
 | --- | --- | --- | --- |
-| Vault bootstrap (sealed) | per-host | `config/bootstrap/sealed/<host>/vault-bootstrap.sops.yaml` | AppRole and optional unseal material |
-| Repo bootstrap (sealed, optional) | per-host | `config/bootstrap/sealed/<host>/repo-bootstrap.sops.yaml` | Repo access token fallback |
-| Age decryption identity | per-host | `/home/abhaile/.config/sops/age/keys.txt` | Decrypts sealed artifacts |
+| Vault Agent bootstrap (sealed) | per-host | `secrets/<host>/vault-agent.sops.yaml` | AppRole RoleID handoff |
+| Vault unseal recovery (sealed) | Vault host | `secrets/<host>/vault-unseal.sops.yaml` | Automated Vault unseal recovery |
+| Age decryption identity | per-host | `/home/abhaile/.config/sops/age/keys.txt` | Decrypts Vault Agent bootstrap artifact |
+| Vault unseal age identity | Vault host | `/root/.config/sops/age/vault-unseal.keys.txt` | Decrypts Vault unseal recovery artifact |
+| Operator recovery age identity | offline | operator password manager / encrypted offline backup | Recovery recipient for sealed artifacts |
 | Git deploy key | per-host | `/home/abhaile/.ssh/gitops_ed25519` | Read-only repo clone/pull |
-| Vault Agent seed token | per-host | `/home/abhaile/.config/vault-agent/token` | Initial AppRole auth for Vault Agent |
+| Vault Agent AppRole material | per-host | `/home/abhaile/.config/vault-agent/{role-id,secret-id}` | Durable host auth for Vault Agent |
 
-The sealed Vault bootstrap artifact must include `role_id`. It may include `unseal_keys` when the
-host is authorized to unseal Vault during bootstrap or early boot. Omit `unseal_keys` on hosts that
-should only consume Vault after it is already unsealed.
+`vault-agent.sops.yaml` must include `role_id` and must not contain `unseal_keys` or AppRole
+SecretID material.
 
-On managed hosts, the sealed Vault bootstrap artifact is available at
-`/opt/abhaile/config/bootstrap/sealed/<host>/vault-bootstrap.sops.yaml`. The host-owned
-`abhaile-vault-unseal.service` checks that path and skips unseal work when the artifact is absent.
+`vault-unseal.sops.yaml` contains `unseal_keys` only for hosts authorized to unseal Vault during
+boot recovery. Omit the file on hosts that should only consume Vault after it is already unsealed.
+Automated unseal is a privileged host recovery activity, not Vault Agent runtime auth.
+
+On managed hosts, sealed artifacts are available under `/opt/abhaile/secrets/<host>/`.
+`abhaile-vault-unseal.service` is rendered only for hosts authorized to perform Vault unseal
+recovery. Hosts that only consume Vault do not receive the unseal unit or helper script. On a Vault
+host, a missing unseal artifact is an operational error and should fail visibly.
 
 Sealed artifacts use age encryption with per-host + operator-recovery recipients defined in `.sops.yaml`.
 
@@ -43,9 +53,9 @@ All outputs are owned `abhaile:abhaile` with mode `0640`. Consuming services use
 
 | Path | Mode | Producer | Notes |
 | --- | --- | --- | --- |
-| `/home/abhaile/.config/vault-agent/token` | `0600` | Operator/Bootstrap | Seed token, never from git |
-| `/home/abhaile/.config/vault-agent/role-id` | `0600` | Operator (bootstrap §4) | AppRole RoleID, written once per host |
-| `/home/abhaile/.config/vault-agent/secret-id` | `0600` | Operator (bootstrap §4) | AppRole SecretID, written once per host |
+| `/home/abhaile/.config/vault-agent/role-id` | `0600` | Bootstrap | AppRole RoleID from `secrets/<host>/vault-agent.sops.yaml` |
+| `/home/abhaile/.config/vault-agent/secret-id` | `0600` | Bootstrap | AppRole SecretID from out-of-band handoff, never from git |
+| `/root/.config/sops/age/vault-unseal.keys.txt` | `0600` | Operator | Root-owned age identity for automated Vault unseal on the Vault host |
 | `/srv/vault/agent/run/vault-agent-token` | `0600` | Vault Agent sink | Refreshed automatically |
 | `/srv/vault/agent/out/.ready` | `0640` | Vault Agent template | Gates `abhaile-secrets-ready.path` |
 | `/srv/vault/agent/out/*` | `0640` | Vault Agent templates | Runtime secret-bearing configs |
@@ -54,11 +64,12 @@ All outputs are owned `abhaile:abhaile` with mode `0640`. Consuming services use
 
 | Category | Rotation | Mechanism |
 | --- | --- | --- |
-| Vault Agent sink token | Automatic (6h) | `vault-token-refresh.timer` |
+| Vault Agent sink token | Automatic | Vault Agent renewal |
+| Vault Agent AppRole SecretID | Manual | Create in Vault, deliver through wrapped bootstrap handoff, restart Vault Agent |
 | Runtime secrets (templates) | Automatic | Vault Agent re-renders on lease/TTL expiry |
 | Vault unseal keys | Manual | Re-init Vault (rare, requires operator) |
-| Age identities | Manual | Replace key, run `make bootstrap-rotate` |
-| Bootstrap seed token | Manual | Re-mint via AppRole if expired |
+| Host age identities | Manual | Replace key, run SOPS rotation for affected artifacts |
+| Operator recovery age identity | Manual | Replace offline key, rotate all affected sealed artifacts |
 | Service API keys in Vault KV | Manual | Update Vault KV, Agent re-renders |
 
 ## Adding a New Secret
@@ -73,7 +84,7 @@ See [Adding a Service](../guides/adding-a-service.md) for the full service onboa
 
 ## Emergency Access
 
-If Vault is sealed or secrets are not rendering, see [Break-Glass](../runbooks/break-glass.md) §1 (Vault Sealed Recovery) and §6 (Token Expiry).
+If Vault is sealed or secrets are not rendering, see [Break-Glass](../runbooks/break-glass.md) §1 (Vault Sealed Recovery) and §6 (Vault-Agent AppRole Auth Recovery).
 
 ## Vault Policies
 

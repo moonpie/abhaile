@@ -64,6 +64,10 @@ than a single application service. Current examples are:
 - `abhaile-runner.service`
 - `abhaile-runner.timer`
 
+Host-owned does not imply common-host-owned. Privileged recovery units such as Vault unseal are
+authored only on hosts that hold the corresponding recovery material. Common host composition is
+reserved for infrastructure that should exist on every managed host.
+
 The GitOps runner remains outside `src/abhaile/` as defined by ADR 0003. This ADR decides where the
 runner unit and timer are authored, not what the runner is responsible for.
 

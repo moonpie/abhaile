@@ -94,21 +94,46 @@ class TestRenderApplyE2E:
         phobos_unseal = (
             phobos_root / "system/etc/systemd/system/abhaile-vault-unseal.service"
         ).read_text(encoding="utf-8")
-        deimos_unseal = (
-            deimos_root / "system/etc/systemd/system/abhaile-vault-unseal.service"
-        ).read_text(encoding="utf-8")
+        deimos_unseal = deimos_root / "system/etc/systemd/system/abhaile-vault-unseal.service"
 
         assert "After=vault.service network-online.target" in phobos_unseal
-        assert "After=network-online.target" in deimos_unseal
-        assert "After=vault.service network-online.target" not in deimos_unseal
+        assert "Wants=vault.service network-online.target" in phobos_unseal
+        assert "ConditionPathExists=" not in phobos_unseal
+        assert (
+            "Environment=SOPS_AGE_KEY_FILE=/root/.config/sops/age/vault-unseal.keys.txt"
+            in phobos_unseal
+        )
+        assert "Environment=UNSEAL_FILE=/opt/abhaile/secrets/phobos/vault-unseal.sops.yaml" in (
+            phobos_unseal
+        )
+        assert "vault-bootstrap.sops.yaml" not in phobos_unseal
+        assert "config/bootstrap/sealed" not in phobos_unseal
+        assert not deimos_unseal.exists()
+        assert not (deimos_root / "system/opt/abhaile/tools/bash/vault-unseal.sh").exists()
 
         for rendered_root in (phobos_root, deimos_root):
             assert (rendered_root / "system/etc/systemd/system/abhaile-runner.service").exists()
             assert (rendered_root / "system/etc/systemd/system/abhaile-runner.timer").exists()
+            vault_agent_unit = (
+                rendered_root
+                / "services/vault-agent/home/abhaile/.config/containers/systemd"
+                / "vault-agent.container"
+            )
+            vault_agent_content = vault_agent_unit.read_text(encoding="utf-8")
+            assert "After=network-online.target" in vault_agent_content
+            assert "Wants=network-online.target" in vault_agent_content
+            assert "abhaile-vault-unseal.service" not in vault_agent_content
             assert (
-                rendered_root / "system/etc/systemd/system/abhaile-vault-unseal.service"
-            ).exists()
-            assert (rendered_root / "system/opt/abhaile/tools/bash/vault-unseal.sh").exists()
+                "Volume=/home/abhaile/.config/vault-agent/role-id:/agent/role-id:ro"
+                in vault_agent_content
+            )
+            assert (
+                "Volume=/home/abhaile/.config/vault-agent/secret-id:/agent/secret-id:ro"
+                in vault_agent_content
+            )
+            assert "/home/abhaile/.config/vault-agent/token:/agent/token" not in (
+                vault_agent_content
+            )
 
         phobos_entries = _entries_by_target(json.loads(manifests["phobos"].read_text()))
         deimos_entries = _entries_by_target(json.loads(manifests["deimos"].read_text()))
@@ -119,13 +144,18 @@ class TestRenderApplyE2E:
                 "activation_mode": "start",
                 "enable_mode": "enable",
             }
-            assert entries["/etc/systemd/system/abhaile-vault-unseal.service"]["apply_hints"] == {
-                "activation_mode": "start",
-                "enable_mode": "enable",
-            }
-            assert entries["/opt/abhaile/tools/bash/vault-unseal.sh"]["owner_ref"].startswith(
-                "host:"
-            )
+
+        assert phobos_entries["/etc/systemd/system/abhaile-vault-unseal.service"][
+            "apply_hints"
+        ] == {
+            "activation_mode": "start",
+            "enable_mode": "enable",
+        }
+        assert phobos_entries["/opt/abhaile/tools/bash/vault-unseal.sh"]["owner_ref"].startswith(
+            "host:"
+        )
+        assert "/etc/systemd/system/abhaile-vault-unseal.service" not in deimos_entries
+        assert "/opt/abhaile/tools/bash/vault-unseal.sh" not in deimos_entries
 
 
 def _entries_by_target(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:

@@ -10,15 +10,6 @@ composition:
       destination: /etc/systemd/system/abhaile-secrets-ready.path
       enable: true
       start: true
-    - source:
-        template: vault-agent/systemd/vault-token-refresh.service.j2
-        variables:
-          vault_addr: '%%network.services.vault.address%%'
-      destination: /etc/systemd/system/vault-token-refresh.service
-    - source: vault-agent/systemd/vault-token-refresh.timer
-      destination: /etc/systemd/system/vault-token-refresh.timer
-      enable: true
-      start: true
   vault_agent:
     base:
       source:
@@ -47,7 +38,11 @@ composition:
         mode: ro
         shared: true
     mounted_files:
-      - host_path: /home/abhaile/.config/vault-agent/token
-        mount_path: /agent/token
+      - host_path: /home/abhaile/.config/vault-agent/role-id
+        mount_path: /agent/role-id
+        mode: ro
+      - host_path: /home/abhaile/.config/vault-agent/secret-id
+        mount_path: /agent/secret-id
+        mode: ro
       - host_path: /srv/vault/agent/config.hcl
         mount_path: /agent/config.hcl

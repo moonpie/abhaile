@@ -86,9 +86,26 @@ class TestBootstrapPreflight:
         )
         assert result.returncode == 0, f"Syntax error: {result.stderr}"
 
-    def test_token_acquisition_requires_input(self) -> None:
-        """Token acquisition fails without any credential source."""
-        # Unset all token env vars, no TTY
+    def test_vault_cli_installer_uses_defined_ephemeral_helper(self) -> None:
+        """Vault CLI install path uses the defined ephemeral directory helper."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "create_ephemeral_dir()" in script
+        assert "ensure_ephemeral_dir" not in script
+
+    def test_bootstrap_installs_systemd_container_for_machinectl(self) -> None:
+        """Bootstrap installs systemd-container for user manager verification."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "systemd-container" in script
+
+    def test_deploy_key_is_mandatory_for_repo_access(self) -> None:
+        """Bootstrap does not advertise an unimplemented repo-token fallback."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "repo-bootstrap" not in script
+        assert "Deploy key missing" in script
+
+    def test_secret_id_handoff_requires_input(self) -> None:
+        """SecretID handoff acquisition fails without any credential source."""
+        # Unset all handoff env vars, no TTY
         env = os.environ.copy()
         env.pop("BOOTSTRAP_TOKEN", None)
         env.pop("BOOTSTRAP_TOKEN_FD", None)
@@ -100,7 +117,7 @@ class TestBootstrapPreflight:
                     "set -euo pipefail; "
                     "log() { :; }; die() { exit 1; }; "
                     f"source {BOOTSTRAP_SCRIPT}; "
-                    "acquire_bootstrap_token"
+                    "acquire_secret_id_handoff"
                 ),
             ],
             capture_output=True,
@@ -110,10 +127,10 @@ class TestBootstrapPreflight:
         )
         assert result.returncode != 0
 
-    def test_token_from_env_var(self) -> None:
-        """Token acquisition succeeds with BOOTSTRAP_TOKEN env var."""
+    def test_secret_id_handoff_from_env_var(self) -> None:
+        """SecretID handoff acquisition succeeds with BOOTSTRAP_TOKEN env var."""
         env = os.environ.copy()
-        env["BOOTSTRAP_TOKEN"] = "test-token-value"
+        env["BOOTSTRAP_TOKEN"] = "test-secret-id-handoff"
         env.pop("BOOTSTRAP_TOKEN_FD", None)
         result = subprocess.run(
             [
@@ -122,10 +139,10 @@ class TestBootstrapPreflight:
                 (
                     "set -euo pipefail; "
                     "log() { :; }; die() { exit 1; }; "
-                    "_bootstrap_token=''; "
+                    "_secret_id_handoff=''; "
                     f"source {BOOTSTRAP_SCRIPT}; "
-                    "acquire_bootstrap_token; "
-                    'test -n "$_bootstrap_token"'
+                    "acquire_secret_id_handoff; "
+                    'test -n "$_secret_id_handoff"'
                 ),
             ],
             capture_output=True,
@@ -134,3 +151,82 @@ class TestBootstrapPreflight:
             stdin=subprocess.DEVNULL,
         )
         assert result.returncode == 0
+
+    def test_secret_id_unwrap_failure_is_fatal_by_default(self) -> None:
+        """SecretID handoff fails closed when unwrap fails without recovery opt-in."""
+        env = os.environ.copy()
+        env["VAULT_ADDR"] = "http://127.0.0.1:1"
+        env.pop("BOOTSTRAP_DIRECT_SECRET_ID", None)
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -euo pipefail; "
+                    f"source {BOOTSTRAP_SCRIPT}; "
+                    "resolve_secret_id_handoff direct-secret"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+        assert result.returncode != 0
+        assert "direct SecretID recovery requires BOOTSTRAP_DIRECT_SECRET_ID=1" in result.stderr
+
+    def test_direct_secret_id_requires_recovery_opt_in(self) -> None:
+        """Direct SecretID handoff is returned only when recovery mode is explicit."""
+        env = os.environ.copy()
+        env["VAULT_ADDR"] = "http://127.0.0.1:1"
+        env["BOOTSTRAP_DIRECT_SECRET_ID"] = "1"
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -euo pipefail; "
+                    f"source {BOOTSTRAP_SCRIPT}; "
+                    "resolve_secret_id_handoff direct-secret"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert result.stdout == "direct-secret"
+        assert "BOOTSTRAP_DIRECT_SECRET_ID=1 set" in result.stderr
+
+    def test_bootstrap_writes_approle_files_not_seed_token(self) -> None:
+        """Bootstrap uses Vault Agent AppRole files instead of a seed-token file."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "VAULT_ROLE_ID_PATH" in script
+        assert "VAULT_SECRET_ID_PATH" in script
+        assert "/home/abhaile/.config/vault-agent/token" not in script
+        assert "/v1/auth/approle/login" not in script
+        assert "client_token" not in script
+
+    def test_bootstrap_supports_response_wrapped_secret_id(self) -> None:
+        """Bootstrap unwraps by default and requires opt-in for direct SecretID fallback."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "vault unwrap -format=json" in script
+        assert "BOOTSTRAP_DIRECT_SECRET_ID" in script
+        assert "direct SecretID recovery requires BOOTSTRAP_DIRECT_SECRET_ID=1" in script
+        assert "Failed to resolve SecretID handoff" in script
+
+    def test_bootstrap_reports_approle_file_write_failures(self) -> None:
+        """Bootstrap wraps AppRole file write failures with clear fatal messages."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'die "Failed to write Vault Agent role-id"' in script
+        assert 'die "Failed to write Vault Agent secret-id"' in script
+
+    def test_bootstrap_uses_vault_agent_artifact_only(self) -> None:
+        """Bootstrap reads only the Vault Agent artifact, not unseal material."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'readonly SECRETS_DIR="secrets"' in script
+        assert "vault-agent.sops.yaml" in script
+        assert "vault-bootstrap.sops.yaml" not in script
+        assert "unseal_keys" not in script
+        assert "/v1/sys/unseal" not in script

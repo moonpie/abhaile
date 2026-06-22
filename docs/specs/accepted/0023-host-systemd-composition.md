@@ -8,7 +8,7 @@ title: Host Systemd Composition
 status: accepted
 owner: moonpie
 created: 2026-06-08
-updated: 2026-06-20
+updated: 2026-06-23
 related_adrs:
   - 0003-gitops-runner-responsibility-boundary
   - 0004-apply-execution-model
@@ -105,24 +105,25 @@ systemd executor already represents the operation.
 
 ### Vault Unseal Ownership
 
-The Vault unseal helper script must be hosted by common host composition, not by
-`vault-agent` service composition. The script must not carry `restart_unit` behavior and must not
-restart or validate `vault-agent.service` when the script changes.
+The Vault unseal helper script must be hosted by Vault-host composition, not by `vault-agent`
+service composition. The script must not carry `restart_unit` behavior and must not restart or
+validate `vault-agent.service` when the script changes.
 
 `abhaile-vault-unseal.service` must be authored through host `composition.systemd`. The unit must:
 
 - run after `network-online.target`
-- run after `vault.service` only on hosts where the `vault` service is mapped locally
-- remain suitable for hosts that reach Vault over the network
-- call the host-installed Vault CLI at `/usr/local/bin/vault`
-- use the SOPS age key and sealed bootstrap artifact locations defined by the bootstrap/secrets
+- run after `vault.service` on hosts where the `vault` service is mapped locally
+- render only on hosts authorized to perform Vault unseal recovery
+- fail visibly if the sealed recovery artifact is missing on an authorized Vault host
+- use the root-owned SOPS age key and sealed recovery artifact locations defined by the secrets
   contract
 - be enabled and startable through normal systemd apply hints
 - avoid exposing unseal keys in unit files, rendered artifacts, logs, environment variables, or
   process command arguments
 
-The unit must avoid host-name-specific logic. Host-specific behavior should come from render
-context such as mapped services.
+The unit must be omitted from hosts that only consume Vault after it is unsealed. Rootless
+`vault-agent.service` must not depend on the system unseal unit; Vault Agent should start after
+network readiness and recover through its own retry/restart behavior.
 
 ### GitOps Runner Ownership
 
@@ -156,7 +157,7 @@ references that currently imply service-owned or host-name-specific Vault unseal
 At minimum, update:
 
 - bootstrap documentation where it describes Vault unseal prerequisites or host unit placement
-- secrets documentation where it describes sealed bootstrap artifacts and optional unseal keys
+- secrets documentation where it describes sealed recovery artifacts and optional unseal keys
 - any inventory or mapping documentation affected by moving the runner out of service mapping
 
 Documentation must stay generic. It may list prerequisites such as Vault availability, SOPS access,
@@ -171,10 +172,10 @@ Host composition keeps the same top-level shape as service composition:
 ```yaml
 composition:
   config:
-    - source: common/tools/vault-unseal.sh
+    - source: phobos/tools/vault-unseal.sh
       destination: /opt/abhaile/tools/bash/vault-unseal.sh
   systemd:
-    - source: common/systemd/abhaile-vault-unseal.service.j2
+    - source: phobos/systemd/abhaile-vault-unseal.service.j2
       destination: /etc/systemd/system/abhaile-vault-unseal.service
       enable: true
       start: true
@@ -186,15 +187,9 @@ generic file placement list.
 
 ### Render Context
 
-The host renderer should receive mapped services for the target host. Templates may then use a
-generic condition such as:
-
-```jinja2
-After={% if "vault" in host_services %}vault.service {% endif %}network-online.target
-```
-
-This keeps the Vault unseal unit portable across phobos, deimos, and future hosts without embedding
-host names in the unit.
+The host renderer should receive mapped services for the target host. Templates may use that context
+for host-owned infrastructure decisions. Vault unseal is intentionally authored only on Vault hosts
+that have the root recovery age identity and sealed recovery artifact.
 
 ### Apply Semantics
 
@@ -215,14 +210,16 @@ normal apply process.
 - [x] Rendered host systemd artifacts carry systemd apply hints for enable and start behavior.
 - [x] Host systemd drop-ins do not receive independent enable or start behavior.
 - [x] Host `composition.config` rejects `/etc/systemd/system/` destinations.
-- [x] Vault unseal script is placed by common host `composition.config`.
+- [x] Vault unseal script is placed by Vault-host `composition.config`.
 - [x] Vault unseal script changes do not request `vault-agent.service` restart or validation.
 - [x] Vault unseal handling does not expose unseal keys in unit files, rendered artifacts, logs,
   environment variables, or process command arguments.
 - [x] `abhaile-vault-unseal.service` is placed by host `composition.systemd`.
-- [x] `abhaile-vault-unseal.service` orders after `vault.service` only on hosts that locally map
-  the `vault` service.
-- [x] `abhaile-vault-unseal.service` orders after `network-online.target` on all rendered hosts.
+- [x] `abhaile-vault-unseal.service` renders only on hosts authorized to perform Vault unseal
+  recovery.
+- [x] `abhaile-vault-unseal.service` orders after `vault.service` and `network-online.target` on
+  the Vault host.
+- [x] Rootless `vault-agent.service` does not depend on `abhaile-vault-unseal.service`.
 - [x] GitOps runner unit and timer are authored in common host composition and render for every
   managed host.
 - [x] GitOps runner unit and timer are moved to host `composition.systemd`.

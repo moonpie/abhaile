@@ -39,8 +39,8 @@ Each containerized service gets a deterministic /32 address on ipvlan-l2. See [I
 
 ```mermaid
 flowchart LR
-    S[sealed artifacts\nconfig/bootstrap/sealed/] -->|sops decrypt| B[bootstrap]
-    B -->|seed token| VA[vault-agent]
+    S[sealed artifacts\nsecrets/<host>/] -->|sops decrypt| B[bootstrap/recovery]
+    B -->|AppRole files| VA[vault-agent]
     VA -->|templates| R[runtime secrets\n/srv/vault/agent/out/]
     R -->|path watch| SVC[services]
 ```
