@@ -86,6 +86,18 @@ class TestBootstrapPreflight:
         )
         assert result.returncode == 0, f"Syntax error: {result.stderr}"
 
+    def test_pipe_to_bash_reaches_preflight(self) -> None:
+        """Bootstrap supports curl-bash execution from stdin."""
+        result = subprocess.run(
+            ["bash", "-s", "--", "deimos"],
+            input=BOOTSTRAP_SCRIPT.read_text(encoding="utf-8"),
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "BASH_SOURCE" not in result.stderr
+        assert "Must run as root" in result.stdout
+
     def test_vault_cli_installer_uses_defined_ephemeral_helper(self) -> None:
         """Vault CLI install path uses the defined ephemeral directory helper."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")

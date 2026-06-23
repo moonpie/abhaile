@@ -573,6 +573,7 @@ main() {
     exit 0
 }
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+_bootstrap_source="${BASH_SOURCE[0]:-}"
+if [[ -z "$_bootstrap_source" || "$_bootstrap_source" == "$0" ]]; then
     main "$@"
 fi
