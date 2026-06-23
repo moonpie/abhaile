@@ -1,8 +1,20 @@
 id: sops
-name: "Install latest SOPS binary"
-description: "Download the newest SOPS release from GitHub and install it into /usr/local/bin"
+name: "Install SOPS binary"
+description: "Download pinned SOPS release from GitHub, verify checksum, and install it into /usr/local/bin"
 commands:
-  - 'SOPS_VER=$(curl -s https://api.github.com/repos/getsops/sops/releases/latest | jq -r .tag_name)'
-  - 'echo "Installing SOPS ${SOPS_VER}"'
-  - 'sudo curl -Lo /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/${SOPS_VER}/sops-${SOPS_VER}.linux.amd64"'
-  - 'sudo chmod 0755 /usr/local/bin/sops'
+  - |
+    sudo bash -euo pipefail -c '
+      SOPS_VER=v3.13.1
+      SOPS_SHA256=620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a
+      echo "Installing SOPS ${SOPS_VER}"
+      tmpfile=$(mktemp)
+      trap '"'"'rm -f "$tmpfile"'"'"' EXIT
+      curl -fsSL -o "$tmpfile" "https://github.com/getsops/sops/releases/download/${SOPS_VER}/sops-${SOPS_VER}.linux.amd64"
+      actual_sha=$(sha256sum "$tmpfile" | awk '"'"'{print $1}'"'"')
+      if [ "$actual_sha" != "$SOPS_SHA256" ]; then
+        echo "sops checksum mismatch: expected=${SOPS_SHA256} actual=${actual_sha}" >&2
+        exit 1
+      fi
+      install -m 0755 "$tmpfile" /usr/local/bin/sops
+    '
+  - '/usr/local/bin/sops --version'

@@ -77,6 +77,25 @@ class TestBootstrapPreflight:
         assert result.returncode == 0
         assert result.stdout == "http://vault.svc.abhaile.home.arpa:8200"
 
+    def test_sops_checksum_matches_pinned_release(self) -> None:
+        """Bootstrap pins the verified SOPS release checksum."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'readonly SOPS_VERSION="v3.13.1"' in script
+        expected_sha = (
+            'readonly SOPS_SHA256="'
+            "620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a"
+            '"'
+        )
+        assert expected_sha in script
+
+    def test_vault_cli_installer_verifies_checksum(self) -> None:
+        """Vault CLI install verifies the HashiCorp release checksum."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'readonly VAULT_VERSION="1.21.4"' in script
+        assert "vault_${VAULT_VERSION}_SHA256SUMS" in script
+        assert "sha256sum -c -" in script
+        assert "Vault CLI checksum verification failed" in script
+
     def test_script_syntax_valid(self) -> None:
         """Bootstrap script has valid bash syntax."""
         result = subprocess.run(

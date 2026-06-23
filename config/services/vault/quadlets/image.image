@@ -1,2 +1,2 @@
 [Image]
-Image=docker.io/hashicorp/vault:1.21
+Image=docker.io/hashicorp/vault:1.21.4

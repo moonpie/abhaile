@@ -6,11 +6,10 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-readonly SOPS_VERSION="v3.9.4"
-readonly SOPS_SHA256="4540307a0889c4e4bcbec4079b67050b4e49e9937e7a0543a40cb2e33e63a596"
+readonly SOPS_VERSION="v3.13.1"
+readonly SOPS_SHA256="620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a"
 readonly SOPS_URL="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
-readonly VAULT_VERSION="1.21"
-readonly VAULT_RELEASE_API="https://api.releases.hashicorp.com/v1/releases/vault/${VAULT_VERSION}?license_class=oss"
+readonly VAULT_VERSION="1.21.4"
 
 readonly REPO_URL="${ABHAILE_REPO_URL:-git@github.com:moonpie/abhaile.git}"
 readonly REPO_DIR="/opt/abhaile"
@@ -185,27 +184,26 @@ install_vault_cli() {
 
     log "Installing Vault CLI ${VAULT_VERSION}"
 
-    local vault_release
-    vault_release=$(curl -fsSL "$VAULT_RELEASE_API" | jq -r .version)
-
-    local version_regex
-    version_regex="^${VAULT_VERSION//./\\.}(\\.[0-9]+)?$"
-    if [[ ! "$vault_release" =~ $version_regex ]]; then
-        die "Unexpected Vault release version from HashiCorp API: ${vault_release}"
-    fi
-
     create_ephemeral_dir
     local vault_zip="${_ephemeral_dir}/vault.zip"
+    local vault_shasums="${_ephemeral_dir}/vault_SHA256SUMS"
     local vault_bin="${_ephemeral_dir}/vault"
 
     curl -fsSL -o "$vault_zip" \
-        "https://releases.hashicorp.com/vault/${vault_release}/vault_${vault_release}_linux_amd64.zip"
+        "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip"
+    curl -fsSL -o "$vault_shasums" \
+        "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_SHA256SUMS"
+    (
+        cd "$_ephemeral_dir"
+        grep "vault_${VAULT_VERSION}_linux_amd64.zip" "$vault_shasums" |
+            sha256sum -c -
+    ) || die "Vault CLI checksum verification failed"
     unzip -p "$vault_zip" vault >"$vault_bin"
     install -m 0755 "$vault_bin" /usr/local/bin/vault
-    rm -f "$vault_zip" "$vault_bin"
+    rm -f "$vault_zip" "$vault_shasums" "$vault_bin"
 
     /usr/local/bin/vault version >/dev/null
-    log "Vault CLI ${vault_release} installed"
+    log "Vault CLI ${VAULT_VERSION} installed"
 }
 
 # --- Stage 1: Preflight -----------------------------------------------------
