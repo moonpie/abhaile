@@ -138,7 +138,9 @@ class TestBootstrapPreflight:
     def test_bootstrap_installs_project_entrypoints(self) -> None:
         """Bootstrap installs Abhaile into the venv before invoking CLI entrypoints."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
-        assert 'pip" install --quiet --editable "${REPO_DIR}"' in script
+        assert "Python dependencies already installed" in script
+        assert "--no-build-isolation --no-deps" in script
+        assert 'pip" install --quiet --no-build-isolation --no-deps \\' in script
         assert '"${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname"' in script
         assert '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"' in script
 

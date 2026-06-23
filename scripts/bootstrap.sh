@@ -354,10 +354,16 @@ stage_repo_and_env() {
         python3 -m venv "${REPO_DIR}/.venv"
     fi
 
-    log "Installing Python dependencies"
-    "${REPO_DIR}/.venv/bin/pip" install --quiet --upgrade pip
-    "${REPO_DIR}/.venv/bin/pip" install --quiet -r "${REPO_DIR}/requirements.txt"
-    "${REPO_DIR}/.venv/bin/pip" install --quiet --editable "${REPO_DIR}"
+    if "${REPO_DIR}/.venv/bin/python" -c "import jinja2, jsonschema, yaml" 2>/dev/null; then
+        log "Python dependencies already installed"
+    else
+        log "Installing Python dependencies"
+        "${REPO_DIR}/.venv/bin/pip" install --quiet -r "${REPO_DIR}/requirements.txt"
+    fi
+
+    log "Installing Abhaile entrypoints"
+    "${REPO_DIR}/.venv/bin/pip" install --quiet --no-build-isolation --no-deps \
+        --editable "${REPO_DIR}"
 
     # Ensure CLI entrypoints are on PATH
     export PATH="${REPO_DIR}/.venv/bin:${PATH}"
