@@ -32,6 +32,7 @@ composition:
       - unzip
       - age
       - jq
+      - bind9-utils
     downloads:
       - sops
       - vault-cli

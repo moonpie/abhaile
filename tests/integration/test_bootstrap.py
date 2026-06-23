@@ -130,6 +130,11 @@ class TestBootstrapPreflight:
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert "systemd-container" in script
 
+    def test_bootstrap_installs_coredns_validation_tooling(self) -> None:
+        """Bootstrap installs bind tooling before first CoreDNS zone apply."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "bind9-utils" in script
+
     def test_bootstrap_installs_project_entrypoints(self) -> None:
         """Bootstrap installs Abhaile into the venv before invoking CLI entrypoints."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")

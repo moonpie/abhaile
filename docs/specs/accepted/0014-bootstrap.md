@@ -85,9 +85,9 @@ The script performs these stages in order, aborting on any failure:
 #### Stage 2 — Prerequisites
 
 1. Install base packages: `git`, `python3`, `python3-venv`, `podman`, `crun`, `age`, `jq`,
-   `curl`, `unzip`, and `systemd-container`.
+   `curl`, `unzip`, `systemd-container`, and `bind9-utils`.
 1. Install `sops` binary (from GitHub release, pinned version, verified checksum).
-1. Install Vault CLI binary (from HashiCorp release, pinned minor version).
+1. Install Vault CLI binary (from HashiCorp release, pinned version, verified checksum).
 1. Enable `systemd-networkd` and `systemd-resolved`.
 
 #### Stage 3 — User and Credential Validation

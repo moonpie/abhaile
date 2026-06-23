@@ -112,6 +112,10 @@ class TestRenderApplyE2E:
         assert not (deimos_root / "system/opt/abhaile/tools/bash/vault-unseal.sh").exists()
 
         for rendered_root in (phobos_root, deimos_root):
+            packages = (
+                (rendered_root / "software/packages.txt").read_text(encoding="utf-8").splitlines()
+            )
+            assert "bind9-utils" in packages
             runner_unit = rendered_root / "system/etc/systemd/system/abhaile-runner.service"
             assert runner_unit.exists()
             assert "Environment=PATH=/opt/abhaile/.venv/bin:" in runner_unit.read_text(

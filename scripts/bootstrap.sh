@@ -243,7 +243,9 @@ stage_preflight() {
 stage_prerequisites() {
     log "=== Stage 2: Prerequisites ==="
 
-    local packages=(git python3 python3-venv podman crun age jq curl unzip systemd-container)
+    local packages=(
+        git python3 python3-venv podman crun age jq curl unzip systemd-container bind9-utils
+    )
     local to_install=()
 
     for pkg in "${packages[@]}"; do
