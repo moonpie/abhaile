@@ -355,6 +355,7 @@ stage_repo_and_env() {
     log "Installing Python dependencies"
     "${REPO_DIR}/.venv/bin/pip" install --quiet --upgrade pip
     "${REPO_DIR}/.venv/bin/pip" install --quiet -r "${REPO_DIR}/requirements.txt"
+    "${REPO_DIR}/.venv/bin/pip" install --quiet --editable "${REPO_DIR}"
 
     # Ensure CLI entrypoints are on PATH
     export PATH="${REPO_DIR}/.venv/bin:${PATH}"
@@ -494,11 +495,11 @@ stage_render_apply() {
 
     # Render
     log "Running abhaile-render --host ${hostname}"
-    abhaile-render --host "$hostname" --output "$OUTPUT_DIR"
+    "${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname" --output "$OUTPUT_DIR"
 
     # Apply
     log "Running abhaile-apply (live)"
-    abhaile-apply --host "$hostname" --output "$OUTPUT_DIR"
+    "${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname" --output "$OUTPUT_DIR"
 
     # Wait for Vault Agent .ready sentinel
     log "Waiting for Vault Agent ready sentinel (timeout=${BOOTSTRAP_READY_TIMEOUT}s)"

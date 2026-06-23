@@ -183,6 +183,7 @@ This is the recommended path when replacing manual service management with GitOp
 
    ```bash
    /opt/abhaile/.venv/bin/pip install -r /opt/abhaile/requirements.txt
+   /opt/abhaile/.venv/bin/pip install --editable /opt/abhaile
    ```
 
 1. Render the host.

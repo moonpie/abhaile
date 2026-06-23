@@ -130,6 +130,13 @@ class TestBootstrapPreflight:
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert "systemd-container" in script
 
+    def test_bootstrap_installs_project_entrypoints(self) -> None:
+        """Bootstrap installs Abhaile into the venv before invoking CLI entrypoints."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'pip" install --quiet --editable "${REPO_DIR}"' in script
+        assert '"${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname"' in script
+        assert '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"' in script
+
     def test_deploy_key_is_mandatory_for_repo_access(self) -> None:
         """Bootstrap does not advertise an unimplemented repo-token fallback."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")

@@ -79,6 +79,15 @@ def _run_runner(
 class TestRunnerExitCodes:
     """Test runner exit code paths."""
 
+    def test_runner_uses_venv_entrypoints(self) -> None:
+        """Runner invokes render/apply from the repository venv."""
+        script = RUNNER_SCRIPT.read_text(encoding="utf-8")
+        assert 'readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"' in script
+        assert 'readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"' in script
+        assert 'readonly ABHAILE_APPLY="${ABHAILE_VENV_BIN}/abhaile-apply"' in script
+        assert '"$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT"' in script
+        assert 'sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT"' in script
+
     def test_unknown_host_exits_3(self, runner_repo: Path) -> None:
         """Runner exits 3 when hostname not in mapping.yaml."""
         # Covered by test_host_validation_rejects_unknown_host which tests

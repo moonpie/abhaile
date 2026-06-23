@@ -104,7 +104,8 @@ The script performs these stages in order, aborting on any failure:
 
 1. Clone repo to `/opt/abhaile` (or pull if directory exists for re-run idempotency).
 1. Checkout target branch (default: `main`).
-1. Create Python venv at `/opt/abhaile/.venv`, install `requirements.txt`.
+1. Create Python venv at `/opt/abhaile/.venv`, install `requirements.txt`, and install the
+   project into the venv.
 
 #### Stage 5 — Configuration Validation
 
@@ -123,8 +124,9 @@ The script performs these stages in order, aborting on any failure:
 
 1. Enable user lingering for `abhaile` user (`loginctl enable-linger abhaile`) — required
    before apply can manage rootless quadlets (vault-agent runs as `podman.user: abhaile`).
-1. Run `abhaile-render --host <hostname> --output /var/lib/abhaile`.
-1. Run `abhaile-apply --host <hostname> --output /var/lib/abhaile` (live apply, not dry-run).
+1. Run `/opt/abhaile/.venv/bin/abhaile-render --host <hostname> --output /var/lib/abhaile`.
+1. Run `/opt/abhaile/.venv/bin/abhaile-apply --host <hostname> --output /var/lib/abhaile`
+   (live apply, not dry-run).
 1. Abort on failure with clear error and state summary.
 1. Wait for Vault Agent `.ready` sentinel at `/srv/vault/agent/out/.ready` with configurable
    timeout (default 60s, polling interval 2s). If timeout expires, log warning but do not

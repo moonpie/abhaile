@@ -112,7 +112,11 @@ class TestRenderApplyE2E:
         assert not (deimos_root / "system/opt/abhaile/tools/bash/vault-unseal.sh").exists()
 
         for rendered_root in (phobos_root, deimos_root):
-            assert (rendered_root / "system/etc/systemd/system/abhaile-runner.service").exists()
+            runner_unit = rendered_root / "system/etc/systemd/system/abhaile-runner.service"
+            assert runner_unit.exists()
+            assert "Environment=PATH=/opt/abhaile/.venv/bin:" in runner_unit.read_text(
+                encoding="utf-8"
+            )
             assert (rendered_root / "system/etc/systemd/system/abhaile-runner.timer").exists()
             vault_agent_unit = (
                 rendered_root

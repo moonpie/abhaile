@@ -7,11 +7,14 @@ set -euo pipefail
 readonly ABHAILE_BRANCH="${ABHAILE_BRANCH:-main}"
 readonly ABHAILE_REMOTE="${ABHAILE_REMOTE:-origin}"
 readonly ABHAILE_OUTPUT="${ABHAILE_OUTPUT:-/var/lib/abhaile}"
+readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"
 ABHAILE_VERBOSE="${ABHAILE_VERBOSE:-0}"
 readonly RUNNER_STATE_DIR="${ABHAILE_OUTPUT}/runner"
 readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
 readonly LAST_COMMIT_FILE="${RUNNER_STATE_DIR}/last-successful-commit"
 readonly LAST_STATUS_FILE="${RUNNER_STATE_DIR}/last-run-status"
+readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"
+readonly ABHAILE_APPLY="${ABHAILE_VENV_BIN}/abhaile-apply"
 
 log() { printf '[abhaile-runner] %s\n' "$*"; }
 die() { log "FATAL: $*"; exit 1; }
@@ -99,7 +102,7 @@ do_render() {
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
     log "render: host=${host} output=${ABHAILE_OUTPUT}"
-    abhaile-render --host "$host" --output "$ABHAILE_OUTPUT" $verbose_flag
+    "$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT" $verbose_flag
 }
 
 do_apply() {
@@ -107,7 +110,7 @@ do_apply() {
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
     log "apply: output=${ABHAILE_OUTPUT}"
-    sudo abhaile-apply --output "$ABHAILE_OUTPUT" $verbose_flag
+    sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT" $verbose_flag
 }
 
 return_to_branch() {

@@ -9,7 +9,7 @@ ExecStart=/opt/abhaile/scripts/abhaile-runner
 User=abhaile
 Group=abhaile
 WorkingDirectory=/opt/abhaile
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/opt/abhaile/.venv/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-/etc/abhaile/runner.env
 StandardOutput=journal
 StandardError=journal

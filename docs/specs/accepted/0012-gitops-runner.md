@@ -75,8 +75,8 @@ Pipeline steps executed in order:
 1. **Fetch** — `git fetch origin` from the configured remote/branch.
 1. **Detect** — compare fetched HEAD against last-applied commit; skip if equal.
 1. **Checkout** — update working tree to fetched HEAD (fast-forward only).
-1. **Render** — invoke `abhaile-render --host $(hostname -s) --output $ABHAILE_OUTPUT`.
-1. **Apply** — invoke `sudo abhaile-apply --output $ABHAILE_OUTPUT` (live mode, not dry-run).
+1. **Render** — invoke `.venv/bin/abhaile-render --host $(hostname -s) --output $ABHAILE_OUTPUT`.
+1. **Apply** — invoke `sudo .venv/bin/abhaile-apply --output $ABHAILE_OUTPUT` (live mode, not dry-run).
 1. **Record** — on success, write the applied commit SHA to runner state.
 1. **Release lock**.
 
@@ -190,7 +190,7 @@ ExecStart=/opt/abhaile/scripts/abhaile-runner
 User=abhaile
 Group=abhaile
 WorkingDirectory=/opt/abhaile
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=PATH=/opt/abhaile/.venv/bin:/usr/local/bin:/usr/bin:/bin
 EnvironmentFile=-/etc/abhaile/runner.env
 StandardOutput=journal
 StandardError=journal
@@ -222,9 +222,9 @@ Design choices:
 - No `ExecStartPre` lock — locking is owned by the runner itself (see below)
   so manual invocations are equally protected.
 - The service user is `abhaile` (unprivileged for git/render); apply is
-  invoked via `sudo abhaile-apply` since apply requires root to place files
-  and reload systemd. A sudoers rule grants `abhaile` passwordless access to
-  `abhaile-apply` only.
+  invoked via `sudo /opt/abhaile/.venv/bin/abhaile-apply` since apply requires
+  root to place files and reload systemd. A sudoers rule grants `abhaile`
+  passwordless access to `abhaile-apply` only.
 - `EnvironmentFile` allows operator overrides (branch, remote, log level)
   without editing the unit.
 
@@ -341,7 +341,8 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 - Rationale: Single known location simplifies the runner, sudoers, and operator expectations. Bootstrap owns initial placement.
 
-- Impact: Runner script operates on `$PWD` (set by systemd); no path logic in the script itself.
+- Impact: Runner script resolves venv entrypoints from `$PWD/.venv/bin` by default; systemd
+  sets `$PWD` with `WorkingDirectory=/opt/abhaile`.
 
 - ADR: null
 
@@ -349,7 +350,7 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 - Rationale: Minimal privilege surface; apply already owns all OS mutations internally.
 
-- Impact: One sudoers line: `abhaile ALL=(root) NOPASSWD: /usr/local/bin/abhaile-apply *`
+- Impact: One sudoers line: `abhaile ALL=(root) NOPASSWD: /opt/abhaile/.venv/bin/abhaile-apply *`
 
 - ADR: null
 
