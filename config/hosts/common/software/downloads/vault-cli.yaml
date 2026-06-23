@@ -6,17 +6,18 @@ commands:
     sudo bash -euo pipefail -c '
       VAULT_VER=1.21.4
       echo "Installing Vault ${VAULT_VER}"
-      release_url="https://releases.hashicorp.com/vault/${VAULT_VER}/vault_${VAULT_VER}_linux_amd64.zip"
+      vault_zip="vault_${VAULT_VER}_linux_amd64.zip"
+      release_url="https://releases.hashicorp.com/vault/${VAULT_VER}/${vault_zip}"
       shasums_url="https://releases.hashicorp.com/vault/${VAULT_VER}/vault_${VAULT_VER}_SHA256SUMS"
       tmpdir=$(mktemp -d)
       trap '"'"'rm -rf "$tmpdir"'"'"' EXIT
-      curl -fLo "$tmpdir/vault.zip" "$release_url"
+      curl -fLo "$tmpdir/$vault_zip" "$release_url"
       curl -fLo "$tmpdir/vault_SHA256SUMS" "$shasums_url"
       (
         cd "$tmpdir"
-        grep "vault_${VAULT_VER}_linux_amd64.zip" vault_SHA256SUMS | sha256sum -c -
+        grep "$vault_zip" vault_SHA256SUMS | sha256sum -c -
       )
-      unzip -p "$tmpdir/vault.zip" vault >"$tmpdir/vault"
+      unzip -p "$tmpdir/$vault_zip" vault >"$tmpdir/vault"
       install -m 0755 "$tmpdir/vault" /usr/local/bin/vault
     '
   - '/usr/local/bin/vault version'

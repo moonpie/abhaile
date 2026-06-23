@@ -185,18 +185,18 @@ install_vault_cli() {
     log "Installing Vault CLI ${VAULT_VERSION}"
 
     create_ephemeral_dir
-    local vault_zip="${_ephemeral_dir}/vault.zip"
+    local vault_zip_name="vault_${VAULT_VERSION}_linux_amd64.zip"
+    local vault_zip="${_ephemeral_dir}/${vault_zip_name}"
     local vault_shasums="${_ephemeral_dir}/vault_SHA256SUMS"
     local vault_bin="${_ephemeral_dir}/vault"
 
     curl -fsSL -o "$vault_zip" \
-        "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip"
+        "https://releases.hashicorp.com/vault/${VAULT_VERSION}/${vault_zip_name}"
     curl -fsSL -o "$vault_shasums" \
         "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_SHA256SUMS"
     (
         cd "$_ephemeral_dir"
-        grep "vault_${VAULT_VERSION}_linux_amd64.zip" "$vault_shasums" |
-            sha256sum -c -
+        grep "$vault_zip_name" "$vault_shasums" | sha256sum -c -
     ) || die "Vault CLI checksum verification failed"
     unzip -p "$vault_zip" vault >"$vault_bin"
     install -m 0755 "$vault_bin" /usr/local/bin/vault
@@ -261,7 +261,10 @@ stage_prerequisites() {
     fi
 
     # Install sops (pinned version with checksum)
-    if [[ -x /usr/local/bin/sops ]] && /usr/local/bin/sops --version 2>/dev/null | grep -q "${SOPS_VERSION#v}"; then
+    if [[ -x /usr/local/bin/sops ]] &&
+        /usr/local/bin/sops --version 2>/dev/null |
+            head -n 1 |
+            grep -qx "sops ${SOPS_VERSION#v}"; then
         log "sops ${SOPS_VERSION} already installed"
     else
         log "Installing sops ${SOPS_VERSION}"

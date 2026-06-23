@@ -81,6 +81,7 @@ class TestBootstrapPreflight:
         """Bootstrap pins the verified SOPS release checksum."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert 'readonly SOPS_VERSION="v3.13.1"' in script
+        assert 'grep -qx "sops ${SOPS_VERSION#v}"' in script
         expected_sha = (
             'readonly SOPS_SHA256="'
             "620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a"
@@ -92,6 +93,7 @@ class TestBootstrapPreflight:
         """Vault CLI install verifies the HashiCorp release checksum."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert 'readonly VAULT_VERSION="1.21.4"' in script
+        assert 'local vault_zip_name="vault_${VAULT_VERSION}_linux_amd64.zip"' in script
         assert "vault_${VAULT_VERSION}_SHA256SUMS" in script
         assert "sha256sum -c -" in script
         assert "Vault CLI checksum verification failed" in script
