@@ -147,7 +147,7 @@ resolve_secret_id_handoff() {
     local unwrap_response=""
     local secret_id=""
 
-    if unwrap_response=$(VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$handoff" \
+    if unwrap_response=$(env VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$handoff" \
         /usr/local/bin/vault unwrap -format=json 2>/dev/null); then
         secret_id=$(printf '%s' "$unwrap_response" | python3 -c "
 import json, sys

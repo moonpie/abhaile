@@ -244,6 +244,7 @@ class TestBootstrapPreflight:
     def test_bootstrap_supports_response_wrapped_secret_id(self) -> None:
         """Bootstrap unwraps by default and requires opt-in for direct SecretID fallback."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'env VAULT_ADDR="$VAULT_ADDR" VAULT_TOKEN="$handoff"' in script
         assert "vault unwrap -format=json" in script
         assert "BOOTSTRAP_DIRECT_SECRET_ID" in script
         assert "direct SecretID recovery requires BOOTSTRAP_DIRECT_SECRET_ID=1" in script
