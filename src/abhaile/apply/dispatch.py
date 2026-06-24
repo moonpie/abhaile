@@ -396,6 +396,7 @@ def _run_caddy_owner_actions(
 ) -> list[dict[str, object]]:
     """Run phase 7.5 Caddy actions for changed entries."""
     owner_results: list[dict[str, object]] = []
+    initial_deploy_segments = _caddy_segments_with_container_writes(writes)
 
     for action in writes:
         kind = action.get("kind")
@@ -412,7 +413,12 @@ def _run_caddy_owner_actions(
             "apply_hints": action.get("apply_hints"),
         }
 
-        summary = CaddyExecutor.apply_config_write(entry, target_path)
+        segment = CaddyExecutor.segment_from_owner_or_target(owner_ref, target_path)
+        summary = CaddyExecutor.apply_config_write(
+            entry,
+            target_path,
+            allow_missing_container=segment in initial_deploy_segments,
+        )
         owner_results.append(
             {
                 "phase": "write",
@@ -437,7 +443,12 @@ def _run_caddy_owner_actions(
             "owner_ref": owner_ref,
             "apply_hints": removal.get("apply_hints"),
         }
-        summary = CaddyExecutor.apply_config_write(entry, target_path)
+        segment = CaddyExecutor.segment_from_owner_or_target(owner_ref, target_path)
+        summary = CaddyExecutor.apply_config_write(
+            entry,
+            target_path,
+            allow_missing_container=segment in initial_deploy_segments,
+        )
         owner_results.append(
             {
                 "phase": "remove",
@@ -450,6 +461,21 @@ def _run_caddy_owner_actions(
 
     LOG.debug("dispatch.caddy results=%d", len(owner_results))
     return owner_results
+
+
+def _caddy_segments_with_container_writes(writes: list[dict[str, object]]) -> set[str]:
+    """Return Caddy segments whose container quadlet is being written."""
+    segments: set[str] = set()
+    for action in writes:
+        kind = action.get("kind")
+        owner_ref = action.get("owner_ref")
+        if kind != "quadlet.container" or not isinstance(owner_ref, str):
+            continue
+        if not owner_ref.startswith("unit:caddy-") or not owner_ref.endswith(".service"):
+            continue
+        unit_name = owner_ref.split(":", 1)[1]
+        segments.add(unit_name.removeprefix("caddy-").removesuffix(".service"))
+    return segments
 
 
 def _run_vault_owner_actions(

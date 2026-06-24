@@ -152,6 +152,55 @@ class TestCaddyOwnerActionsRemovals:
     """Tests for caddy removal branch."""
 
     @patch("abhaile.apply.dispatch.CaddyExecutor.apply_config_write")
+    def test_caddy_write_allows_missing_container_for_same_apply_container_write(
+        self, mock_write: Any
+    ) -> None:
+        mock_write.return_value = {
+            "kind": "caddy.config",
+            "actions": [{"action": "reload", "success": True, "return_code": 0}],
+        }
+
+        writes: list[dict[str, object]] = [
+            {
+                "kind": "caddy.config",
+                "target_path": "/srv/caddy/dmz/Caddyfile",
+                "owner_ref": "caddy:dmz",
+            },
+            {
+                "kind": "quadlet.container",
+                "target_path": "/etc/containers/systemd/caddy-dmz.container",
+                "owner_ref": "unit:caddy-dmz.service",
+            },
+        ]
+
+        results = _run_caddy_owner_actions(writes, [])
+
+        assert len(results) == 1
+        assert mock_write.call_args.kwargs == {"allow_missing_container": True}
+
+    @patch("abhaile.apply.dispatch.CaddyExecutor.apply_config_write")
+    def test_caddy_write_does_not_allow_missing_container_without_container_write(
+        self, mock_write: Any
+    ) -> None:
+        mock_write.return_value = {
+            "kind": "caddy.config",
+            "actions": [{"action": "reload", "success": True, "return_code": 0}],
+        }
+
+        writes: list[dict[str, object]] = [
+            {
+                "kind": "caddy.config",
+                "target_path": "/srv/caddy/internal/Caddyfile",
+                "owner_ref": "caddy:internal",
+            }
+        ]
+
+        results = _run_caddy_owner_actions(writes, [])
+
+        assert len(results) == 1
+        assert mock_write.call_args.kwargs == {"allow_missing_container": False}
+
+    @patch("abhaile.apply.dispatch.CaddyExecutor.apply_config_write")
     def test_caddy_removal_dispatches(self, mock_write: Any) -> None:
         mock_write.return_value = {
             "kind": "caddy.config",

@@ -67,6 +67,23 @@ class CaddyExecutor:
         ]
 
     @staticmethod
+    def _container_exists_argv(segment: str) -> list[str]:
+        podman = shutil.which("podman")
+        if podman is None:
+            raise ApplyError("podman is required for caddy config validation")
+        return [podman, "container", "exists", f"systemd-caddy-{segment}"]
+
+    @staticmethod
+    def caddy_container_exists(segment: str) -> ExecutionResult:
+        """Check whether the segment container exists."""
+        return run_command(
+            CaddyExecutor._container_exists_argv(segment),
+            action_id=f"container-exists-caddy:{segment}",
+            action_type="validation",
+            check=False,
+        )
+
+    @staticmethod
     def validate_caddy_config(
         segment: str,
         *,
@@ -107,7 +124,12 @@ class CaddyExecutor:
         return run_systemctl_command("try-restart", f"caddy-{segment}.service")
 
     @staticmethod
-    def apply_config_write(entry: dict[str, Any], target_path: str) -> dict[str, Any]:
+    def apply_config_write(
+        entry: dict[str, Any],
+        target_path: str,
+        *,
+        allow_missing_container: bool = False,
+    ) -> dict[str, Any]:
         """Apply runtime step for caddy.config writes/removals."""
         owner_ref = str(entry.get("owner_ref", ""))
         segment = CaddyExecutor.segment_from_owner_or_target(owner_ref, target_path)
@@ -116,6 +138,33 @@ class CaddyExecutor:
         if not isinstance(apply_hints, dict):
             apply_hints = {}
         restart_on_failure = bool(apply_hints.get("restart_on_failure"))
+
+        container_exists = CaddyExecutor.caddy_container_exists(segment)
+        if not container_exists.success:
+            if not allow_missing_container:
+                raise ApplyError(
+                    f"Caddy container 'systemd-caddy-{segment}' is required for validation"
+                )
+            return {
+                "kind": entry.get("kind", "caddy.config"),
+                "segment": segment,
+                "actions": [
+                    {
+                        "action": "validate-caddy",
+                        "success": True,
+                        "return_code": None,
+                        "skipped": True,
+                        "reason": "container missing during initial deployment",
+                    },
+                    {
+                        "action": "reload-caddy",
+                        "success": True,
+                        "return_code": None,
+                        "skipped": True,
+                        "reason": "container missing during initial deployment",
+                    },
+                ],
+            }
 
         validate = CaddyExecutor.validate_caddy_config(segment, strict=True)
         reload_result = CaddyExecutor.reload_caddy_config(segment, check=False)

@@ -49,6 +49,16 @@ class TestCaddyExecutor:
 
     def test_apply_config_write_reloads_when_validation_passes(self, mocker: Any) -> None:
         """caddy.config write should validate then reload."""
+        mocker.patch.object(
+            CaddyExecutor,
+            "caddy_container_exists",
+            return_value=ExecutionResult(
+                action_id="container-exists-caddy:dmz",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
+        )
         mock_validate = mocker.patch.object(
             CaddyExecutor,
             "validate_caddy_config",
@@ -85,8 +95,76 @@ class TestCaddyExecutor:
         mock_validate.assert_called_once_with("dmz", strict=True)
         mock_reload.assert_called_once_with("dmz", check=False)
 
+    def test_apply_config_write_skips_validation_for_initial_deploy_missing_container(
+        self, mocker: Any
+    ) -> None:
+        """Initial deployment may stage config before the Caddy container exists."""
+        mocker.patch.object(
+            CaddyExecutor,
+            "caddy_container_exists",
+            return_value=ExecutionResult(
+                action_id="container-exists-caddy:dmz",
+                action_type="validation",
+                success=False,
+                return_code=1,
+            ),
+        )
+        mock_validate = mocker.patch.object(CaddyExecutor, "validate_caddy_config")
+        mock_reload = mocker.patch.object(CaddyExecutor, "reload_caddy_config")
+
+        summary = CaddyExecutor.apply_config_write(
+            {
+                "kind": "caddy.config",
+                "owner_ref": "caddy:dmz",
+            },
+            "/srv/caddy/dmz/Caddyfile",
+            allow_missing_container=True,
+        )
+
+        assert summary["segment"] == "dmz"
+        assert summary["actions"][0]["action"] == "validate-caddy"
+        assert summary["actions"][0]["skipped"] is True
+        assert summary["actions"][1]["action"] == "reload-caddy"
+        assert summary["actions"][1]["skipped"] is True
+        mock_validate.assert_not_called()
+        mock_reload.assert_not_called()
+
+    def test_apply_config_write_missing_container_without_initial_deploy_raises(
+        self, mocker: Any
+    ) -> None:
+        """An unexpectedly missing Caddy container should fail apply."""
+        mocker.patch.object(
+            CaddyExecutor,
+            "caddy_container_exists",
+            return_value=ExecutionResult(
+                action_id="container-exists-caddy:internal",
+                action_type="validation",
+                success=False,
+                return_code=1,
+            ),
+        )
+
+        with pytest.raises(ApplyError, match="systemd-caddy-internal"):
+            CaddyExecutor.apply_config_write(
+                {
+                    "kind": "caddy.config",
+                    "owner_ref": "caddy:internal",
+                },
+                "/srv/caddy/internal/Caddyfile",
+            )
+
     def test_apply_config_write_reload_failure_with_restart_fallback(self, mocker: Any) -> None:
         """When configured, reload failure should fall back to systemd try-restart."""
+        mocker.patch.object(
+            CaddyExecutor,
+            "caddy_container_exists",
+            return_value=ExecutionResult(
+                action_id="container-exists-caddy:internal",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
+        )
         mocker.patch.object(
             CaddyExecutor,
             "validate_caddy_config",
@@ -133,6 +211,16 @@ class TestCaddyExecutor:
 
     def test_apply_config_write_reload_failure_without_fallback_raises(self, mocker: Any) -> None:
         """Without restart_on_failure hint, reload failure should fail apply."""
+        mocker.patch.object(
+            CaddyExecutor,
+            "caddy_container_exists",
+            return_value=ExecutionResult(
+                action_id="container-exists-caddy:dmz",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
+        )
         mocker.patch.object(
             CaddyExecutor,
             "validate_caddy_config",

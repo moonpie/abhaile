@@ -580,7 +580,7 @@ class TestApplyCli:
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
             "abhaile.apply.dispatch.CaddyExecutor.apply_config_write",
-            lambda entry, target_path: {
+            lambda entry, target_path, **_kwargs: {
                 "kind": entry.get("kind", "caddy.config"),
                 "segment": "dmz",
                 "actions": [{"action": "reload-caddy", "success": True, "return_code": 0}],
