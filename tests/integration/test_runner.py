@@ -88,6 +88,16 @@ class TestRunnerExitCodes:
         assert '"$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT"' in script
         assert 'sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT"' in script
 
+    def test_runner_uses_gitops_deploy_key(self) -> None:
+        """Runner selects the non-default Git deploy key for fetches."""
+        script = RUNNER_SCRIPT.read_text(encoding="utf-8")
+        assert (
+            'readonly ABHAILE_GIT_SSH_KEY="${ABHAILE_GIT_SSH_KEY:-/home/abhaile/.ssh/gitops_ed25519}"'
+            in script
+        )
+        assert 'export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -i ${ABHAILE_GIT_SSH_KEY}' in script
+        assert "IdentitiesOnly=yes" in script
+
     def test_unknown_host_exits_3(self, runner_repo: Path) -> None:
         """Runner exits 3 when hostname not in mapping.yaml."""
         # Covered by test_host_validation_rejects_unknown_host which tests

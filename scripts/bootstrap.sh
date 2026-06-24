@@ -612,6 +612,12 @@ stage_render_apply() {
     log "Running abhaile-apply (live)"
     "${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname" --output "$OUTPUT_DIR"
 
+    log "Reloading abhaile user units"
+    systemctl --user -M abhaile@ daemon-reload \
+        || log "WARNING: failed to reload abhaile user units"
+    systemctl --user -M abhaile@ restart vault-agent.service \
+        || log "WARNING: failed to restart vault-agent.service; runner will retry convergence"
+
     # Wait for Vault Agent .ready sentinel
     log "Waiting for Vault Agent ready sentinel (timeout=${BOOTSTRAP_READY_TIMEOUT}s)"
     local waited=0

@@ -335,6 +335,18 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 - ADR: null
 
+- Decision: Runner fetches use the host read-only deploy key at
+  `/home/abhaile/.ssh/gitops_ed25519` by default, overridable with `ABHAILE_GIT_SSH_KEY`
+  or an explicit `GIT_SSH_COMMAND`.
+
+- Rationale: The deploy key is intentionally non-default, so steady-state fetches must select it
+  explicitly just like bootstrap clone/pull operations.
+
+- Impact: Runner does not depend on agent forwarding, default SSH key names, or interactive
+  credentials.
+
+- ADR: null
+
 - Decision: Timer cadence is fixed at 5 minutes in the systemd timer unit; override via `systemctl edit abhaile-runner.timer`.
 
 - Rationale: Timer cadence is a systemd concern. Environment variables can't influence timer intervals without convoluted ExecStartPre hacks.

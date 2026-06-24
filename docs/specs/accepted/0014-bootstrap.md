@@ -136,6 +136,8 @@ The script performs these stages in order, aborting on any failure:
 1. Run `/opt/abhaile/.venv/bin/abhaile-apply --host <hostname> --output /var/lib/abhaile`
    as root (live apply, not dry-run).
 1. Abort on failure with clear error and state summary.
+1. Reload the `abhaile` user manager and restart `vault-agent.service` so newly rendered
+   rootless quadlets and Vault Agent config are active before readiness polling.
 1. Wait for Vault Agent `.ready` sentinel at `/srv/vault/agent/out/.ready` with configurable
    timeout (default 60s, polling interval 2s). If timeout expires, log warning but do not
    abort — runner handles steady-state convergence.

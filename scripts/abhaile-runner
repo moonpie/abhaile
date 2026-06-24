@@ -8,6 +8,7 @@ readonly ABHAILE_BRANCH="${ABHAILE_BRANCH:-main}"
 readonly ABHAILE_REMOTE="${ABHAILE_REMOTE:-origin}"
 readonly ABHAILE_OUTPUT="${ABHAILE_OUTPUT:-/var/lib/abhaile}"
 readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"
+readonly ABHAILE_GIT_SSH_KEY="${ABHAILE_GIT_SSH_KEY:-/home/abhaile/.ssh/gitops_ed25519}"
 ABHAILE_VERBOSE="${ABHAILE_VERBOSE:-0}"
 readonly RUNNER_STATE_DIR="${ABHAILE_OUTPUT}/runner"
 readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
@@ -75,6 +76,9 @@ check_worktree_clean() {
 
 do_fetch() {
     log "fetch: ${ABHAILE_REMOTE}/${ABHAILE_BRANCH}"
+    if [[ -f "$ABHAILE_GIT_SSH_KEY" ]]; then
+        export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -i ${ABHAILE_GIT_SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new}"
+    fi
     if ! git fetch "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"; then
         die "git fetch failed (network/auth issue)"
     fi
