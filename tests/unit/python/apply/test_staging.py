@@ -100,6 +100,15 @@ class TestCopyArtifactForApply:
         # Should not raise or do anything
         _copy_artifact_for_apply(action, tmp_path)
 
+    def test_directory_marker_is_noop_for_non_service_kind(self, tmp_path: Path) -> None:
+        action: dict[str, object] = {
+            "render_path": "system/etc/systemd/network/21-ipvlan-l2.network.d",
+            "target_path": "/etc/systemd/network/21-ipvlan-l2.network.d",
+            "kind": "networkd.network",
+            "is_directory": True,
+        }
+        _copy_artifact_for_apply(action, tmp_path)
+
     def test_regular_artifact_calls_atomic_copy(self, tmp_path: Path) -> None:
         rendered = tmp_path / "rendered"
         rendered.mkdir()

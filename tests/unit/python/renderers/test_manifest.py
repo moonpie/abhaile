@@ -109,6 +109,27 @@ class TestBuildManifest:
         assert "apply_hints" not in entry
         assert "owners" not in manifest
 
+    def test_manifest_serializes_directory_marker(self, tmp_path: Path) -> None:
+        """Directory artifacts include an explicit marker for apply staging."""
+        rendered_dir = tmp_path / "rendered"
+        directory = rendered_dir / "system" / "etc" / "systemd" / "network" / "iface.network.d"
+        directory.mkdir(parents=True)
+
+        collector = ArtifactCollector()
+        collector.register_artifact(
+            render_path="system/etc/systemd/network/iface.network.d",
+            target_path="/etc/systemd/network/iface.network.d",
+            kind="networkd.network",
+            owner_ref="iface:iface",
+            content=b"",
+            is_directory=True,
+        )
+        collector.compute_hashes_and_sizes(rendered_dir)
+
+        manifest = build_manifest("testhost", collector.get_metadata())
+
+        assert manifest["entries"][0]["is_directory"] is True
+
     def test_manifest_requires_hashes_computed(self, tmp_path: Path) -> None:
         """Manifest serialization fails closed when hashes are not computed."""
         rendered_dir = tmp_path / "rendered"

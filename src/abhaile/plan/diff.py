@@ -113,6 +113,7 @@ def _load_manifest(path: Path, *, allow_missing: bool, default_host: str = "") -
         size = item.get("size")
         contributor_ref = item.get("contributor_ref")
         apply_hints = item.get("apply_hints")
+        is_directory = item.get("is_directory")
         if not isinstance(target_path, str) or not target_path:
             raise DiffError(f"Manifest entry missing target_path: {path}")
         if not isinstance(sha256, str) or len(sha256) != 64:
@@ -133,6 +134,8 @@ def _load_manifest(path: Path, *, allow_missing: bool, default_host: str = "") -
             )
         if apply_hints is not None and not isinstance(apply_hints, dict):
             raise DiffError(f"Manifest entry has invalid apply_hints: {path} target={target_path}")
+        if is_directory is not None and not isinstance(is_directory, bool):
+            raise DiffError(f"Manifest entry has invalid is_directory: {path} target={target_path}")
         if not Path(target_path).is_absolute():
             raise DiffError(f"Manifest target_path must be absolute: {path} target={target_path}")
 
@@ -591,6 +594,7 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
                 "kind": desired_entry["kind"],
                 "owner_ref": desired_entry["owner_ref"],
                 "apply_hints": desired_entry.get("apply_hints"),
+                "is_directory": desired_entry.get("is_directory", False),
                 "desired_sha256": desired_entry["sha256"],
                 "live_sha256": live_sha,
                 "reason": reason,

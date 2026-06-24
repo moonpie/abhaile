@@ -93,7 +93,7 @@ def _copy_artifact_for_apply(action: dict[str, object], rendered_dir: Path) -> N
 
     LOG.debug("staging.copy kind=%s target=%s", kind, target_path)
 
-    if kind == "service.directory":
+    if action.get("is_directory") is True or kind == "service.directory":
         return
 
     source = resolve_rendered_source(rendered_dir, render_path)

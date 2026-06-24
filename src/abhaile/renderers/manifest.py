@@ -62,6 +62,8 @@ def _serialize_entries(metadata: RenderMetadata) -> list[dict[str, Any]]:
             entry["contributor_ref"] = artifact.contributor_ref
         if artifact.apply_hints:
             entry["apply_hints"] = artifact.apply_hints
+        if artifact.is_directory:
+            entry["is_directory"] = True
 
         entries.append(entry)
 
