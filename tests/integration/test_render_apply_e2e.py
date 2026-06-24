@@ -111,6 +111,72 @@ class TestRenderApplyE2E:
         assert not deimos_unseal.exists()
         assert not (deimos_root / "system/opt/abhaile/tools/bash/vault-unseal.sh").exists()
 
+        phobos_networkd = phobos_root / "system/etc/systemd/network"
+        deimos_networkd = deimos_root / "system/etc/systemd/network"
+        for networkd_root in (phobos_networkd, deimos_networkd):
+            networkd_content = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in sorted(networkd_root.rglob("*"))
+                if path.is_file()
+            )
+            assert "DNS=172.20.20.235/32" not in networkd_content
+            assert "DNS=172.20.20.236/32" not in networkd_content
+            assert "PreferredSource=172.20.20.20/32" not in networkd_content
+            assert "PreferredSource=172.20.100.20/32" not in networkd_content
+            assert "DNS=172.20.20.235 172.20.20.236" in networkd_content
+
+        phobos_chrony = (phobos_root / "services/chrony-a/etc/chrony/chrony.conf").read_text(
+            encoding="utf-8"
+        )
+        deimos_chrony = (deimos_root / "services/chrony-b/etc/chrony/chrony.conf").read_text(
+            encoding="utf-8"
+        )
+        assert "bindaddress 172.20.20.237/32" not in phobos_chrony
+        assert "peer 172.20.20.238/32" not in phobos_chrony
+        assert "bindaddress 172.20.20.238/32" not in deimos_chrony
+        assert "peer 172.20.20.237/32" not in deimos_chrony
+        assert "bindaddress 172.20.20.237" in phobos_chrony
+        assert "peer 172.20.20.238 iburst" in phobos_chrony
+        assert "bindaddress 172.20.20.238" in deimos_chrony
+        assert "peer 172.20.20.237 iburst" in deimos_chrony
+
+        caddy_dmz_quadlet = (
+            phobos_root / "services/caddy-dmz/etc/containers/systemd/caddy-dmz.container"
+        ).read_text(encoding="utf-8")
+        assert "EnvironmentFile=/srv/vault/agent/out/caddy-dns-desec.env" in caddy_dmz_quadlet
+        assert "EnvironmentFile=/etc/caddy/dns.env" not in caddy_dmz_quadlet
+
+        omada_rebuild = (
+            phobos_root / "services/omada-controller/opt/abhaile/tools/bash/rebuild-omada-cert.sh"
+        )
+        assert omada_rebuild.exists()
+        assert "systemctl restart omada-controller.service" in omada_rebuild.read_text(
+            encoding="utf-8"
+        )
+
+        for rendered_root in (phobos_root, deimos_root):
+            zone_root = (
+                rendered_root / "services/coredns-clean/etc/coredns/zones"
+                if rendered_root == deimos_root
+                else rendered_root / "services/coredns-filtered/etc/coredns/zones"
+            )
+            zones_content = "\n".join(
+                path.read_text(encoding="utf-8")
+                for path in sorted(zone_root.glob("*.zone"))
+                if path.is_file()
+            )
+            assert "ns1    IN CNAME" not in zones_content
+            assert "ns2    IN CNAME" not in zones_content
+            ns1_a = "ns1                      IN    A      172.20.20.235"
+            ns2_a = "ns2                      IN    A      172.20.20.236"
+            first_cname = "phobos                   IN    CNAME  phobos.svc.abhaile.home.arpa."
+            assert ns1_a in zones_content
+            assert ns2_a in zones_content
+            assert zones_content.index(ns1_a) < zones_content.index(first_cname)
+            assert zones_content.index(ns2_a) < zones_content.index(first_cname)
+            assert "\n    10    IN PTR" not in zones_content
+            assert "\n10                       IN    PTR    " in zones_content
+
         for rendered_root in (phobos_root, deimos_root):
             packages = (
                 (rendered_root / "software/packages.txt").read_text(encoding="utf-8").splitlines()

@@ -8,7 +8,7 @@ composition:
     - source:
         template: chrony-common/config/chrony.conf.j2
         variables:
-          bind_ip: '%%network.services.chrony-b.address%%'
-          peer_ip: '%%network.services.chrony-a.address%%'
+          bind_ip: '%%network.services.chrony-b.address | strip_cidr%%'
+          peer_ip: '%%network.services.chrony-a.address | strip_cidr%%'
           stratum: 11
       destination: /etc/chrony/chrony.conf

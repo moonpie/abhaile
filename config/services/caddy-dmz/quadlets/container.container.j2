@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Container]
 DNS={{ network.services['coredns-clean'].address | strip_cidr }}
-EnvironmentFile=/etc/caddy/dns.env
+EnvironmentFile=/srv/vault/agent/out/caddy-dns-desec.env
 Image={{ build }}
 Network={{ network.services[service_name].vlan }}.network
 PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}

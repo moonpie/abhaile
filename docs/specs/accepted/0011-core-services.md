@@ -158,6 +158,8 @@ addresses. coredns-common and chrony-common are composition-only targets
 - Defines `composition.ingress.dmz.base` — aggregation target for DMZ ingress.
 - Custom build with deSEC DNS plugin (`caddy-dmz/build/Containerfile`).
 - Vault-agent template: `caddy-dns-desec.env.ctmpl` for ACME DNS-01 credentials.
+- The container reads the Vault Agent rendered env file directly from
+  `/srv/vault/agent/out/caddy-dns-desec.env`.
 - Systemd path/service: `caddy-dns-desec.path` watches env file for restart.
 - Contributors: omada-controller (dmz-ingress block).
 - DNS-01 via deSEC for `*.abhaile.dedyn.io` public certificates.
@@ -184,7 +186,8 @@ addresses. coredns-common and chrony-common are composition-only targets
 - `composition.include: [coredns-common, coredns-omada]`
 - Corefile template variables: binds to own IP, forwards to blocky at
   `%%network.services.blocky.address%%:8053`.
-- Resolves as `ns1.abhaile.home.arpa` via CNAME.
+- Resolves as `ns1.abhaile.home.arpa` via direct A record because authoritative
+  NS targets must not be CNAMEs.
 
 **coredns-clean** — unfiltered DNS resolver on deimos.
 
@@ -192,7 +195,8 @@ addresses. coredns-common and chrony-common are composition-only targets
 - `composition.include: [coredns-common, coredns-omada]`
 - Corefile template variables: binds to own IP, forwards to upstream
   `9.9.9.9 149.112.112.112 1.1.1.1 1.0.0.1` (no blocky).
-- Resolves as `ns2.abhaile.home.arpa` via CNAME.
+- Resolves as `ns2.abhaile.home.arpa` via direct A record because authoritative
+  NS targets must not be CNAMEs.
 
 **blocky** — DNS-level ad blocking on phobos.
 
@@ -236,8 +240,9 @@ addresses. coredns-common and chrony-common are composition-only targets
 - `podman.user: root`, `podman.network: ipvlan-l2`
 - Static env file at `/etc/omada-controller/omada-controller.env`.
 - Certificate chain rebuild: `rebuild-omada-cert.path` watches Caddy internal
-  CA cert file, triggers `rebuild-omada-cert.service` to concatenate leaf + root
-  CA and restart the controller.
+  CA cert file, triggers `rebuild-omada-cert.service` to run the repo-managed
+  `/opt/abhaile/tools/bash/rebuild-omada-cert.sh`, concatenate leaf + root CA,
+  copy the matching key, and restart the controller.
 - Contributes ingress blocks to both caddy-internal (internal + svc-cert) and
   caddy-dmz (dmz-ingress for hairpin NAT).
 - Named volumes: `cert`, `data`, `logs`, `host-certs`.
@@ -345,8 +350,8 @@ Core services register in two internal zones:
 
 - `svc.abhaile.home.arpa.` — A records pointing to /32 service addresses
   (with PTR for reverse lookups).
-- `abhaile.home.arpa.` — CNAME aliases for user-facing names
-  (e.g., `ns1` → `coredns-filtered.svc.abhaile.home.arpa.`).
+- `abhaile.home.arpa.` — direct A records for `ns1`/`ns2` authoritative
+  nameserver targets, plus CNAME aliases for user-facing names.
 
 caddy-dmz additionally holds the external wildcard:
 

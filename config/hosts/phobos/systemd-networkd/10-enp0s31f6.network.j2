@@ -7,7 +7,7 @@ RequiredForOnline=routable
 [Network]
 Address={{ network.hosts[host_name].interfaces['enp0s31f6'].address }}
 Gateway={{ network.vlans.services.gateway }}
-DNS={{ network.services['coredns-filtered'].address }} {{ network.services['coredns-clean'].address }}
+DNS={{ network.services['coredns-filtered'].address | strip_cidr }} {{ network.services['coredns-clean'].address | strip_cidr }}
 Domains=abhaile.home.arpa
 UseDomains=yes
 VLAN=enp0s31f6.100

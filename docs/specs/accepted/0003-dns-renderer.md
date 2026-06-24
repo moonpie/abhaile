@@ -94,6 +94,13 @@ Template rendering contract (`render_zone_template`):
 - Zone template path format is `service/path/to/template.j2`.
 - Zone serial is required in zone configuration.
 - SOA serial is rendered as `serial.date` + zero-padded two-digit `serial.counter`.
+- Rendered zone files use fixed-width columns for owner, class, type, and data fields to keep
+  output readable and stable.
+- Rendered records are grouped by type in this order: `A`, `AAAA`, `CNAME`, `MX`, `SRV`, `TXT`,
+  `PTR`.
+- Within each record type group, records retain the deterministic collection order: host records
+  in `config/network.yaml` host order, then deployed service records in `config/mapping.yaml`
+  service order, with each host/service preserving its local record order.
 - Missing template path, missing template file, template render failures, or missing serial data raise `RenderError`.
 
 ### SOA Serial Validation

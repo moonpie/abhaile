@@ -1,30 +1,19 @@
 $ORIGIN {{ zone.name }}
 $TTL 300
 
-@   IN SOA ns1.abhaile.home.arpa. hostmaster.abhaile.home.arpa. (
+@                        IN    SOA    ns1.abhaile.home.arpa. hostmaster.abhaile.home.arpa. (
         {{ zone.serial }}
         7200       ; refresh
         3600       ; retry
         1209600    ; expire
         3600 )     ; minimum
-    IN NS ns1.abhaile.home.arpa.
-    IN NS ns2.abhaile.home.arpa.
+@                        IN    NS     ns1.abhaile.home.arpa.
+@                        IN    NS     ns2.abhaile.home.arpa.
 
 
-{% for rec in zone.records %}
-{%     if rec.type == 'A' %}
-    {{ rec.name }}    IN A {{ rec.rdata }}
-{%     elif rec.type == 'AAAA' %}
-    {{ rec.name }}    IN AAAA {{ rec.rdata }}
-{%     elif rec.type == 'CNAME' %}
-    {{ rec.name }}    IN CNAME {{ rec.rdata }}
-{%     elif rec.type == 'TXT' %}
-    {{ rec.name }}    IN TXT "{{ rec.rdata }}"
-{%     elif rec.type == 'MX' %}
-    {{ rec.name }}    IN MX {{ rec.rdata }}
-{%     elif rec.type == 'SRV' %}
-    {{ rec.name }}    IN SRV {{ rec.rdata }}
-{%     elif rec.type == 'PTR' %}
-    {{ rec.name }}    IN PTR {{ rec.rdata }}
-{%     endif %}
+{% for record_type in ['A', 'AAAA', 'CNAME', 'MX', 'SRV', 'TXT', 'PTR'] %}
+{%     for rec in zone.records if rec.type == record_type %}
+{%         set rdata = '"' ~ rec.rdata ~ '"' if rec.type == 'TXT' else rec.rdata %}
+{{ "%-24s %-5s %-6s %s" | format(rec.name, "IN", rec.type, rdata) }}
+{%     endfor %}
 {% endfor %}

@@ -1,3 +1,3 @@
 [Route]
 Destination={{ network.services[service_name].address }}
-PreferredSource={{ network.hosts[host_name].interfaces[interface_name].address }}
+PreferredSource={{ network.hosts[host_name].interfaces[interface_name].address | strip_cidr }}

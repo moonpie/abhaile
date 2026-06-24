@@ -20,33 +20,33 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20260208
+        date: 20260624
         counter: 00
-        content_hash: 1f30b95d34bed91f57d99bb18591d72c4efe7a9cc648ee4d388959b1dcc71012
+        content_hash: b2da49d2184f193bc0d64406a06d4419ecf275fb04d975f6bad64fb3bcee5270
     - name: abhaile.home.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260208
+        date: 20260624
         counter: 00
-        content_hash: 55f4784e31149cd2580b7666bff64abf49838c2410cdd75e76234babb9bc1748
+        content_hash: 9b78482a74c6edcd3132cd8357c7e2a4dcda8dcbee71bb5397b73d4062c5e01b
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260208
+        date: 20260624
         counter: 00
-        content_hash: 771916af8f56aa367ad39d1618e5d79a21ea5b706a69939173771bac5e1c0fe9
+        content_hash: d9a3202ddc7afb10cfa541e3908b543ddbf62e8d04e6323e265011a21363db56
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260208
+        date: 20260624
         counter: 00
-        content_hash: 4b0d98ea561ac53aa7a52f0261bb9b23cca2ea4455920387f39097d0c47e073b
+        content_hash: bc79bb791d775f779472ab2bccd39b8f303c4fdcbf8a93f8e93199868f06ca56
 hosts:
   phobos:
     interfaces:
@@ -410,9 +410,9 @@ services:
             ptr: true
       - zone: abhaile.home.arpa.
         records:
-          - type: cname
+          - type: a
             name: ns1
-            rdata: coredns-filtered.svc.abhaile.home.arpa.
+            rdata: "%%network.services.coredns-filtered.address | strip_cidr%%"
   coredns-clean:
     address: 172.20.20.236/32
     vlan: services
@@ -425,9 +425,9 @@ services:
             ptr: true
       - zone: abhaile.home.arpa.
         records:
-          - type: cname
+          - type: a
             name: ns2
-            rdata: coredns-clean.svc.abhaile.home.arpa.
+            rdata: "%%network.services.coredns-clean.address | strip_cidr%%"
   chrony-a:
     address: 172.20.20.237/32
     vlan: services
