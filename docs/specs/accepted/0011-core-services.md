@@ -241,7 +241,7 @@ addresses. coredns-common and chrony-common are composition-only targets
 - Static env file at `/etc/omada-controller/omada-controller.env`.
 - Certificate chain rebuild: `rebuild-omada-cert.path` watches Caddy internal
   CA cert file, triggers `rebuild-omada-cert.service` to run the repo-managed
-  `/opt/abhaile/tools/bash/rebuild-omada-cert.sh`, concatenate leaf + root CA,
+  `/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh`, concatenate leaf + root CA,
   copy the matching key, and restart the controller.
 - Contributes ingress blocks to both caddy-internal (internal + svc-cert) and
   caddy-dmz (dmz-ingress for hairpin NAT).

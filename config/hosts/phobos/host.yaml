@@ -29,7 +29,7 @@ composition:
       destination: /etc/systemd/network/41-ipvlan-l2.100.network
     - destination: /etc/systemd/network/41-ipvlan-l2.100.network.d/
     - source: phobos/tools/vault-unseal.sh
-      destination: /opt/abhaile/tools/bash/vault-unseal.sh
+      destination: /usr/local/lib/abhaile/tools/vault-unseal.sh
   systemd:
     - source:
         template: phobos/systemd/abhaile-vault-unseal.service.j2

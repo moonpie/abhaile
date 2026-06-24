@@ -8,7 +8,7 @@ Type=oneshot
 Environment=SOPS_AGE_KEY_FILE=/root/.config/sops/age/vault-unseal.keys.txt
 Environment=VAULT_ADDR=http://{{ vault_addr | strip_cidr }}:8200
 Environment=UNSEAL_FILE=/opt/abhaile/secrets/{{ host_name }}/vault-unseal.sops.yaml
-ExecStart=/bin/bash /opt/abhaile/tools/bash/vault-unseal.sh
+ExecStart=/bin/bash /usr/local/lib/abhaile/tools/vault-unseal.sh
 RemainAfterExit=yes
 
 [Install]

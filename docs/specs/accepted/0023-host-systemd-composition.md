@@ -173,7 +173,7 @@ Host composition keeps the same top-level shape as service composition:
 composition:
   config:
     - source: phobos/tools/vault-unseal.sh
-      destination: /opt/abhaile/tools/bash/vault-unseal.sh
+      destination: /usr/local/lib/abhaile/tools/vault-unseal.sh
   systemd:
     - source: phobos/systemd/abhaile-vault-unseal.service.j2
       destination: /etc/systemd/system/abhaile-vault-unseal.service

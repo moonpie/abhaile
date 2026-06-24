@@ -4,4 +4,4 @@ After=caddy-internal.service
 
 [Service]
 Type=oneshot
-ExecStart=/opt/abhaile/tools/bash/rebuild-omada-cert.sh
+ExecStart=/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh

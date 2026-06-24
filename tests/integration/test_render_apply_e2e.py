@@ -109,7 +109,7 @@ class TestRenderApplyE2E:
         assert "vault-bootstrap.sops.yaml" not in phobos_unseal
         assert "config/bootstrap/sealed" not in phobos_unseal
         assert not deimos_unseal.exists()
-        assert not (deimos_root / "system/opt/abhaile/tools/bash/vault-unseal.sh").exists()
+        assert not (deimos_root / "system/usr/local/lib/abhaile/tools/vault-unseal.sh").exists()
 
         phobos_networkd = phobos_root / "system/etc/systemd/network"
         deimos_networkd = deimos_root / "system/etc/systemd/network"
@@ -147,7 +147,8 @@ class TestRenderApplyE2E:
         assert "EnvironmentFile=/etc/caddy/dns.env" not in caddy_dmz_quadlet
 
         omada_rebuild = (
-            phobos_root / "services/omada-controller/opt/abhaile/tools/bash/rebuild-omada-cert.sh"
+            phobos_root
+            / "services/omada-controller/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh"
         )
         assert omada_rebuild.exists()
         assert "systemctl restart omada-controller.service" in omada_rebuild.read_text(
@@ -225,11 +226,11 @@ class TestRenderApplyE2E:
             "activation_mode": "start",
             "enable_mode": "enable",
         }
-        assert phobos_entries["/opt/abhaile/tools/bash/vault-unseal.sh"]["owner_ref"].startswith(
-            "host:"
-        )
+        assert phobos_entries["/usr/local/lib/abhaile/tools/vault-unseal.sh"][
+            "owner_ref"
+        ].startswith("host:")
         assert "/etc/systemd/system/abhaile-vault-unseal.service" not in deimos_entries
-        assert "/opt/abhaile/tools/bash/vault-unseal.sh" not in deimos_entries
+        assert "/usr/local/lib/abhaile/tools/vault-unseal.sh" not in deimos_entries
 
 
 def _entries_by_target(manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:

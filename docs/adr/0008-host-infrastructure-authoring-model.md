@@ -59,7 +59,7 @@ solely to install host infrastructure units.
 Host infrastructure includes units that operate the local GitOps host or host bootstrap state rather
 than a single application service. Current examples are:
 
-- `/opt/abhaile/tools/bash/vault-unseal.sh`
+- `/usr/local/lib/abhaile/tools/vault-unseal.sh`
 - `abhaile-vault-unseal.service`
 - `abhaile-runner.service`
 - `abhaile-runner.timer`

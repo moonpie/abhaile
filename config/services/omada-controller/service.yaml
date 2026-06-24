@@ -7,7 +7,7 @@ composition:
     - source: omada-controller/config/omada-controller.env
       destination: /etc/omada-controller/omada-controller.env
     - source: omada-controller/tools/rebuild-omada-cert.sh
-      destination: /opt/abhaile/tools/bash/rebuild-omada-cert.sh
+      destination: /usr/local/lib/abhaile/tools/rebuild-omada-cert.sh
   systemd:
     - source: omada-controller/systemd/rebuild-omada-cert.service
       destination: /etc/systemd/system/rebuild-omada-cert.service
