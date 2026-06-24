@@ -27,13 +27,14 @@ test -f /srv/vault/agent/out/.ready && echo "OK" || echo "NOT READY"
 
 ```bash
 # Render (on target host, from /opt/abhaile)
-abhaile-render --host $(hostname -s) --output /var/lib/abhaile
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
 
 # Dry-run apply (safe, read-only)
-sudo abhaile-apply --output /var/lib/abhaile --dry-run
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
 
 # Live apply
-sudo abhaile-apply --output /var/lib/abhaile
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
 ```
 
 <details>
@@ -44,20 +45,26 @@ sudo abhaile-apply --output /var/lib/abhaile
 abhaile-render --all --output ./out
 
 # Check drift (what would change)
-abhaile-diff --output /var/lib/abhaile
+sudo /opt/abhaile/.venv/bin/abhaile-diff --output /var/lib/abhaile
 
 # Dry-run with validation commands (systemd-analyze, visudo -c, named-checkzone)
-sudo abhaile-apply --output /var/lib/abhaile --dry-run --dry-run-validations
+sudo /opt/abhaile/.venv/bin/abhaile-apply \
+  --output /var/lib/abhaile \
+  --dry-run \
+  --dry-run-validations
 
 # Apply with safe removals (only files unchanged on disk)
-sudo abhaile-apply --output /var/lib/abhaile --prune
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --prune
 
 # Force-prune drifted removals (DESTRUCTIVE — requires --allow-destructive)
-sudo abhaile-apply --output /var/lib/abhaile --force-prune --allow-destructive
+sudo /opt/abhaile/.venv/bin/abhaile-apply \
+  --output /var/lib/abhaile \
+  --force-prune \
+  --allow-destructive
 
 # JSON output for scripting
-abhaile-diff --output /var/lib/abhaile --json
-sudo abhaile-apply --output /var/lib/abhaile --dry-run --json
+sudo /opt/abhaile/.venv/bin/abhaile-diff --output /var/lib/abhaile --json
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run --json
 ```
 
 </details>
@@ -70,10 +77,10 @@ systemctl status abhaile-runner.timer
 systemctl list-timers abhaile-runner.timer
 
 # Last run result (format: "<exit_code> <timestamp> <commit_sha>")
-cat /var/lib/abhaile/runner/last-run-status
+sudo cat /var/lib/abhaile/runner/last-run-status
 
 # Last successful commit
-cat /var/lib/abhaile/runner/last-successful-commit
+sudo cat /var/lib/abhaile/runner/last-successful-commit
 
 # Runner logs (last run)
 journalctl -u abhaile-runner.service --no-pager -n 50
@@ -309,15 +316,18 @@ Service unreachable?
 When confused at 3am and need to blow it all away:
 
 ```bash
-# On target host, as root:
+# On target host:
 cd /opt/abhaile
-git fetch origin main && git checkout main && git pull
+sudo -H -u abhaile env HOME=/home/abhaile git fetch origin main
+sudo -H -u abhaile env HOME=/home/abhaile git checkout main
+sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
 
 # Full re-render
-abhaile-render --host $(hostname -s) --output /var/lib/abhaile
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
 
 # Force apply (use --prune for safe removals, --force-prune --allow-destructive if desperate)
-sudo abhaile-apply --output /var/lib/abhaile --prune
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --prune
 
 # Reload systemd
 systemctl daemon-reload
@@ -346,21 +356,23 @@ echo "Secrets ready, services should converge"
 
 ```bash
 # On target host
-cd /opt/abhaile && git pull
-abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-sudo abhaile-apply --output /var/lib/abhaile
+cd /opt/abhaile
+sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
 ```
 
 ### DNS Serial Workflow
 
 When zone records change in `config/network.yaml`:
 
-1. `abhaile-render --host $(hostname -s) --output /tmp/dns-check` — it will fail with serial mismatch and print the new `content_hash`.
+1. `sudo -H -u abhaile env HOME=/home/abhaile /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /tmp/dns-check` — it will fail with serial mismatch and print the new `content_hash`.
 1. In `config/network.yaml`, update the matching zone's `serial`:
    - `date`: today as `YYYYMMDD` (e.g., `20260607`)
    - `counter`: `00` (or increment if same day)
    - `content_hash`: paste the hash from the error message
-1. `abhaile-render --host $(hostname -s) --output /tmp/dns-check` — should succeed.
+1. `sudo -H -u abhaile env HOME=/home/abhaile /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /tmp/dns-check` — should succeed.
 1. Commit and push.
 1. Verify propagation after apply:
 
@@ -381,7 +393,7 @@ Container images are pinned in quadlet `.image` files. To update:
 
 ```bash
 # Applied manifests (last 10 kept automatically)
-ls /var/lib/abhaile/state/history/
+sudo ls /var/lib/abhaile/state/history/
 
 # Podman image pruning (manual, not automated)
 sudo podman image prune -a

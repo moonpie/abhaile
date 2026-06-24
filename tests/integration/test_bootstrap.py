@@ -138,11 +138,43 @@ class TestBootstrapPreflight:
     def test_bootstrap_installs_project_entrypoints(self) -> None:
         """Bootstrap installs Abhaile into the venv before invoking CLI entrypoints."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "run_as_abhaile" in script
         assert "Python dependencies already installed" in script
-        assert "--no-build-isolation --no-deps" in script
-        assert 'pip" install --quiet --no-build-isolation --no-deps \\' in script
-        assert '"${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname"' in script
+        assert "write_abhaile_entrypoint" in script
+        assert "abhaile.cli.render" in script
+        assert "abhaile.cli.apply" in script
+        assert 'export PYTHONPATH="${REPO_DIR}/src' in script
+        assert 'run_as_abhaile "${REPO_DIR}/.venv/bin/abhaile-render"' in script
         assert '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"' in script
+
+    def test_bootstrap_prepares_runner_ownership_boundaries(self) -> None:
+        """Bootstrap separates runner-owned paths from apply-owned state."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "prepare_repo_ownership" in script
+        assert "prepare_output_ownership" in script
+        assert 'chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}" "$REPO_DIR"' in script
+        assert 'install -d -m 0750 -o root -g "$ABHAILE_GROUP" "$OUTPUT_DIR"' in script
+        assert '"${OUTPUT_DIR}/rendered"' in script
+        assert '"${OUTPUT_DIR}/runner"' in script
+        assert 'install -d -m 0750 -o root -g root "${OUTPUT_DIR}/state"' in script
+        assert 'chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}"' in script
+        assert 'chown -R root:root "${OUTPUT_DIR}/state"' in script
+
+    def test_bootstrap_validates_abhaile_identity_contract(self) -> None:
+        """Bootstrap fails fast when the service account identity does not match config."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'readonly ABHAILE_UID="1001"' in script
+        assert 'readonly ABHAILE_GID="1001"' in script
+        assert 'readonly ABHAILE_HOME="/home/abhaile"' in script
+        assert 'readonly ABHAILE_SHELL="/bin/bash"' in script
+        assert "ensure_abhaile_identity" in script
+        assert "Group ${ABHAILE_GROUP} exists with gid=" in script
+        assert "GID ${ABHAILE_GID} is already used by group" in script
+        assert "UID ${ABHAILE_UID} is already used by user" in script
+        assert "User ${ABHAILE_USER} exists with uid=" in script
+        assert "User ${ABHAILE_USER} has primary gid=" in script
+        assert "User ${ABHAILE_USER} has home=" in script
+        assert "User ${ABHAILE_USER} has shell=" in script
 
     def test_deploy_key_is_mandatory_for_repo_access(self) -> None:
         """Bootstrap does not advertise an unimplemented repo-token fallback."""

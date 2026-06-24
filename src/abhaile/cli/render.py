@@ -264,14 +264,19 @@ def render_host(
 
 
 def _prepare_output_dirs(output_root: Path, paths: dict[str, str]) -> Path:
-    """Wipe and recreate rendered output directory.
+    """Wipe rendered output contents and preserve the rendered directory.
 
     render owns rendered/ entirely; state/ is created and managed by apply.
     """
     rendered_dir = output_root / paths["rendered_dir_name"]
     if rendered_dir.exists():
-        shutil.rmtree(rendered_dir)
-    rendered_dir.mkdir(parents=True)
+        for child in rendered_dir.iterdir():
+            if child.is_dir() and not child.is_symlink():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+    else:
+        rendered_dir.mkdir(parents=True)
     return rendered_dir
 
 

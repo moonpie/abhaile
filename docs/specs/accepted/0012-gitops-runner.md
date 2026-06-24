@@ -267,9 +267,15 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 #### Ownership and Permissions
 
+- `/opt/abhaile/` — owned by `abhaile:abhaile`, mode `0750` or stricter compatible
+  with git and venv updates.
+- `/opt/abhaile/.venv/` — owned by `abhaile:abhaile`.
+- `/var/lib/abhaile/rendered/` — owned by `abhaile:abhaile`, mode `0750`.
 - `/var/lib/abhaile/runner/` — owned by `abhaile:abhaile`, mode `0750`.
-- State files within — owned by `abhaile:abhaile`, mode `0640`.
-- Lock file — owned by `abhaile:abhaile`, mode `0600`.
+- `/var/lib/abhaile/state/` — owned by `root:root`, mode `0750`.
+- Runner state files within `/var/lib/abhaile/runner/` — owned by `abhaile:abhaile`,
+  mode `0640`.
+- Runner lock file — owned by `abhaile:abhaile`, mode `0600`.
 
 ## Decision Notes
 
@@ -339,7 +345,9 @@ The runner uses `flock(2)` (exclusive, non-blocking) on
 
 - Decision: Repository location is fixed at `/opt/abhaile`; set once during bootstrap via systemd WorkingDirectory.
 
-- Rationale: Single known location simplifies the runner, sudoers, and operator expectations. Bootstrap owns initial placement.
+- Rationale: Single known location simplifies the runner, sudoers, and operator expectations.
+  Bootstrap owns initial placement and sets ownership so the unprivileged runner can fetch,
+  checkout, and render.
 
 - Impact: Runner script resolves venv entrypoints from `$PWD/.venv/bin` by default; systemd
   sets `$PWD` with `WorkingDirectory=/opt/abhaile`.

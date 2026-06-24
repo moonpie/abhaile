@@ -25,6 +25,13 @@ readonly VAULT_SECRET_ID_PATH="${VAULT_AGENT_DIR}/secret-id"
 readonly READY_SENTINEL="/srv/vault/agent/out/.ready"
 readonly BOOTSTRAP_READY_TIMEOUT="${BOOTSTRAP_READY_TIMEOUT:-60}"
 
+readonly ABHAILE_USER="abhaile"
+readonly ABHAILE_GROUP="abhaile"
+readonly ABHAILE_UID="1001"
+readonly ABHAILE_GID="1001"
+readonly ABHAILE_HOME="/home/abhaile"
+readonly ABHAILE_SHELL="/bin/bash"
+
 readonly SECRETS_DIR="secrets"
 readonly AGE_KEY_PATH="/home/abhaile/.config/sops/age/keys.txt"
 readonly DEPLOY_KEY_PATH="/home/abhaile/.ssh/gitops_ed25519"
@@ -114,13 +121,63 @@ cleanup_ephemeral() {
     _secret_id_handoff=""
 }
 
+run_as_abhaile() {
+    sudo -H -u "$ABHAILE_USER" env HOME="$ABHAILE_HOME" "$@"
+}
+
+prepare_repo_ownership() {
+    install -d -m 0755 /opt
+    if [[ -e "$REPO_DIR" ]]; then
+        chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}" "$REPO_DIR"
+        chmod 0750 "$REPO_DIR"
+    else
+        install -d -m 0750 -o "$ABHAILE_USER" -g "$ABHAILE_GROUP" "$REPO_DIR"
+    fi
+}
+
+prepare_output_ownership() {
+    install -d -m 0750 -o root -g "$ABHAILE_GROUP" "$OUTPUT_DIR"
+    install -d -m 0750 -o "$ABHAILE_USER" -g "$ABHAILE_GROUP" \
+        "${OUTPUT_DIR}/rendered" \
+        "${OUTPUT_DIR}/runner"
+    install -d -m 0750 -o root -g root "${OUTPUT_DIR}/state"
+    chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}" "${OUTPUT_DIR}/rendered" "${OUTPUT_DIR}/runner"
+    chown -R root:root "${OUTPUT_DIR}/state"
+}
+
+write_abhaile_entrypoint() {
+    local name="$1"
+    local module="$2"
+    local target="${REPO_DIR}/.venv/bin/${name}"
+    local tmp
+    tmp=$(mktemp "${target}.tmp.XXXXXX")
+
+    cat >"$tmp" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export PYTHONPATH="${REPO_DIR}/src\${PYTHONPATH:+:\$PYTHONPATH}"
+exec "${REPO_DIR}/.venv/bin/python" -c 'import sys; from ${module} import main; sys.exit(main())' "\$@"
+EOF
+    chmod 0755 "$tmp"
+    chown "${ABHAILE_USER}:${ABHAILE_GROUP}" "$tmp"
+    mv "$tmp" "$target"
+}
+
+install_abhaile_entrypoints() {
+    log "Installing Abhaile entrypoints"
+    write_abhaile_entrypoint "abhaile-render" "abhaile.cli.render"
+    write_abhaile_entrypoint "abhaile-apply" "abhaile.cli.apply"
+    write_abhaile_entrypoint "abhaile-diff" "abhaile.cli.diff"
+    write_abhaile_entrypoint "abhaile-inventory" "abhaile.cli.inventory"
+}
+
 write_vault_agent_secret_file() {
     local path="$1"
     local value="$2"
     local secret_dir
     secret_dir=$(dirname "$path")
 
-    install -d -m 0700 -o abhaile -g abhaile "$secret_dir"
+    install -d -m 0700 -o "$ABHAILE_USER" -g "$ABHAILE_GROUP" "$secret_dir"
 
     local secret_tmp
     secret_tmp=$(mktemp "${secret_dir}/.$(basename "$path").tmp.XXXXXX")
@@ -128,7 +185,7 @@ write_vault_agent_secret_file() {
         rm -f "$secret_tmp"
         return 1
     fi
-    if ! chown abhaile:abhaile "$secret_tmp"; then
+    if ! chown "${ABHAILE_USER}:${ABHAILE_GROUP}" "$secret_tmp"; then
         rm -f "$secret_tmp"
         return 1
     fi
@@ -139,6 +196,52 @@ write_vault_agent_secret_file() {
     if ! mv "$secret_tmp" "$path"; then
         rm -f "$secret_tmp"
         return 1
+    fi
+}
+
+ensure_abhaile_identity() {
+    local actual_gid gid_owner uid_owner
+    actual_gid=$(getent group "$ABHAILE_GROUP" | awk -F: '{print $3}')
+
+    if [[ -n "$actual_gid" && "$actual_gid" != "$ABHAILE_GID" ]]; then
+        die "Group ${ABHAILE_GROUP} exists with gid=${actual_gid}, expected gid=${ABHAILE_GID}"
+    fi
+
+    gid_owner=$(getent group | awk -F: -v gid="$ABHAILE_GID" '$3 == gid { print $1; exit }')
+    if [[ -n "$gid_owner" && "$gid_owner" != "$ABHAILE_GROUP" ]]; then
+        die "GID ${ABHAILE_GID} is already used by group ${gid_owner}; cannot create ${ABHAILE_GROUP}"
+    fi
+
+    if [[ -z "$actual_gid" ]]; then
+        groupadd -g "$ABHAILE_GID" "$ABHAILE_GROUP"
+        log "Created group ${ABHAILE_GROUP} (gid=${ABHAILE_GID})"
+    fi
+
+    uid_owner=$(getent passwd | awk -F: -v uid="$ABHAILE_UID" '$3 == uid { print $1; exit }')
+    if [[ -n "$uid_owner" && "$uid_owner" != "$ABHAILE_USER" ]]; then
+        die "UID ${ABHAILE_UID} is already used by user ${uid_owner}; cannot create ${ABHAILE_USER}"
+    fi
+
+    if getent passwd "$ABHAILE_USER" >/dev/null; then
+        local actual_uid actual_primary_gid actual_home actual_shell
+        IFS=: read -r _ _ actual_uid actual_primary_gid _ actual_home actual_shell \
+            < <(getent passwd "$ABHAILE_USER")
+        if [[ "$actual_uid" != "$ABHAILE_UID" ]]; then
+            die "User ${ABHAILE_USER} exists with uid=${actual_uid}, expected uid=${ABHAILE_UID}"
+        fi
+        if [[ "$actual_primary_gid" != "$ABHAILE_GID" ]]; then
+            die "User ${ABHAILE_USER} has primary gid=${actual_primary_gid}, expected gid=${ABHAILE_GID}"
+        fi
+        if [[ "$actual_home" != "$ABHAILE_HOME" ]]; then
+            die "User ${ABHAILE_USER} has home=${actual_home}, expected home=${ABHAILE_HOME}"
+        fi
+        if [[ "$actual_shell" != "$ABHAILE_SHELL" ]]; then
+            die "User ${ABHAILE_USER} has shell=${actual_shell}, expected shell=${ABHAILE_SHELL}"
+        fi
+    else
+        useradd -u "$ABHAILE_UID" -g "$ABHAILE_GROUP" -m -s "$ABHAILE_SHELL" \
+            -d "$ABHAILE_HOME" "$ABHAILE_USER"
+        log "Created user ${ABHAILE_USER} (uid=${ABHAILE_UID})"
     fi
 }
 
@@ -299,16 +402,7 @@ stage_user_and_credentials() {
     local hostname="$1"
     log "=== Stage 3: User and Credential Validation ==="
 
-    # Create abhaile user/group if absent
-    if ! getent group abhaile &>/dev/null; then
-        groupadd -g 1001 abhaile
-        log "Created group abhaile (gid=1001)"
-    fi
-
-    if ! id abhaile &>/dev/null; then
-        useradd -u 1001 -g abhaile -m -s /bin/bash -d /home/abhaile abhaile
-        log "Created user abhaile (uid=1001)"
-    fi
+    ensure_abhaile_identity
 
     # Require SecretID handoff material.
     acquire_secret_id_handoff
@@ -336,34 +430,40 @@ stage_repo_and_env() {
 
     local git_ssh_cmd="ssh -i ${DEPLOY_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 
+    prepare_repo_ownership
+
     if [[ -d "$REPO_DIR/.git" ]]; then
         log "Repo already cloned at ${REPO_DIR}; pulling latest"
-        cd "$REPO_DIR"
-        GIT_SSH_COMMAND="$git_ssh_cmd" git fetch origin "$REPO_BRANCH"
-        git checkout "$REPO_BRANCH"
-        GIT_SSH_COMMAND="$git_ssh_cmd" git pull origin "$REPO_BRANCH"
+        run_as_abhaile env GIT_SSH_COMMAND="$git_ssh_cmd" \
+            git -C "$REPO_DIR" fetch origin "$REPO_BRANCH"
+        run_as_abhaile git -C "$REPO_DIR" checkout "$REPO_BRANCH"
+        run_as_abhaile env GIT_SSH_COMMAND="$git_ssh_cmd" \
+            git -C "$REPO_DIR" pull origin "$REPO_BRANCH"
     else
         log "Cloning repo to ${REPO_DIR}"
-        GIT_SSH_COMMAND="$git_ssh_cmd" git clone -b "$REPO_BRANCH" "$REPO_URL" "$REPO_DIR"
-        cd "$REPO_DIR"
+        run_as_abhaile env GIT_SSH_COMMAND="$git_ssh_cmd" \
+            git clone -b "$REPO_BRANCH" "$REPO_URL" "$REPO_DIR"
     fi
+
+    cd "$REPO_DIR"
+    prepare_repo_ownership
 
     # Create/update Python venv
     if [[ ! -d "${REPO_DIR}/.venv" ]]; then
         log "Creating Python venv"
-        python3 -m venv "${REPO_DIR}/.venv"
+        run_as_abhaile python3 -m venv "${REPO_DIR}/.venv"
     fi
 
-    if "${REPO_DIR}/.venv/bin/python" -c "import jinja2, jsonschema, yaml" 2>/dev/null; then
+    if run_as_abhaile "${REPO_DIR}/.venv/bin/python" -c "import jinja2, jsonschema, yaml" \
+        2>/dev/null; then
         log "Python dependencies already installed"
     else
         log "Installing Python dependencies"
-        "${REPO_DIR}/.venv/bin/pip" install --quiet -r "${REPO_DIR}/requirements.txt"
+        run_as_abhaile "${REPO_DIR}/.venv/bin/pip" install --quiet \
+            -r "${REPO_DIR}/requirements.txt"
     fi
 
-    log "Installing Abhaile entrypoints"
-    "${REPO_DIR}/.venv/bin/pip" install --quiet --no-build-isolation --no-deps \
-        --editable "${REPO_DIR}"
+    install_abhaile_entrypoints
 
     # Ensure CLI entrypoints are on PATH
     export PATH="${REPO_DIR}/.venv/bin:${PATH}"
@@ -380,7 +480,7 @@ stage_config_validation() {
     cd "$REPO_DIR"
 
     # Verify hostname in mapping.yaml
-    if ! ABHAILE_HOST="$hostname" python3 -c "
+    if ! ABHAILE_HOST="$hostname" "${REPO_DIR}/.venv/bin/python" -c "
 import yaml, sys, os
 host = os.environ['ABHAILE_HOST']
 m = yaml.safe_load(open('config/mapping.yaml'))
@@ -393,7 +493,7 @@ if host not in hosts:
     fi
 
     # Verify hostname in network.yaml
-    if ! ABHAILE_HOST="$hostname" python3 -c "
+    if ! ABHAILE_HOST="$hostname" "${REPO_DIR}/.venv/bin/python" -c "
 import yaml, sys, os
 host = os.environ['ABHAILE_HOST']
 n = yaml.safe_load(open('config/network.yaml'))
@@ -430,7 +530,7 @@ stage_sealed_handoff() {
 
     # Extract role_id from decrypted artifact
     local role_id
-    role_id=$(python3 -c "
+    role_id=$("${REPO_DIR}/.venv/bin/python" -c "
 import yaml, sys
 data = yaml.safe_load(open('$decrypted')) or {}
 print(data.get('role_id', ''), end='')
@@ -474,6 +574,8 @@ stage_render_apply() {
 
     cd "$REPO_DIR"
     export PATH="${REPO_DIR}/.venv/bin:${PATH}"
+    prepare_repo_ownership
+    prepare_output_ownership
 
     # Enable user lingering for abhaile (required for rootless quadlets)
     if ! loginctl show-user abhaile 2>/dev/null | grep -q "Linger=yes"; then
@@ -503,7 +605,8 @@ stage_render_apply() {
 
     # Render
     log "Running abhaile-render --host ${hostname}"
-    "${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname" --output "$OUTPUT_DIR"
+    run_as_abhaile "${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname" \
+        --output "$OUTPUT_DIR"
 
     # Apply
     log "Running abhaile-apply (live)"

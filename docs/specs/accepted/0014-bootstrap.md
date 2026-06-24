@@ -94,7 +94,8 @@ The script performs these stages in order, aborting on any failure:
 
 1. Create `abhaile` user and group if absent (uid 1001, gid 1001, group `abhaile`,
    shell `/bin/bash`, home `/home/abhaile`, not a system user — matches
-   `config/hosts/common/host.yaml`). User must exist before credential path checks.
+   `config/hosts/common/host.yaml`). If either identity already exists with a different
+   UID/GID, primary group, home, or shell, abort before writing repo or runtime state.
 1. Require SecretID handoff material (see §4 below).
 1. Verify age decryption identity exists at `/home/abhaile/.config/sops/age/keys.txt` (or
    root path for root-scoped artifacts). Abort with instructions if missing.
@@ -104,8 +105,9 @@ The script performs these stages in order, aborting on any failure:
 
 1. Clone repo to `/opt/abhaile` (or pull if directory exists for re-run idempotency).
 1. Checkout target branch (default: `main`).
-1. Create Python venv at `/opt/abhaile/.venv`, install `requirements.txt`, and install the
-   project into the venv.
+1. Create Python venv at `/opt/abhaile/.venv`, install `requirements.txt` when needed, and
+   create local Abhaile entrypoint wrappers in the venv.
+1. Ensure `/opt/abhaile` and `/opt/abhaile/.venv` are owned by `abhaile:abhaile`.
 
 #### Stage 5 — Configuration Validation
 
@@ -124,9 +126,15 @@ The script performs these stages in order, aborting on any failure:
 
 1. Enable user lingering for `abhaile` user (`loginctl enable-linger abhaile`) — required
    before apply can manage rootless quadlets (vault-agent runs as `podman.user: abhaile`).
-1. Run `/opt/abhaile/.venv/bin/abhaile-render --host <hostname> --output /var/lib/abhaile`.
+1. Prepare `/var/lib/abhaile` ownership boundaries:
+   - `/var/lib/abhaile` is `root:abhaile` mode 0750.
+   - `/var/lib/abhaile/rendered` is `abhaile:abhaile` mode 0750.
+   - `/var/lib/abhaile/runner` is `abhaile:abhaile` mode 0750.
+   - `/var/lib/abhaile/state` is `root:root` mode 0750.
+1. Run `/opt/abhaile/.venv/bin/abhaile-render --host <hostname> --output /var/lib/abhaile`
+   as `abhaile`.
 1. Run `/opt/abhaile/.venv/bin/abhaile-apply --host <hostname> --output /var/lib/abhaile`
-   (live apply, not dry-run).
+   as root (live apply, not dry-run).
 1. Abort on failure with clear error and state summary.
 1. Wait for Vault Agent `.ready` sentinel at `/srv/vault/agent/out/.ready` with configurable
    timeout (default 60s, polling interval 2s). If timeout expires, log warning but do not
@@ -188,9 +196,9 @@ Complete operator workflow from bare metal to steady-state:
 
 1. Install Debian 13 on target host. Set hostname (`phobos` or `deimos`).
 1. Ensure host is defined in `config/mapping.yaml` and `config/network.yaml` (commit to repo).
-1. Create `abhaile` user and group manually (`useradd -u 1001 -m -s /bin/bash abhaile`,
-   `groupadd -g 1001 abhaile` if not already done). Bootstrap Stage 3 is idempotent and
-   will skip creation if the user exists.
+1. Ensure UID 1001 and GID 1001 are available for `abhaile`. Bootstrap Stage 3 creates
+   the user and group when absent, or verifies the existing identity matches
+   `config/hosts/common/host.yaml`.
 1. Generate and place age decryption identity:
    - `/home/abhaile/.config/sops/age/keys.txt` (mode 0600, owner `abhaile:abhaile`)
 1. Generate and place git deploy key:

@@ -185,7 +185,7 @@ systemctl restart systemd-networkd
 1. Check what went wrong:
 
    ```bash
-   cat /var/lib/abhaile/runner/last-run-status
+   sudo cat /var/lib/abhaile/runner/last-run-status
    journalctl -u abhaile-runner.service --no-pager -n 50
    ```
 
@@ -194,12 +194,15 @@ systemctl restart systemd-networkd
 1. Test manually:
 
    ```bash
-   cd /opt/abhaile && git pull
-   abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-   sudo abhaile-apply --output /var/lib/abhaile --dry-run
+   cd /opt/abhaile
+   sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
+   sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
    ```
 
-1. If dry-run looks clean, live apply: `sudo abhaile-apply --output /var/lib/abhaile`
+1. If dry-run looks clean, live apply:
+   `sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile`
 
 1. Re-enable timer: `systemctl start abhaile-runner.timer`
 
@@ -262,9 +265,13 @@ systemctl restart systemd-networkd
 1. **Re-render and re-apply if state is suspect:**
 
    ```bash
-   cd /opt/abhaile && git fetch origin main && git checkout main && git pull
-   abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-   sudo abhaile-apply --output /var/lib/abhaile
+   cd /opt/abhaile
+   sudo -H -u abhaile env HOME=/home/abhaile git fetch origin main
+   sudo -H -u abhaile env HOME=/home/abhaile git checkout main
+   sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
+   sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
    ```
 
 1. **Re-enable runner:** `systemctl start abhaile-runner.timer`

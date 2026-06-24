@@ -164,32 +164,45 @@ This is the recommended path when replacing manual service management with GitOp
 
    ```bash
    sudo install -d -m 0755 /opt
-   sudo GIT_SSH_COMMAND="ssh -i /home/abhaile/.ssh/gitops_ed25519 -o IdentitiesOnly=yes" \
+   sudo install -d -m 0750 -o abhaile -g abhaile /opt/abhaile
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     GIT_SSH_COMMAND="ssh -i /home/abhaile/.ssh/gitops_ed25519 -o IdentitiesOnly=yes" \
      git clone -b main git@github.com:moonpie/abhaile.git /opt/abhaile
-   sudo chown -R root:root /opt/abhaile
    ```
 
    If the repo already exists:
 
    ```bash
    cd /opt/abhaile
-   git fetch origin main
-   git checkout main
-   git pull --ff-only origin main
+   sudo chown -R abhaile:abhaile /opt/abhaile
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     git fetch origin main
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     git checkout main
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     git pull --ff-only origin main
    ```
 
 1. Install runtime dependencies or run the bootstrap script up to the point where the venv exists.
    If the venv already exists:
 
    ```bash
-   /opt/abhaile/.venv/bin/pip install -r /opt/abhaile/requirements.txt
-   /opt/abhaile/.venv/bin/pip install --no-build-isolation --no-deps --editable /opt/abhaile
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     /opt/abhaile/.venv/bin/pip install -r /opt/abhaile/requirements.txt
    ```
+
+   Bootstrap creates local entrypoint wrappers in `/opt/abhaile/.venv/bin` after the
+   runtime dependencies import successfully.
 
 1. Render the host.
 
    ```bash
-   /opt/abhaile/.venv/bin/abhaile-render --host "$(hostname -s)" --output /var/lib/abhaile
+   sudo install -d -m 0750 -o root -g abhaile /var/lib/abhaile
+   sudo install -d -m 0750 -o abhaile -g abhaile /var/lib/abhaile/rendered
+   sudo install -d -m 0750 -o abhaile -g abhaile /var/lib/abhaile/runner
+   sudo install -d -m 0750 -o root -g root /var/lib/abhaile/state
+   sudo -H -u abhaile env HOME=/home/abhaile \
+     /opt/abhaile/.venv/bin/abhaile-render --host "$(hostname -s)" --output /var/lib/abhaile
    ```
 
 1. Run a dry-run apply with validations.
@@ -262,7 +275,7 @@ The host is enrolled when all checks pass:
 systemctl status abhaile-runner.timer --no-pager
 systemctl list-timers abhaile-runner.timer --no-pager
 test -f /srv/vault/agent/out/.ready && echo OK
-cat /var/lib/abhaile/runner/last-successful-commit
+sudo cat /var/lib/abhaile/runner/last-successful-commit
 machinectl shell abhaile@ /bin/systemctl --user status vault-agent.service
 ```
 
