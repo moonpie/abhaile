@@ -236,6 +236,14 @@ class TestQuadretsIntegration:
         authelia_content = authelia_container.read_text()
         assert "Pod=authelia-app.pod" in authelia_content
         assert "[Container]" in authelia_content
+        assert (
+            "After=abhaile-secrets-ready.service authelia-config.service "
+            "authelia-app-redis.service"
+        ) in authelia_content
+        assert (
+            "Requires=abhaile-secrets-ready.service authelia-config.service "
+            "authelia-app-redis.service"
+        ) in authelia_content
 
         # Verify authelia image file
         authelia_image = (
@@ -254,6 +262,10 @@ class TestQuadretsIntegration:
         redis_content = redis_container.read_text()
         assert "Pod=authelia-app.pod" in redis_content
         assert "[Container]" in redis_content
+        assert (
+            "Requires=abhaile-secrets-ready.service authelia-redis-conf.service"
+        ) in redis_content
+        assert "After=abhaile-secrets-ready.service authelia-redis-conf.service" in redis_content
 
         # Verify redis image file
         redis_image = (

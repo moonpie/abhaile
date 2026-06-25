@@ -277,6 +277,18 @@ Dry-run validations:
 - `systemd-sysusers --dry-run` for sysusers.
 - `visudo -cf <rendered-source>` for sudoers.
 
+### File Staging Metadata
+
+All non-directory writes are staged atomically with deterministic file metadata.
+
+- User-managed artifact families (`host.sysusers`, `host.sudoers`,
+  `host.authorized_keys`) use their explicit `apply_hints` ownership and mode.
+- Rootless artifacts with `apply_hints.rootless` use
+  `apply_hints.podman_user` as both owner and group, with mode `0644`.
+- All other apply-managed files use `root:root` ownership and mode `0644`.
+
+Rootless artifacts without a non-empty `podman_user` hint fail during staging.
+
 ### Phase 7.4 — CorednsExecutor
 
 Module: `abhaile.apply.coredns`

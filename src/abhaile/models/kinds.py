@@ -34,5 +34,5 @@ KNOWN_APPLY_HINTS: dict[str, list[str]] = {
     "vault": ["write_order", "restart_mode", "rootless", "podman_user"],
     "networkd": [],
     "quadlet": ["rootless", "podman_user", "shared"],
-    "service": ["restart_unit", "rootless", "owner", "group", "mode"],
+    "service": ["restart_unit", "rootless", "podman_user", "owner", "group", "mode"],
 }

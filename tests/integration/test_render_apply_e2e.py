@@ -146,6 +146,35 @@ class TestRenderApplyE2E:
         assert "EnvironmentFile=/srv/vault/agent/out/caddy-dns-desec.env" in caddy_dmz_quadlet
         assert "EnvironmentFile=/etc/caddy/dns.env" not in caddy_dmz_quadlet
 
+        authelia_quadlet = (
+            phobos_root / "services/authelia/etc/containers/systemd/authelia-app-authelia.container"
+        ).read_text(encoding="utf-8")
+        redis_quadlet = (
+            phobos_root / "services/authelia/etc/containers/systemd/authelia-app-redis.container"
+        ).read_text(encoding="utf-8")
+        authelia_copy_unit = (
+            phobos_root / "services/authelia/etc/systemd/system/authelia-config.service"
+        ).read_text(encoding="utf-8")
+        redis_copy_unit = (
+            phobos_root / "services/authelia/etc/systemd/system/authelia-redis-conf.service"
+        ).read_text(encoding="utf-8")
+
+        assert "Requires=abhaile-secrets-ready.service authelia-redis-conf.service" in (
+            redis_quadlet
+        )
+        assert (
+            "Requires=abhaile-secrets-ready.service authelia-config.service "
+            "authelia-app-redis.service"
+        ) in authelia_quadlet
+        assert (
+            "ExecStartPost=/usr/bin/systemctl try-restart authelia-app-authelia.service"
+            in authelia_copy_unit
+        )
+        assert (
+            "ExecStartPost=/usr/bin/systemctl try-restart authelia-app-redis.service"
+            in redis_copy_unit
+        )
+
         omada_rebuild = (
             phobos_root
             / "services/omada-controller/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh"

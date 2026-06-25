@@ -30,6 +30,16 @@ apply:
 - `abhaile-apply --dry-run` never dispatches service owner actions.
 - Dry-run reports drift only; restart, directory enforcement, and other mutations are skipped.
 
+## File Metadata
+
+Apply normalizes non-directory file writes instead of inheriting render-time
+ownership or umask.
+
+- User-managed files use explicit `apply_hints` ownership and mode.
+- Rootless artifacts use the configured `podman.user` as owner and group,
+  with mode `0644`.
+- Other managed files are written as `root:root` with mode `0644`.
+
 ## Service-owned artifact audit
 
 The April 2026 audit of rendered `service.config` / `service.env` entries produced the following buckets.

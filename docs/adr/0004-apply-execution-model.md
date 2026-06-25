@@ -24,6 +24,7 @@ Apply uses typed owner-based execution driven by planner output and renderer-int
 
 - dry-run must not mutate host state
 - service directories are enforced idempotently at apply time
+- non-directory file writes are staged with deterministic ownership and mode
 - reload/restart behavior is scoped to changed owners
 - free-form manifest-level `reload_actions` are not part of the model
 
@@ -36,6 +37,8 @@ Apply uses typed owner-based execution driven by planner output and renderer-int
 ## Consequences
 
 - Apply behavior is deterministic and family-specific
+- Apply normalizes managed file metadata instead of inheriting render-time
+  umask or temporary-file ownership
 - Runtime side effects are easier to test and reason about
 - Planner logic and executor logic stay separated
 - Service-specific behavior can be extended through typed hints instead of ad hoc scripting

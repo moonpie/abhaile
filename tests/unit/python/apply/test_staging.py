@@ -11,6 +11,7 @@ import pytest
 from abhaile.apply.actions import ExecutionResult
 from abhaile.apply.staging import (
     _copy_artifact_for_apply,
+    _default_file_hints,
     _prepare_authorized_keys_parent,
     _required_user_hints,
 )
@@ -88,6 +89,41 @@ class TestRequiredUserHints:
             _required_user_hints(entry)
 
 
+class TestDefaultFileHints:
+    """Tests for default apply metadata hints."""
+
+    def test_rootful_file_defaults_to_root_metadata(self) -> None:
+        user, group, mode = _default_file_hints({"kind": "service.config"})
+        assert user == "root"
+        assert group == "root"
+        assert mode == 0o644
+
+    def test_rootless_file_defaults_to_podman_user_metadata(self) -> None:
+        entry: dict[str, object] = {
+            "kind": "quadlet.container",
+            "apply_hints": {
+                "rootless": True,
+                "podman_user": "abhaile",
+            },
+        }
+
+        user, group, mode = _default_file_hints(entry)
+        assert user == "abhaile"
+        assert group == "abhaile"
+        assert mode == 0o644
+
+    def test_rootless_file_missing_podman_user_raises(self) -> None:
+        entry: dict[str, object] = {
+            "kind": "quadlet.container",
+            "apply_hints": {
+                "rootless": True,
+            },
+        }
+
+        with pytest.raises(ApplyError, match="missing podman_user"):
+            _default_file_hints(entry)
+
+
 class TestCopyArtifactForApply:
     """Tests for _copy_artifact_for_apply."""
 
@@ -109,7 +145,10 @@ class TestCopyArtifactForApply:
         }
         _copy_artifact_for_apply(action, tmp_path)
 
-    def test_regular_artifact_calls_atomic_copy(self, tmp_path: Path) -> None:
+    @patch("abhaile.apply.staging.atomic_copy_file_with_perms")
+    def test_regular_artifact_copies_with_default_metadata(
+        self, mock_copy: Any, tmp_path: Path
+    ) -> None:
         rendered = tmp_path / "rendered"
         rendered.mkdir()
         source = rendered / "system" / "etc" / "app.conf"
@@ -124,7 +163,41 @@ class TestCopyArtifactForApply:
         }
 
         _copy_artifact_for_apply(action, rendered)
-        assert target.read_text() == "content"
+        mock_copy.assert_called_once_with(
+            source,
+            target,
+            mode=0o644,
+            owner_user="root",
+            owner_group="root",
+        )
+
+    @patch("abhaile.apply.staging.atomic_copy_file_with_perms")
+    def test_rootless_artifact_copies_with_podman_user_metadata(
+        self, mock_copy: Any, tmp_path: Path
+    ) -> None:
+        rendered = tmp_path / "rendered"
+        source = rendered / "services" / "vault-agent" / "vault-agent.container"
+        source.parent.mkdir(parents=True)
+        source.write_text("[Container]")
+
+        action: dict[str, object] = {
+            "render_path": "services/vault-agent/vault-agent.container",
+            "target_path": "/home/abhaile/.config/containers/systemd/vault-agent.container",
+            "kind": "quadlet.container",
+            "apply_hints": {
+                "rootless": True,
+                "podman_user": "abhaile",
+            },
+        }
+
+        _copy_artifact_for_apply(action, rendered)
+        mock_copy.assert_called_once_with(
+            source,
+            Path("/home/abhaile/.config/containers/systemd/vault-agent.container"),
+            mode=0o644,
+            owner_user="abhaile",
+            owner_group="abhaile",
+        )
 
     @patch("abhaile.apply.staging.atomic_copy_file_with_perms")
     @patch("abhaile.apply.staging.UserManagementExecutor.validate_sudoers")

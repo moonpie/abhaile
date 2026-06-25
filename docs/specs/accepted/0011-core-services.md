@@ -135,7 +135,10 @@ addresses. coredns-common and chrony-common are composition-only targets
 - Pod composition: `authelia` container + `redis` container in a shared pod.
 - Vault-agent templates: `authelia.configuration.yml.ctmpl` and
   `authelia-redis.conf.ctmpl` for session/storage/JWT secrets and Redis password.
-- Systemd path/service units watch vault-agent output for config reload:
+- Systemd copy services materialize Vault Agent output into the Authelia and
+  Redis config volumes before container startup: `authelia-config.service` and
+  `authelia-redis-conf.service`.
+- Systemd path units watch Vault Agent output for config refresh:
   `authelia-config.path` and `authelia-redis-conf.path`.
 - Static `users_database.yml` for file-based user store.
 - Contributes internal ingress block to caddy-internal.
@@ -297,7 +300,10 @@ systemd-networkd (host interfaces + ipvlan-l2 + VLANs)
           → abhaile-vault-unseal.service (phobos-only SOPS recovery + API unseal)
           → vault-agent (rootless, secret delivery; retries/restarts until Vault is usable)
             → abhaile-secrets-ready.path/.service (sentinel watch)
-              → caddy-dmz, authelia (After=abhaile-secrets-ready)
+              → authelia-config.service + authelia-redis-conf.service
+                → authelia-app-redis.service
+                → authelia-app-authelia.service
+              → caddy-dmz (After=abhaile-secrets-ready)
           → caddy-internal (After=vault)
             → omada-controller (After=caddy-internal, needs internal CA cert)
 ```
@@ -316,8 +322,10 @@ Key dependency semantics:
 
 - vault depends on chrony-a and blocky (needs time sync and DNS for Raft/TLS).
 - caddy-internal depends on vault (needs Vault API for internal PKI).
-- caddy-dmz and authelia depend on `abhaile-secrets-ready` (need vault-agent
-  rendered credentials).
+- caddy-dmz depends on `abhaile-secrets-ready` (needs vault-agent rendered
+  credentials).
+- Authelia containers depend on service-owned copy units that materialize
+  Vault Agent output into their bind-mounted config directories before startup.
 - omada-controller depends on caddy-internal (needs internal CA certificate
   for its cert chain rebuild).
 - ddclient depends on `abhaile-secrets-ready` (needs deSEC credentials from
@@ -333,12 +341,22 @@ The secrets delivery path for core services:
 1. vault-agent renders `.ctmpl` templates to `/srv/vault/agent/out/<filename>`.
 1. vault-agent writes `.ready` sentinel after all templates render successfully.
 1. `abhaile-secrets-ready.path` detects sentinel, starts `.service`.
-1. Per-service systemd path units watch their specific output files:
-   - `authelia-config.path` → copies `authelia.configuration.yml` to volume, restarts.
-   - `authelia-redis-conf.path` → copies `authelia-redis.conf` to volume, restarts.
+1. Per-service copy services materialize required files before dependent
+   containers start:
+   - `authelia-config.service` copies `authelia.configuration.yml` into the Authelia
+     config volume.
+   - `authelia-redis-conf.service` copies `authelia-redis.conf` into the Redis
+     config volume.
+1. Per-service systemd path units watch their specific output files and re-run
+   copy or restart handlers on refresh:
+   - `authelia-config.path` → starts `authelia-config.service`.
+   - `authelia-redis-conf.path` → starts `authelia-redis-conf.service`.
    - `caddy-dns-desec.path` → restarts caddy-dmz with new env file.
    - `coredns-omada-env.path` → restarts coredns with new Omada credentials.
    - `ddclient-conf.path` → restarts ddclient with new deSEC credentials.
+
+Authelia copy services use `systemctl try-restart` for downstream refresh so
+initial startup does not require the target container to already be active.
 
 No resolved secret values appear in rendered repo output. Render produces only
 the `.ctmpl` source files, `config.hcl` template block declarations, and

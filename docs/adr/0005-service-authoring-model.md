@@ -26,12 +26,17 @@ Service configuration uses section-based semantics.
 - `composition.systemd` entries may declare `enable` and `start` booleans
 - apply enforces boot persistence with `systemctl enable/disable`
 - helper units that are path-triggered are not independently enabled unless explicitly intended
+- services that need Vault Agent output copied into bind-mounted runtime paths
+  should model the copy as a service-owned oneshot prerequisite, with any path
+  unit reusing that same oneshot for refresh
 
 ### Restart Behavior
 
 - authored entry-level `apply` blocks are not part of the model
 - host daemons without quadlet-derived unit names use explicit service-level `apply.restart_unit`
 - renderer-internal apply hints carry the runtime metadata needed by apply
+- copy/update oneshots should use `try-restart` for downstream services so
+  first startup and refresh use the same unit without creating ordering cycles
 
 ## Alternatives Considered
 
@@ -45,6 +50,8 @@ Service configuration uses section-based semantics.
 - Schema and runtime behavior align more closely
 - Contributors have a stable model for where to place units versus plain config
 - Apply can enforce lifecycle intent without relying on ambiguous authoring patterns
+- First boot can materialize service-owned runtime config without waiting for a
+  path event that may already have happened
 
 ## References
 

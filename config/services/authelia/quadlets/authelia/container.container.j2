@@ -1,7 +1,7 @@
 [Unit]
 Description=Authelia (SSO)
-After=abhaile-secrets-ready.service authelia-app-redis.service
-Requires=abhaile-secrets-ready.service authelia-app-redis.service
+After=abhaile-secrets-ready.service authelia-config.service authelia-app-redis.service
+Requires=abhaile-secrets-ready.service authelia-config.service authelia-app-redis.service
 
 [Container]
 Pod={{ pod }}

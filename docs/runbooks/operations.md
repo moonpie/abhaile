@@ -157,6 +157,23 @@ systemctl status abhaile-secrets-ready.service
 ls -la /srv/vault/agent/out/
 ```
 
+### Vault-Agent Copy Units
+
+Services that copy Vault Agent output into bind-mounted runtime paths should
+be checked at both the copy unit and container level.
+
+```bash
+systemctl status authelia-config.service authelia-redis-conf.service --no-pager -l
+systemctl status authelia-app-authelia.service authelia-app-redis.service --no-pager -l
+podman volume inspect systemd-authelia-app-authelia-config
+```
+
+If a container cannot see a file that exists on the host, compare the volume
+`Options.device` path with the rendered `.volume` unit. A stale Podman named
+volume can keep pointing at an old bind source. Stop the dependent container,
+remove the stale volume only after confirming it is a bind volume, then start
+the generated `*-volume.service` and dependent container again.
+
 ## Diagnostics
 
 ### DNS

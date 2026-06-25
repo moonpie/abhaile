@@ -1,7 +1,7 @@
 [Unit]
 Description=Redis (sessions)
-Requires=abhaile-secrets-ready.service
-After=abhaile-secrets-ready.service
+Requires=abhaile-secrets-ready.service authelia-redis-conf.service
+After=abhaile-secrets-ready.service authelia-redis-conf.service
 
 [Container]
 Pod={{ pod }}

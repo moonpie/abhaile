@@ -111,6 +111,13 @@ Reference: `config/services/coredns-filtered/service.yaml`
 - [ ] Add `composition.vault_agent.templates[]` entries
 - [ ] Create Vault policy for AppRole access
 - [ ] Seed credentials in Vault KV
+- [ ] If a container needs copied secret output before startup, add a
+  service-owned oneshot copy unit and make the container `Requires=` /
+  `After=` that unit
+- [ ] If the same secret output needs refresh handling, add a path unit that
+  starts the same copy unit
+- [ ] Use `systemctl try-restart` in copy-unit post actions so first startup
+  and refresh can share the unit safely
 
 ## Optional: Caddy Ingress
 

@@ -7,4 +7,4 @@ Requires=abhaile-secrets-ready.service
 Type=oneshot
 ExecStartPre=/usr/bin/mkdir -p /srv/authelia/authelia/config
 ExecStart=/usr/bin/install -m 0640 -o root -g root /srv/vault/agent/out/authelia.configuration.yml /srv/authelia/authelia/config/configuration.yml
-ExecStartPost=systemctl restart authelia-app-authelia.service
+ExecStartPost=/usr/bin/systemctl try-restart authelia-app-authelia.service

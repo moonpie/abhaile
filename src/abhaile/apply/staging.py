@@ -9,7 +9,6 @@ import pwd
 from pathlib import Path
 
 from abhaile.apply.actions import (
-    atomic_copy_file,
     atomic_copy_file_with_perms,
     resolve_rendered_source,
 )
@@ -19,6 +18,7 @@ from abhaile.utils.errors import ApplyError
 
 LOG = logging.getLogger(__name__)
 _USER_KINDS = KIND_FAMILIES["user"]
+_DEFAULT_FILE_MODE = 0o644
 
 
 def _required_user_hints(entry: dict[str, object]) -> tuple[str, str, int, int | None]:
@@ -81,6 +81,17 @@ def _prepare_authorized_keys_parent(
         raise ApplyError(f"Failed to set ownership on {ssh_dir}: {exc}") from exc
 
 
+def _default_file_hints(entry: dict[str, object]) -> tuple[str, str, int]:
+    """Return default owner/group/mode for apply-managed non-user artifacts."""
+    apply_hints = entry.get("apply_hints")
+    if isinstance(apply_hints, dict) and bool(apply_hints.get("rootless")):
+        podman_user = apply_hints.get("podman_user")
+        if not isinstance(podman_user, str) or not podman_user:
+            raise ApplyError("Rootless artifact missing podman_user in apply_hints")
+        return podman_user, podman_user, _DEFAULT_FILE_MODE
+    return "root", "root", _DEFAULT_FILE_MODE
+
+
 def _copy_artifact_for_apply(action: dict[str, object], rendered_dir: Path) -> None:
     """Copy artifact for apply, using strict policy for user-managed kinds."""
     render_path = action.get("render_path")
@@ -124,4 +135,11 @@ def _copy_artifact_for_apply(action: dict[str, object], rendered_dir: Path) -> N
         )
         return
 
-    atomic_copy_file(source, target)
+    owner_user, owner_group, mode = _default_file_hints(action)
+    atomic_copy_file_with_perms(
+        source,
+        target,
+        mode=mode,
+        owner_user=owner_user,
+        owner_group=owner_group,
+    )
