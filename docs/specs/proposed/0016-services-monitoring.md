@@ -8,7 +8,7 @@ title: Monitoring and Observability Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-06-25
 related_adrs:
   - 0005-service-authoring-model
 supersedes: null
@@ -59,8 +59,11 @@ the full service definitions and render/deploy requirements.
 - [ ] All containerized services use deterministic /32 ipvlan-l2 addressing.
 - [ ] Vault-agent templates provide credentials where required (Grafana admin, Alertmanager
   notification creds, SNMP community strings).
-- [ ] Alertmanager fires on GitOps runner failures: non-zero exit code, rollback events
-  (host running prior commit), and unreachable rollback target (SPEC-2026-012).
+- [ ] Alertmanager fires on GitOps runner failures: non-zero exit code, dirty worktree,
+  rollback events (host running prior commit), unreachable rollback target, and stale
+  last-successful run (SPEC-2026-012).
+- [ ] Monitoring consumes GitOps runner diagnostic state and logs without requiring the
+  runner to implement Prometheus exposition itself.
 
 ## Constraints
 
@@ -235,6 +238,36 @@ jobs statically at render time:
 No runtime service discovery. Adding a new scrape target means updating the source config and
 re-rendering.
 
+### GitOps Runner Observability Inputs
+
+The GitOps runner remains a thin shell orchestrator owned by SPEC-2026-012. This monitoring
+spec should consume the runner's local evidence rather than move monitoring logic into the
+runner itself.
+
+Monitoring should account for:
+
+- `abhaile-runner.timer` active state.
+- `abhaile-runner.service` failed state.
+- `/var/lib/abhaile/runner/last-run-status` exit code, timestamp, and commit.
+- `/var/lib/abhaile/runner/last-successful-commit` commit, timestamp, and branch.
+- Any runner summary/current-phase state added by SPEC-2026-012 maintenance work.
+- Journald entries for checkout, render, apply, rollback, dirty worktree, and unrecoverable
+  git failures.
+
+Alert rules should distinguish:
+
+- a failed latest run from an old but still healthy last-successful commit;
+- a dirty worktree requiring operator intervention from a render/apply failure that can
+  attempt rollback;
+- a successful rollback from normal success, because the host is intentionally running a
+  prior commit;
+- a stale runner where neither success nor failure has been recorded within the expected
+  timer window.
+
+Prometheus can initially derive these signals from node-exporter textfile metrics, systemd
+unit metrics, or log-derived metrics once Loki/Promtail is available. The runner should not
+grow a long-running metrics endpoint.
+
 ### Secrets Requirements
 
 | Secret | Delivery | Consumer |
@@ -284,6 +317,8 @@ _To be recorded during implementation._
   assigned to the same host
 - [ ] Loki config includes syslog receiver on UDP 514 and TCP 1514
 - [ ] Promtail config ships journal and log files to Loki with correct labels
+- [ ] Monitoring captures GitOps runner status from systemd, runner state files, and/or
+  journald so checkout, render, apply, rollback, and dirty-worktree failures are diagnosable
 - [ ] Grafana provisioning includes Prometheus and Loki datasource definitions
 - [ ] Blackbox exporter config includes probe modules and target lists for internal, DMZ, and
   external endpoints

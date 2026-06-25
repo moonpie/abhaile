@@ -101,8 +101,10 @@ mapping, the runner exits with code 3 and a clear error message.
 #### Dirty Worktree Handling
 
 If the working tree has uncommitted changes at runner start, the runner refuses
-to proceed (exit 3). The runner does not stash or clean; operator intervention
-is required.
+to proceed (exit 3). The runner logs `git status --short`, staged
+`git diff --cached --name-status`, unstaged `git diff --name-status`, and recent
+reflog entries before exiting. The runner does not stash or clean; operator
+intervention is required.
 
 #### Fast-Forward Failure
 
@@ -239,7 +241,9 @@ All runner-owned state lives under `/var/lib/abhaile/runner/`:
 
 ```text
 /var/lib/abhaile/runner/
+├── current-run               # current phase while a run is active
 ├── last-successful-commit    # last applied commit record
+├── last-run-summary          # diagnostic summary of the last completed run
 ├── lock                      # flock-based lock file
 └── last-run-status           # exit code and timestamp of last run
 ```
@@ -251,6 +255,29 @@ This is separate from apply-owned state at `/var/lib/abhaile/state/`.
 ```text
 <exit-code> <ISO 8601 timestamp> <commit-attempted>
 ```
+
+`last-run-summary` format (plain text key/value pairs):
+
+```text
+host=<hostname>
+branch=<branch>
+remote=<remote>
+started_at=<ISO 8601 timestamp>
+finished_at=<ISO 8601 timestamp>
+duration_seconds=<seconds>
+phase=<final phase>
+outcome=<success|failure|dirty-worktree|rollback-success|already-current|...>
+exit_code=<exit code>
+current_sha=<current HEAD>
+target_sha=<commit-attempted>
+last_good_sha=<last successful commit or none>
+rollback_attempted=<true|false>
+```
+
+`current-run` uses the same key/value style for the active phase. It is updated
+before fetch, checkout, render, apply, and rollback, and removed after a completed
+success or failure. Monitoring can treat a stale `current-run` timestamp as a
+possible hung runner.
 
 #### Locking Strategy
 

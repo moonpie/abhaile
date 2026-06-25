@@ -82,12 +82,31 @@ sudo cat /var/lib/abhaile/runner/last-run-status
 # Last successful commit
 sudo cat /var/lib/abhaile/runner/last-successful-commit
 
+# Diagnostic summary from the last completed run
+sudo cat /var/lib/abhaile/runner/last-run-summary
+
+# Active phase if a run is currently in progress
+sudo test -f /var/lib/abhaile/runner/current-run && sudo cat /var/lib/abhaile/runner/current-run
+
 # Runner logs (last run)
 journalctl -u abhaile-runner.service --no-pager -n 50
 
 # Trigger manual run
 sudo systemctl start abhaile-runner.service
 ```
+
+If the runner reports a dirty worktree, inspect staged and unstaged state before
+repairing it:
+
+```bash
+sudo -H -u abhaile env HOME=/home/abhaile git -C /opt/abhaile status --short
+sudo -H -u abhaile env HOME=/home/abhaile git -C /opt/abhaile diff --name-status
+sudo -H -u abhaile env HOME=/home/abhaile git -C /opt/abhaile diff --cached --name-status
+sudo -H -u abhaile env HOME=/home/abhaile git -C /opt/abhaile reflog -n 5 --date=iso
+```
+
+Only restore paths after confirming the change is not intentional local
+operator work.
 
 ## Service Operations
 

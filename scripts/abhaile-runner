@@ -14,8 +14,13 @@ readonly RUNNER_STATE_DIR="${ABHAILE_OUTPUT}/runner"
 readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
 readonly LAST_COMMIT_FILE="${RUNNER_STATE_DIR}/last-successful-commit"
 readonly LAST_STATUS_FILE="${RUNNER_STATE_DIR}/last-run-status"
+readonly LAST_SUMMARY_FILE="${RUNNER_STATE_DIR}/last-run-summary"
+readonly CURRENT_RUN_FILE="${RUNNER_STATE_DIR}/current-run"
 readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"
 readonly ABHAILE_APPLY="${ABHAILE_VENV_BIN}/abhaile-apply"
+RUN_STARTED_AT=""
+RUN_STARTED_SECONDS=""
+RUN_TARGET_SHA=""
 
 log() { printf '[abhaile-runner] %s\n' "$*"; }
 die() { log "FATAL: $*"; exit 1; }
@@ -35,6 +40,42 @@ record_run_status() {
     local ts
     ts="$(date --iso-8601=seconds)"
     write_atomic "$LAST_STATUS_FILE" "${exit_code} ${ts} ${commit}"
+}
+
+record_run_summary() {
+    local exit_code="$1" phase="$2" outcome="$3" target_sha="${4:-unknown}" rollback="${5:-false}"
+    local ts duration current_sha last_good_sha
+    ts="$(date --iso-8601=seconds)"
+    current_sha="$(git rev-parse HEAD 2>/dev/null || printf 'unknown')"
+    last_good_sha="$(read_last_good_sha || true)"
+    duration="unknown"
+    if [[ -n "$RUN_STARTED_SECONDS" ]]; then
+        duration="$(($(date +%s) - RUN_STARTED_SECONDS))"
+    fi
+
+    write_atomic "$LAST_SUMMARY_FILE" "host=$(hostname -s)
+branch=${ABHAILE_BRANCH}
+remote=${ABHAILE_REMOTE}
+started_at=${RUN_STARTED_AT:-unknown}
+finished_at=${ts}
+duration_seconds=${duration}
+phase=${phase}
+outcome=${outcome}
+exit_code=${exit_code}
+current_sha=${current_sha}
+target_sha=${target_sha}
+last_good_sha=${last_good_sha:-none}
+rollback_attempted=${rollback}"
+}
+
+record_current_phase() {
+    local phase="$1" target_sha="${2:-${RUN_TARGET_SHA:-unknown}}"
+    write_atomic "$CURRENT_RUN_FILE" "host=$(hostname -s)
+branch=${ABHAILE_BRANCH}
+remote=${ABHAILE_REMOTE}
+phase=${phase}
+target_sha=${target_sha}
+updated_at=$(date --iso-8601=seconds)"
 }
 
 read_last_good_sha() {
@@ -61,6 +102,9 @@ hosts = [k for item in m.get('abhaile', []) for k in item]
 sys.exit(0 if '$host' in hosts else 1)
 " 2>/dev/null; then
         log "Host '${host}' not found in config/mapping.yaml"
+        record_run_status 3 "unknown"
+        record_run_summary 3 "validate_host" "failure"
+        rm -f "$CURRENT_RUN_FILE"
         exit 3
     fi
 }
@@ -68,6 +112,17 @@ sys.exit(0 if '$host' in hosts else 1)
 check_worktree_clean() {
     if [[ -n "$(git status --porcelain)" ]]; then
         log "Dirty worktree detected; operator intervention required"
+        log "dirty status:"
+        git status --short || true
+        log "dirty staged changes:"
+        git diff --cached --name-status || true
+        log "dirty unstaged changes:"
+        git diff --name-status || true
+        log "recent git reflog:"
+        git reflog -n 5 --date=iso || true
+        record_run_status 3 "unknown"
+        record_run_summary 3 "check_worktree_clean" "dirty-worktree"
+        rm -f "$CURRENT_RUN_FILE"
         exit 3
     fi
 }
@@ -75,29 +130,35 @@ check_worktree_clean() {
 # --- Pipeline steps ----------------------------------------------------------
 
 do_fetch() {
+    record_current_phase "fetch"
     log "fetch: ${ABHAILE_REMOTE}/${ABHAILE_BRANCH}"
     if [[ -f "$ABHAILE_GIT_SSH_KEY" ]]; then
         export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -i ${ABHAILE_GIT_SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new}"
     fi
-    if ! git fetch "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"; then
+    if ! git fetch --prune "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"; then
+        record_run_status 1 "unknown"
+        record_run_summary 1 "fetch" "failure"
+        rm -f "$CURRENT_RUN_FILE"
         die "git fetch failed (network/auth issue)"
     fi
 }
 
 do_checkout() {
     local target_sha="$1"
-    log "checkout: fast-forward to ${target_sha:0:12}"
+    record_current_phase "checkout" "$target_sha"
 
     local current_sha
     current_sha="$(git rev-parse HEAD)"
+    log "checkout: fast-forward current=${current_sha:0:12} target=${target_sha:0:12}"
     if ! git merge-base --is-ancestor "$current_sha" "$target_sha" 2>/dev/null; then
         log "Cannot fast-forward: current HEAD is not an ancestor of target"
+        record_run_status 1 "$target_sha"
+        record_run_summary 1 "checkout" "fast-forward-failure" "$target_sha"
+        rm -f "$CURRENT_RUN_FILE"
         exit 1
     fi
 
-    # Fast-forward local branch to target, then checkout
-    git update-ref "refs/heads/${ABHAILE_BRANCH}" "$target_sha"
-    git checkout --quiet "$ABHAILE_BRANCH"
+    git merge --ff-only --quiet "$target_sha"
 }
 
 do_render() {
@@ -105,6 +166,7 @@ do_render() {
     local verbose_flag=""
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
+    record_current_phase "render"
     log "render: host=${host} output=${ABHAILE_OUTPUT}"
     "$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT" $verbose_flag
 }
@@ -113,6 +175,7 @@ do_apply() {
     local verbose_flag=""
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
+    record_current_phase "apply"
     log "apply: output=${ABHAILE_OUTPUT}"
     sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT" $verbose_flag
 }
@@ -128,6 +191,7 @@ do_rollback() {
     local host="$1" target_sha="$2"
     local last_good_sha
     last_good_sha="$(read_last_good_sha)"
+    record_current_phase "rollback" "$target_sha"
 
     if [[ -z "$last_good_sha" ]]; then
         log "rollback: no last-known-good commit (first run); cannot rollback"
@@ -156,6 +220,8 @@ do_rollback() {
 main() {
     local host
     host="$(hostname -s)"
+    RUN_STARTED_AT="$(date --iso-8601=seconds)"
+    RUN_STARTED_SECONDS="$(date +%s)"
 
     # Ensure state directory exists with correct ownership
     mkdir -p "$RUNNER_STATE_DIR"
@@ -168,7 +234,8 @@ main() {
         exit 2
     fi
 
-    log "start: host=${host} branch=${ABHAILE_BRANCH} remote=${ABHAILE_REMOTE}"
+    log "start: host=${host} branch=${ABHAILE_BRANCH} remote=${ABHAILE_REMOTE} cwd=${PWD}"
+    record_current_phase "start"
 
     validate_host "$host"
     check_worktree_clean
@@ -177,6 +244,7 @@ main() {
     # Detect: compare fetched HEAD against last-applied commit
     local target_sha last_sha current_sha
     target_sha="$(git rev-parse "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}")"
+    RUN_TARGET_SHA="$target_sha"
     last_sha="$(read_last_good_sha)"
 
     if [[ "$target_sha" == "$last_sha" ]]; then
@@ -184,11 +252,14 @@ main() {
         if [[ "$current_sha" == "$target_sha" ]]; then
             log "detect: already at target commit ${target_sha:0:12}; nothing to do"
             record_run_status 0 "$target_sha"
+            record_run_summary 0 "detect" "already-current" "$target_sha" "false"
+            rm -f "$CURRENT_RUN_FILE"
             exit 0
         fi
     fi
 
-    log "detect: target=${target_sha:0:12} last-good=${last_sha:-none}"
+    current_sha="$(git rev-parse HEAD)"
+    log "detect: current=${current_sha:0:12} target=${target_sha:0:12} last-good=${last_sha:-none}"
 
     # Checkout (fast-forward only)
     do_checkout "$target_sha"
@@ -198,6 +269,8 @@ main() {
         log "success: applied commit ${target_sha:0:12}"
         record_success "$target_sha"
         record_run_status 0 "$target_sha"
+        record_run_summary 0 "complete" "success" "$target_sha" "false"
+        rm -f "$CURRENT_RUN_FILE"
         return_to_branch
         exit 0
     fi
@@ -207,10 +280,14 @@ main() {
     if do_rollback "$host" "$target_sha"; then
         return_to_branch
         record_run_status 0 "$target_sha"
+        record_run_summary 0 "rollback" "rollback-success" "$target_sha" "true"
+        rm -f "$CURRENT_RUN_FILE"
         exit 0
     else
         return_to_branch
         record_run_status 1 "$target_sha"
+        record_run_summary 1 "rollback" "failure" "$target_sha" "true"
+        rm -f "$CURRENT_RUN_FILE"
         exit 1
     fi
 }

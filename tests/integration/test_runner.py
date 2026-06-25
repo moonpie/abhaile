@@ -20,6 +20,7 @@ def runner_repo(tmp_path: Path) -> Path:
 
     # Init git repo
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "checkout", "-q", "-b", "main"], cwd=repo, check=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=repo,
@@ -55,6 +56,17 @@ def runner_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _git(repo: Path, *args: str) -> str:
+    """Run git in a test repository and return stdout."""
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def _run_runner(
     repo: Path, env_overrides: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -73,6 +85,57 @@ def _run_runner(
         env=env,
         timeout=10,
     )
+
+
+def _make_runner_executable(path: Path, body: str) -> None:
+    """Create an executable helper script for runner integration tests."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    path.chmod(0o755)
+
+
+def _prepare_successful_runner(repo: Path) -> dict[str, str]:
+    """Prepare fake runner dependencies and a local remote."""
+    hostname = subprocess.run(
+        ["hostname", "-s"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    mapping = {"abhaile": [{hostname: ["svc-a"]}, {"deimos": ["svc-b"]}]}
+    (repo / "config" / "mapping.yaml").write_text(yaml.dump(mapping))
+    _git(repo, "add", "config/mapping.yaml")
+    _git(repo, "commit", "-m", "test host mapping")
+
+    remote = repo.parent / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-q", "-u", "origin", "main")
+
+    venv_bin = repo / ".venv" / "bin"
+    _make_runner_executable(
+        venv_bin / "abhaile-render",
+        '#!/usr/bin/env bash\nset -euo pipefail\nmkdir -p "$4/rendered"\n',
+    )
+    _make_runner_executable(
+        venv_bin / "abhaile-apply",
+        "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+    )
+    fake_bin = repo.parent / "fake-bin"
+    _make_runner_executable(
+        fake_bin / "sudo",
+        '#!/usr/bin/env bash\nset -euo pipefail\nexec "$@"\n',
+    )
+
+    return {
+        "ABHAILE_VENV_BIN": str(venv_bin),
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+
+
+def _commit_and_push(repo: Path, message: str) -> str:
+    """Commit all staged/unstaged changes and push to origin/main."""
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", message)
+    _git(repo, "push", "-q", "origin", "main")
+    return _git(repo, "rev-parse", "HEAD")
 
 
 @pytest.mark.integration
@@ -162,6 +225,78 @@ class TestRunnerExitCodes:
         result = _run_runner(runner_repo)
         assert result.returncode == 3
         assert "Dirty worktree" in result.stdout or "dirty" in result.stdout.lower()
+        assert "dirty status:" in result.stdout
+        assert "dirty staged changes:" in result.stdout
+        assert "A\tdirty.txt" in result.stdout
+
+    def test_fast_forward_add_leaves_worktree_clean(self, runner_repo: Path) -> None:
+        """Runner fast-forward handles added files without staging inverse deletions."""
+        env = _prepare_successful_runner(runner_repo)
+        (runner_repo / "added.txt").write_text("added\n")
+        target_sha = _commit_and_push(runner_repo, "add file")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _git(runner_repo, "status", "--short") == ""
+        assert (runner_repo / "added.txt").read_text() == "added\n"
+        assert _git(runner_repo, "rev-parse", "HEAD") == target_sha
+
+    def test_fast_forward_modify_leaves_worktree_clean(self, runner_repo: Path) -> None:
+        """Runner fast-forward handles modified files without preserving old content."""
+        env = _prepare_successful_runner(runner_repo)
+        config = runner_repo / "config" / "mapping.yaml"
+        before = config.read_text()
+        config.write_text(before + "# changed\n")
+        target_sha = _commit_and_push(runner_repo, "modify file")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _git(runner_repo, "status", "--short") == ""
+        assert config.read_text().endswith("# changed\n")
+        assert _git(runner_repo, "rev-parse", "HEAD") == target_sha
+
+    def test_fast_forward_delete_leaves_worktree_clean(self, runner_repo: Path) -> None:
+        """Runner fast-forward handles deleted files without staging inverse additions."""
+        env = _prepare_successful_runner(runner_repo)
+        doomed = runner_repo / "remove-me.txt"
+        doomed.write_text("remove me\n")
+        _commit_and_push(runner_repo, "add removable file")
+        doomed.unlink()
+        target_sha = _commit_and_push(runner_repo, "delete file")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert _git(runner_repo, "status", "--short") == ""
+        assert not doomed.exists()
+        assert _git(runner_repo, "rev-parse", "HEAD") == target_sha
+
+    def test_runner_writes_summary_for_successful_run(self, runner_repo: Path) -> None:
+        """Runner records diagnostic summary state after success."""
+        env = _prepare_successful_runner(runner_repo)
+        (runner_repo / "added.txt").write_text("added\n")
+        target_sha = _commit_and_push(runner_repo, "add file")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        summary = runner_repo.parent / "output" / "runner" / "last-run-summary"
+        current = runner_repo.parent / "output" / "runner" / "current-run"
+        assert result.returncode == 0, result.stdout + result.stderr
+        summary_text = summary.read_text()
+        assert "phase=complete" in summary_text
+        assert "outcome=success" in summary_text
+        assert f"target_sha={target_sha}" in summary_text
+        assert not current.exists()
 
     def test_lock_contention_exits_2(self, runner_repo: Path) -> None:
         """Runner exits 2 when lock is already held."""
