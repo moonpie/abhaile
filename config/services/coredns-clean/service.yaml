@@ -13,6 +13,5 @@ composition:
         variables:
           bind_ip: '%%network.services.coredns-clean.address | strip_cidr%%'
           forward_to: 9.9.9.9 149.112.112.112 1.1.1.1 1.0.0.1
-          omada_ip: '%%network.services.omada-controller.address | strip_cidr%%'
           dmz_caddy_ip: '%%network.services.caddy-dmz.address | strip_cidr%%'
       destination: /etc/coredns/Corefile

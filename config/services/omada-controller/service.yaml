@@ -3,11 +3,11 @@ podman:
   user: root
   network: ipvlan-l2
 apply:
-  config_change_restart_unit: omada-controller.service
+  config_change_restart_unit: null
 composition:
   config:
-    - source: omada-controller/config/omada-controller.env
-      destination: /etc/omada-controller/omada-controller.env
+    - source: omada-controller/config/omada.js
+      destination: /srv/omada-controller/mongodb/initdb/omada.js
     - source: omada-controller/tools/rebuild-omada-cert.sh
       destination: /usr/local/lib/abhaile/tools/rebuild-omada-cert.sh
   systemd:
@@ -15,6 +15,18 @@ composition:
       destination: /etc/systemd/system/rebuild-omada-cert.service
     - source: omada-controller/systemd/rebuild-omada-cert.path
       destination: /etc/systemd/system/rebuild-omada-cert.path
+      enable: true
+      start: true
+    - source: omada-controller/systemd/omada-controller-env.service
+      destination: /etc/systemd/system/omada-controller-env.service
+    - source: omada-controller/systemd/omada-controller-env.path
+      destination: /etc/systemd/system/omada-controller-env.path
+      enable: true
+      start: true
+    - source: omada-controller/systemd/omada-mongodb-env.service
+      destination: /etc/systemd/system/omada-mongodb-env.service
+    - source: omada-controller/systemd/omada-mongodb-env.path
+      destination: /etc/systemd/system/omada-mongodb-env.path
       enable: true
       start: true
   ingress:
@@ -25,19 +37,43 @@ composition:
     dmz:
       blocks:
         - omada-controller/caddy/dmz-ingress.txt
-  container:
-    named_volumes:
-      - name: cert
-        host_path: /srv/omada-controller/cert
-        mount_path: /cert
-      - name: data
-        host_path: /srv/omada-controller/data
-        mount_path: /opt/tplink/EAPController/data
-      - name: logs
-        host_path: /srv/omada-controller/logs
-        mount_path: /opt/tplink/EAPController/logs
-      - name: host-certs
-        host_path: /etc/ssl/certs
-        mount_path: /etc/ssl/certs
-        mode: ro
-        shared: true
+  vault_agent:
+    templates:
+      - source: omada-controller/templates/omada-controller.env.ctmpl
+        out: omada-controller.env
+        perms: '0640'
+      - source: omada-controller/templates/omada-mongodb.env.ctmpl
+        out: omada-mongodb.env
+        perms: '0640'
+  pod:
+    containers:
+      - name: omada-controller
+        container:
+          named_volumes:
+            - name: cert
+              host_path: /srv/omada-controller/omada-controller/cert
+              mount_path: /cert
+            - name: data
+              host_path: /srv/omada-controller/omada-controller/data
+              mount_path: /opt/tplink/EAPController/data
+            - name: logs
+              host_path: /srv/omada-controller/omada-controller/logs
+              mount_path: /opt/tplink/EAPController/logs
+            - name: host-certs
+              host_path: /etc/ssl/certs
+              mount_path: /etc/ssl/certs
+              mode: ro
+              shared: true
+      - name: mongodb
+        container:
+          named_volumes:
+            - name: config
+              host_path: /srv/omada-controller/mongodb/config
+              mount_path: /data/configdb
+            - name: data
+              host_path: /srv/omada-controller/mongodb/data
+              mount_path: /data/db
+          mounted_files:
+            - host_path: /srv/omada-controller/mongodb/initdb/omada.js
+              mount_path: /docker-entrypoint-initdb.d/omada.js
+              mode: ro

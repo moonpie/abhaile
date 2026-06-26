@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy Omada Controller environment from Vault Agent
+After=abhaile-secrets-ready.service
+Requires=abhaile-secrets-ready.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root /etc/omada-controller
+ExecStart=/usr/bin/install -m 0640 -o root -g root /srv/vault/agent/out/omada-controller.env /etc/omada-controller/omada-controller.env
+ExecStartPost=/usr/bin/systemctl try-restart omada-controller-app-omada-controller.service

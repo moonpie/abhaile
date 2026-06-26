@@ -146,6 +146,17 @@ class TestRenderApplyE2E:
         assert "EnvironmentFile=/srv/vault/agent/out/caddy-dns-desec.env" in caddy_dmz_quadlet
         assert "EnvironmentFile=/etc/caddy/dns.env" not in caddy_dmz_quadlet
 
+        for rendered_root, service_name in (
+            (phobos_root, "coredns-filtered"),
+            (deimos_root, "coredns-clean"),
+        ):
+            corefile = (rendered_root / f"services/{service_name}/etc/coredns/Corefile").read_text(
+                encoding="utf-8"
+            )
+            assert "controller_url ${OMADA_URL}" in corefile
+            assert "site ${OMADA_SITE}" in corefile
+            assert "controller_url https://172.20.20.220:8043" not in corefile
+
         authelia_quadlet = (
             phobos_root / "services/authelia/etc/containers/systemd/authelia-app-authelia.container"
         ).read_text(encoding="utf-8")
@@ -170,19 +181,78 @@ class TestRenderApplyE2E:
             "ExecStartPost=/usr/bin/systemctl try-restart authelia-app-authelia.service"
             in authelia_copy_unit
         )
+        assert "ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root" in authelia_copy_unit
         assert (
             "ExecStartPost=/usr/bin/systemctl try-restart authelia-app-redis.service"
             in redis_copy_unit
         )
+        assert "ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root" in redis_copy_unit
+        assert "Notify=healthy" in redis_quadlet
+        assert "StopSignal=SIGTERM" in redis_quadlet
+        assert "StopTimeout=60" in redis_quadlet
 
         omada_rebuild = (
             phobos_root
             / "services/omada-controller/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh"
         )
         assert omada_rebuild.exists()
-        assert "systemctl restart omada-controller.service" in omada_rebuild.read_text(
+        omada_rebuild_content = omada_rebuild.read_text(encoding="utf-8")
+        assert 'OMADA_ENV="${OMADA_ENV:-/etc/omada-controller/omada-controller.env}"' in (
+            omada_rebuild_content
+        )
+        assert (
+            'OUT_DIR="${OUT_DIR:-/srv/omada-controller/omada-controller/cert}"'
+            in omada_rebuild_content
+        )
+        assert "systemctl try-restart omada-controller-app-omada-controller.service" in (
+            omada_rebuild_content
+        )
+
+        omada_service_root = phobos_root / "services/omada-controller/etc/containers/systemd"
+        assert (omada_service_root / "omada-controller-app.pod").exists()
+        omada_controller_container = (
+            omada_service_root / "omada-controller-app-omada-controller.container"
+        )
+        omada_mongodb_container = omada_service_root / "omada-controller-app-mongodb.container"
+        assert omada_controller_container.exists()
+        assert (omada_service_root / "omada-controller-app-omada-controller.image").exists()
+        assert omada_mongodb_container.exists()
+        assert (omada_service_root / "omada-controller-app-mongodb.image").exists()
+        omada_controller_content = omada_controller_container.read_text(encoding="utf-8")
+        omada_mongodb_content = omada_mongodb_container.read_text(encoding="utf-8")
+        assert "EnvironmentFile=/etc/omada-controller/omada-controller.env" in (
+            omada_controller_content
+        )
+        assert "omada-controller-env.service" in omada_controller_content
+        assert "omada-controller-app-mongodb.service" in omada_controller_content
+        assert "EnvironmentFile=/etc/omada-controller/omada-mongodb.env" in (omada_mongodb_content)
+        assert "omada-mongodb-env.service" in omada_mongodb_content
+        assert "HealthCmd=" in omada_mongodb_content
+        assert "Notify=healthy" in omada_mongodb_content
+        assert "StopSignal=SIGTERM" in omada_mongodb_content
+        assert "StopTimeout=60" in omada_mongodb_content
+        assert "/docker-entrypoint-initdb.d/omada.js:ro" in omada_mongodb_content
+        assert "Image=" in (
+            omada_service_root / "omada-controller-app-omada-controller.image"
+        ).read_text(encoding="utf-8")
+        assert "Image=" in (omada_service_root / "omada-controller-app-mongodb.image").read_text(
             encoding="utf-8"
         )
+
+        omada_init = (
+            phobos_root / "services/omada-controller/srv/omada-controller/mongodb/initdb/omada.js"
+        )
+        assert omada_init.exists()
+        omada_init_content = omada_init.read_text(encoding="utf-8")
+        assert "process.env.OMADA_MONGODB_USERNAME" in omada_init_content
+        assert "process.env.OMADA_MONGODB_PASSWORD" in omada_init_content
+
+        omada_env_path = phobos_root / "services/omada-controller/etc/systemd/system"
+        assert not (omada_env_path / "omada-mongodb-ready.service").exists()
+        assert (omada_env_path / "omada-controller-env.path").exists()
+        assert (omada_env_path / "omada-controller-env.service").exists()
+        assert (omada_env_path / "omada-mongodb-env.path").exists()
+        assert (omada_env_path / "omada-mongodb-env.service").exists()
 
         for rendered_root in (phobos_root, deimos_root):
             zone_root = (

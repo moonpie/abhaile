@@ -180,7 +180,9 @@ addresses. coredns-common and chrony-common are composition-only targets
 
 - Provides Containerfile, build quadlet (`coredns-omada.build`), and install service.
 - Deploys the main `coredns.service` systemd unit.
-- Vault-agent template: `coredns-omada.env.ctmpl` for Omada API credentials.
+- Vault-agent template: `coredns-omada.env.ctmpl` for Omada API URL, site, and
+  credentials. The URL uses the Omada Controller service hostname rather than
+  the service IP so TLS verification matches the Caddy-issued certificate.
 - Systemd path/service: `coredns-omada-env.path` watches env file for reload.
 
 **coredns-filtered** — ad-filtering DNS resolver on phobos.
@@ -241,14 +243,30 @@ addresses. coredns-common and chrony-common are composition-only targets
 **omada-controller** — TP-Link network controller on phobos.
 
 - `podman.user: root`, `podman.network: ipvlan-l2`
-- Static env file at `/etc/omada-controller/omada-controller.env`.
+- Pod service with an Omada controller container and local-only MongoDB container.
+- Controller uses `MONGO_EXTERNAL=true` with MongoDB bound to `127.0.0.1`
+  inside the shared pod network namespace.
+- Vault-agent templates render controller and MongoDB environment files to
+  `/srv/vault/agent/out/omada-controller.env` and
+  `/srv/vault/agent/out/omada-mongodb.env`.
+- `omada-controller-env.service` and `omada-mongodb-env.service` materialize
+  those files into `/etc/omada-controller/` before the containers start, using
+  the same service-facing config boundary as the original Omada controller unit.
+- MongoDB is initialized from the repo-managed non-secret init script at
+  `/srv/omada-controller/mongodb/initdb/omada.js`; the script reads the Omada
+  database username and password from MongoDB container environment variables.
+- MongoDB uses its container healthcheck with Quadlet `Notify=healthy`, so the
+  MongoDB systemd unit only reports started after the database is healthy. The
+  controller depends directly on that unit, matching the external-Mongo
+  readiness contract from the upstream Compose examples.
 - Certificate chain rebuild: `rebuild-omada-cert.path` watches Caddy internal
   CA cert file, triggers `rebuild-omada-cert.service` to run the repo-managed
   `/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh`, concatenate leaf + root CA,
-  copy the matching key, and restart the controller.
+  copy the matching key, and try-restart the controller container.
 - Contributes ingress blocks to both caddy-internal (internal + svc-cert) and
   caddy-dmz (dmz-ingress for hairpin NAT).
-- Named volumes: `cert`, `data`, `logs`, `host-certs`.
+- Controller named volumes: `cert`, `data`, `logs`, `host-certs`.
+- MongoDB named volumes: `config`, `data`.
 
 ### Composition Patterns
 
@@ -264,7 +282,8 @@ authoring model:
 
 **Vault-agent template aggregation** (`composition.vault_agent.templates`):
 
-- authelia, caddy-dmz, coredns-omada, and ddclient each declare templates.
+- authelia, caddy-dmz, coredns-omada, ddclient, and omada-controller each
+  declare templates.
 - vault-agent on the same host collects all declared templates into its
   `config.hcl` and copies source `.ctmpl` files to the templates volume.
 - On phobos: authelia + caddy-dmz + coredns-omada + ddclient templates aggregated.
@@ -281,6 +300,8 @@ authoring model:
 
 - authelia uses a pod with two containers (authelia + redis) sharing a network
   namespace.
+- omada-controller uses a pod with two containers (controller + MongoDB)
+  sharing a network namespace.
 
 **Host-native services** (`systemd.network: service-32`):
 
@@ -305,7 +326,13 @@ systemd-networkd (host interfaces + ipvlan-l2 + VLANs)
                 → authelia-app-authelia.service
               → caddy-dmz (After=abhaile-secrets-ready)
           → caddy-internal (After=vault)
-            → omada-controller (After=caddy-internal, needs internal CA cert)
+            → omada-mongodb-env.service
+              → omada-controller-app-mongodb
+                 (After=abhaile-secrets-ready, omada-mongodb-env)
+            → omada-controller-env.service
+              → omada-controller-app-omada-controller
+                 (After=abhaile-secrets-ready, omada-controller-env,
+                  omada-controller-app-mongodb; MongoDB unit uses Notify=healthy)
 ```
 
 On deimos the chain is shorter:
@@ -326,8 +353,14 @@ Key dependency semantics:
   credentials).
 - Authelia containers depend on service-owned copy units that materialize
   Vault Agent output into their bind-mounted config directories before startup.
-- omada-controller depends on caddy-internal (needs internal CA certificate
-  for its cert chain rebuild).
+- omada-controller MongoDB depends on `abhaile-secrets-ready` for root and
+  application database credentials, and on `omada-mongodb-env.service` to
+  materialize them into `/etc/omada-controller/omada-mongodb.env`.
+- omada-controller depends on `abhaile-secrets-ready` for `EAP_MONGOD_URI`, and
+  on `omada-controller-env.service` to materialize it into
+  `/etc/omada-controller/omada-controller.env`. It also depends on the MongoDB
+  container unit, which uses `Notify=healthy` for the local external database
+  readiness gate.
 - ddclient depends on `abhaile-secrets-ready` (needs deSEC credentials from
   vault-agent).
 
@@ -347,6 +380,10 @@ The secrets delivery path for core services:
      config volume.
    - `authelia-redis-conf.service` copies `authelia-redis.conf` into the Redis
      config volume.
+   - `omada-controller-env.service` copies `omada-controller.env` into
+     `/etc/omada-controller/`.
+   - `omada-mongodb-env.service` copies `omada-mongodb.env` into
+     `/etc/omada-controller/`.
 1. Per-service systemd path units watch their specific output files and re-run
    copy or restart handlers on refresh:
    - `authelia-config.path` → starts `authelia-config.service`.
@@ -354,9 +391,19 @@ The secrets delivery path for core services:
    - `caddy-dns-desec.path` → restarts caddy-dmz with new env file.
    - `coredns-omada-env.path` → restarts coredns with new Omada credentials.
    - `ddclient-conf.path` → restarts ddclient with new deSEC credentials.
+   - `omada-controller-env.path` → starts `omada-controller-env.service`.
+   - `omada-mongodb-env.path` → starts `omada-mongodb-env.service`.
+
+Omada controller and MongoDB Quadlets read service-facing env files from
+`/etc/omada-controller/`. The MongoDB init script is static and non-secret; the
+MongoDB credentials and controller `EAP_MONGOD_URI` come only from Vault
+Agent-rendered env files that are copied into that directory. Changing MongoDB
+credentials is a deliberate maintenance operation because existing MongoDB
+users are not recreated automatically after first boot.
 
 Authelia copy services use `systemctl try-restart` for downstream refresh so
 initial startup does not require the target container to already be active.
+Omada env copy services use the same `try-restart` pattern.
 
 No resolved secret values appear in rendered repo output. Render produces only
 the `.ctmpl` source files, `config.hcl` template block declarations, and

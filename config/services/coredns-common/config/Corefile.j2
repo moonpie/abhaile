@@ -13,10 +13,10 @@
     file /etc/coredns/zones/{{ zone.name.rstrip('.') }}.zone
 
     # Omada dynamic client/device/DHCP records
-    # Uses direct IP to avoid DNS bootstrap/circular deps.
+    # URL/site and credentials come from /etc/coredns/omada.env.
     omada {
-        controller_url https://{{ service.config.omada_ip }}:8043
-        site .*
+        controller_url ${OMADA_URL}
+        site ${OMADA_SITE}
         username ${OMADA_USERNAME}
         password ${OMADA_PASSWORD}
         resolve_clients true
@@ -24,6 +24,7 @@
         resolve_dhcp_reservations true
         stale_record_duration 24h
         ignore_startup_errors true
+        fallthrough
     }
 }
 {% endfor %}

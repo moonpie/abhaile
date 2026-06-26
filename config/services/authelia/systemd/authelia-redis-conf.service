@@ -5,6 +5,6 @@ Requires=abhaile-secrets-ready.service
 
 [Service]
 Type=oneshot
-ExecStartPre=/usr/bin/mkdir -p /srv/authelia/redis/config
+ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root /srv/authelia/redis/config
 ExecStart=/usr/bin/install -m 0640 -o root -g root /srv/vault/agent/out/authelia-redis.conf /srv/authelia/redis/config/redis.conf
 ExecStartPost=/usr/bin/systemctl try-restart authelia-app-redis.service

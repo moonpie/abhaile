@@ -256,8 +256,12 @@ systemctl restart systemd-networkd
 
    ```bash
    systemctl restart caddy-internal.service caddy-dmz.service
-   systemctl restart authelia-app.service
-   systemctl restart omada-controller.service
+   systemctl restart authelia-app-redis.service
+   systemctl restart authelia-app-authelia.service
+   systemctl start omada-mongodb-env.service
+   systemctl restart omada-controller-app-mongodb.service
+   systemctl start omada-controller-env.service
+   systemctl restart omada-controller-app-omada-controller.service
    ```
 
 1. **Verify:** `curl -s http://172.20.20.204:8200/v1/sys/seal-status | jq .sealed`
@@ -333,7 +337,10 @@ podman image prune -a -f                         # remove all unused images
 podman volume prune -f                           # remove unused volumes
 
 # Nuclear: reset container storage (ALL containers lost, will regenerate from quadlets)
-systemctl stop vault.service blocky.service caddy-internal.service caddy-dmz.service authelia-app.service omada-controller.service
+systemctl stop vault.service blocky.service caddy-internal.service caddy-dmz.service
+systemctl stop authelia-app-authelia.service authelia-app-redis.service
+systemctl stop omada-controller-app-omada-controller.service
+systemctl stop omada-controller-app-mongodb.service
 podman system reset --force
 systemctl daemon-reload
 # Then follow Full Host Recovery §5 from step 5

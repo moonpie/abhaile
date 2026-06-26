@@ -266,6 +266,10 @@ class TestQuadretsIntegration:
             "Requires=abhaile-secrets-ready.service authelia-redis-conf.service"
         ) in redis_content
         assert "After=abhaile-secrets-ready.service authelia-redis-conf.service" in redis_content
+        assert "HealthStartPeriod=10s" in redis_content
+        assert "Notify=healthy" in redis_content
+        assert "StopSignal=SIGTERM" in redis_content
+        assert "StopTimeout=60" in redis_content
 
         # Verify redis image file
         redis_image = (
@@ -285,6 +289,76 @@ class TestQuadretsIntegration:
         assert any(
             "authelia-app-redis-" in name for name in volume_names
         ), "Should have volume(s) for redis container with authelia-app-redis- prefix"
+
+    def test_render_actual_omada_controller_pod(self, tmp_path: Path) -> None:
+        """Test rendering omada-controller pod service with MongoDB."""
+        repo_root = Path(__file__).parent.parent.parent
+        config_root = repo_root / "config"
+
+        omada_yaml = config_root / "services" / "omada-controller" / "service.yaml"
+        if not omada_yaml.exists():
+            pytest.skip(f"Test requires omada-controller service at {omada_yaml}")
+
+        network_yaml = config_root / "network.yaml"
+        if not network_yaml.exists():
+            pytest.skip(f"Test requires network.yaml at {network_yaml}")
+
+        output_dir = tmp_path / "services"
+        network = read_yaml(network_yaml)
+
+        render_service_quadlets(
+            "phobos",
+            ["omada-controller"],
+            network,
+            config_root,
+            output_dir,
+        )
+
+        service_dir = output_dir / "omada-controller" / "etc/containers/systemd"
+        pod = service_dir / "omada-controller-app.pod"
+        controller = service_dir / "omada-controller-app-omada-controller.container"
+        mongodb = service_dir / "omada-controller-app-mongodb.container"
+
+        assert pod.exists()
+        assert controller.exists()
+        assert mongodb.exists()
+        assert (service_dir / "omada-controller-app-omada-controller.image").exists()
+        assert (service_dir / "omada-controller-app-mongodb.image").exists()
+
+        pod_content = pod.read_text()
+        assert "Network=services.network" in pod_content
+        assert "IP=172.20.20.220" in pod_content
+
+        controller_content = controller.read_text()
+        assert "Pod=omada-controller-app.pod" in controller_content
+        assert "Image=omada-controller-app-omada-controller.image" in controller_content
+        assert (
+            "After=abhaile-secrets-ready.service omada-controller-env.service "
+            "omada-controller-app-mongodb.service" in controller_content
+        )
+        assert (
+            "Requires=abhaile-secrets-ready.service omada-controller-env.service "
+            "omada-controller-app-mongodb.service" in controller_content
+        )
+        assert "EnvironmentFile=/etc/omada-controller/omada-controller.env" in controller_content
+
+        mongodb_content = mongodb.read_text()
+        assert "Pod=omada-controller-app.pod" in mongodb_content
+        assert "Image=omada-controller-app-mongodb.image" in mongodb_content
+        assert "After=abhaile-secrets-ready.service omada-mongodb-env.service" in mongodb_content
+        assert "Requires=abhaile-secrets-ready.service omada-mongodb-env.service" in (
+            mongodb_content
+        )
+        assert "EnvironmentFile=/etc/omada-controller/omada-mongodb.env" in mongodb_content
+        assert "Exec=mongod --dbpath /data/db --bind_ip 127.0.0.1" in mongodb_content
+        assert "HealthCmd=" in mongodb_content
+        assert "Notify=healthy" in mongodb_content
+        assert "StopSignal=SIGTERM" in mongodb_content
+        assert "StopTimeout=60" in mongodb_content
+        assert (
+            "Volume=/srv/omada-controller/mongodb/initdb/omada.js:/docker-entrypoint-initdb.d/omada.js:ro"
+            in mongodb_content
+        )
 
         # Verify network quadlet
         network_file = (

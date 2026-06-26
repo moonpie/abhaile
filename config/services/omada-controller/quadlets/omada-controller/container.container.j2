@@ -1,13 +1,12 @@
 [Unit]
 Description=TP-Link Omada Controller
-After=network-online.target
-Wants=network-online.target
+After=abhaile-secrets-ready.service omada-controller-env.service omada-controller-app-mongodb.service
+Requires=abhaile-secrets-ready.service omada-controller-env.service omada-controller-app-mongodb.service
 
 [Container]
 EnvironmentFile=/etc/omada-controller/omada-controller.env
+Pod={{ pod }}
 Image={{ image }}
-Network={{ network.services[service_name].vlan }}.network
-PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
 StopTimeout=60
 Timezone=local
 Ulimit=nofile=4096:8192

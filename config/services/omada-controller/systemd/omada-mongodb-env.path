@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Omada MongoDB environment from Vault Agent
+
+[Path]
+PathChanged=/srv/vault/agent/out/omada-mongodb.env
+
+[Install]
+WantedBy=multi-user.target

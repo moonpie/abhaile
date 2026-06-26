@@ -5,7 +5,7 @@ LEAF_CERT="${LEAF_CERT:-/srv/caddy/internal/data/certificates/local/omada-contro
 LEAF_KEY="${LEAF_KEY:-/srv/caddy/internal/data/certificates/local/omada-controller.svc.abhaile.home.arpa/omada-controller.svc.abhaile.home.arpa.key}"
 ROOT_CERT="${ROOT_CERT:-/srv/caddy/internal/data/pki/authorities/local/root.crt}"
 OMADA_ENV="${OMADA_ENV:-/etc/omada-controller/omada-controller.env}"
-OUT_DIR="${OUT_DIR:-/srv/omada-controller/cert}"
+OUT_DIR="${OUT_DIR:-/srv/omada-controller/omada-controller/cert}"
 CERT_NAME="${SSL_CERT_NAME:-tls.crt}"
 KEY_NAME="${SSL_KEY_NAME:-tls.key}"
 
@@ -47,4 +47,4 @@ mv "$key_tmp" "$OUT_DIR/$KEY_NAME"
 trap - EXIT
 
 log "Rebuilt Omada certificate bundle in $OUT_DIR"
-systemctl restart omada-controller.service
+systemctl try-restart omada-controller-app-omada-controller.service

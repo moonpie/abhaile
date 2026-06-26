@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Omada Controller environment from Vault Agent
+
+[Path]
+PathChanged=/srv/vault/agent/out/omada-controller.env
+
+[Install]
+WantedBy=multi-user.target

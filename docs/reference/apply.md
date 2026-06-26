@@ -55,7 +55,6 @@ The April 2026 audit of rendered `service.config` / `service.env` entries produc
 | `blocky` | `service.config` | `blocky.service` |
 | `chrony-a` | `service.config` | `chrony.service` |
 | `chrony-b` | `service.config` | `chrony.service` |
-| `omada-controller` | `service.config`, `service.env` | `omada-controller.service` |
 | `vault` | `service.config`, `service.env` | `vault.service` |
 
 ### Explicit no-direct-restart coverage
@@ -66,6 +65,7 @@ The April 2026 audit of rendered `service.config` / `service.env` entries produc
 | `caddy-dmz` | `service.config` | Caddy image build input; runtime Caddyfile and DNS env have separate handling |
 | `coredns-clean` | included `service.config` | CoreDNS Omada build input; CoreDNS runtime config uses `coredns.config` |
 | `coredns-filtered` | included `service.config` | CoreDNS Omada build input; CoreDNS runtime config uses `coredns.config` |
+| `omada-controller` | `service.config` | First-boot MongoDB init input and helper/systemd units; runtime env refresh is handled by Omada env copy/path units |
 
 ## Related files
 

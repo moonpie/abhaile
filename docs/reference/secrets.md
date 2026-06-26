@@ -45,7 +45,9 @@ Vault Agent renders `.ctmpl` sources to `/srv/vault/agent/out/` at runtime. Vaul
 | authelia | `authelia/templates/authelia-redis.conf.ctmpl` | `/srv/vault/agent/out/authelia-redis.conf` | Redis password |
 | caddy-dmz | `caddy-dmz/templates/caddy-dns-desec.env.ctmpl` | `/srv/vault/agent/out/caddy-dns-desec.env` | deSEC API token for ACME DNS-01 |
 | ddclient | `ddclient/templates/ddclient.conf.ctmpl` | `/srv/vault/agent/out/ddclient.conf` | deSEC API credentials for DDNS updates |
-| coredns-omada | `coredns-omada/templates/coredns-omada.env.ctmpl` | `/srv/vault/agent/out/coredns-omada.env` | Omada Controller API credentials |
+| coredns-omada | `coredns-omada/templates/coredns-omada.env.ctmpl` | `/srv/vault/agent/out/coredns-omada.env` | Omada Controller API URL, site, and credentials |
+| omada-controller | `omada-controller/templates/omada-controller.env.ctmpl` | `/srv/vault/agent/out/omada-controller.env` | Omada Controller external MongoDB URI |
+| omada-controller | `omada-controller/templates/omada-mongodb.env.ctmpl` | `/srv/vault/agent/out/omada-mongodb.env` | MongoDB root and Omada database credentials |
 
 All outputs are owned `abhaile:abhaile` with mode `0640`. Consuming services use systemd `.path` units to watch their output file and trigger reload/restart.
 
@@ -82,6 +84,44 @@ All outputs are owned `abhaile:abhaile` with mode `0640`. Consuming services use
 
 See [Adding a Service](../guides/adding-a-service.md) for the full service onboarding checklist.
 
+## Updating Vault KV
+
+Use the human `userpass` admin account for routine Vault KV changes:
+
+```bash
+export VAULT_ADDR=http://172.20.20.204:8200
+vault login -method=userpass username=admin
+```
+
+Avoid placing secret values directly in shell history. Prefer a restrictive
+temporary file:
+
+```bash
+umask 077
+tmp="$(mktemp)"
+vi "$tmp"
+vault kv patch secret/abhaile/omada @"$tmp"
+rm -f "$tmp"
+```
+
+The `admins` policy includes Vault's `patch` capability so `vault kv patch` can
+use HTTP PATCH without warning.
+
+For Omada's external MongoDB deployment, add these fields to
+`secret/abhaile/omada`:
+
+```json
+{
+  "mongodb_root_username": "<root-admin-username>",
+  "mongodb_root_password": "<root-admin-password>",
+  "mongodb_username": "<omada-application-username>",
+  "mongodb_password": "<omada-application-password>"
+}
+```
+
+`omada-controller.env.ctmpl` assembles `EAP_MONGOD_URI` from the application
+username and password, so the password is stored once in Vault.
+
 ## Emergency Access
 
 If Vault is sealed or secrets are not rendering, see [Break-Glass](../runbooks/break-glass.md) §1 (Vault Sealed Recovery) and §6 (Vault-Agent AppRole Auth Recovery).
@@ -89,3 +129,22 @@ If Vault is sealed or secrets are not rendering, see [Break-Glass](../runbooks/b
 ## Vault Policies
 
 Vault policies live in `policies/` (e.g., `vault-agent.hcl`, `admins.hcl`). These define read/write ACLs for AppRoles and operators but do not contain secret values.
+
+To change Vault Agent access, edit the matching policy file in `policies/`, log
+in as the human admin user, then apply it:
+
+```bash
+export VAULT_ADDR=http://172.20.20.204:8200
+vault login -method=userpass username=admin
+vault policy fmt policies/vault-agent.hcl
+vault policy write vault-agent policies/vault-agent.hcl
+vault policy read vault-agent
+```
+
+Restart Vault Agent on affected hosts after policy changes that unblock new
+templates:
+
+```bash
+sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  systemctl --user restart vault-agent.service
+```

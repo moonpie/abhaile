@@ -1,0 +1,30 @@
+[Unit]
+Description=MongoDB for TP-Link Omada Controller
+After=abhaile-secrets-ready.service omada-mongodb-env.service
+Requires=abhaile-secrets-ready.service omada-mongodb-env.service
+
+[Container]
+EnvironmentFile=/etc/omada-controller/omada-mongodb.env
+Pod={{ pod }}
+Image={{ image }}
+Timezone=local
+{% for v in volume_lines %}
+{{ v }}
+{% endfor %}
+Exec=mongod --dbpath /data/db --bind_ip 127.0.0.1
+HealthCmd=["CMD-SHELL","mongosh --quiet -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval 'db.adminCommand({ ping: 1 }).ok' | grep -q 1"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=30s
+Notify=healthy
+StopSignal=SIGTERM
+StopTimeout=60
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+MemoryMax=2G
+
+[Install]
+WantedBy=multi-user.target

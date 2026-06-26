@@ -176,6 +176,92 @@ systemctl status abhaile-secrets-ready.service
 ls -la /srv/vault/agent/out/
 ```
 
+### Vault Admin Operations
+
+Use the human `userpass` admin account for routine Vault operations such as KV
+updates, policy writes, and AppRole inspection. Do not use the Vault Agent sink
+token for operator work, and reserve the initial root token for break-glass
+recovery only.
+
+```bash
+export VAULT_ADDR=http://172.20.20.204:8200
+vault login -method=userpass username=admin
+vault token lookup
+```
+
+If the command is not attached to a TTY, run it from an interactive terminal.
+Do not paste Vault tokens, passwords, or SecretIDs into chat or shell history.
+
+To confirm Vault Agent is working and that its token came from AppRole:
+
+```bash
+# Host-local rendered output and readiness sentinel
+sudo test -f /srv/vault/agent/out/.ready && echo "vault-agent ready"
+sudo ls -l /srv/vault/agent/out
+
+# User service health and recent auth/template logs
+sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  systemctl --user status vault-agent.service --no-pager -l
+sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  journalctl --user -u vault-agent.service --no-pager -n 80 -l
+
+# Configured auth method
+sudo grep -A8 'method "approle"' /srv/vault/agent/config.hcl
+
+# Sink token lookup without printing the token itself
+sudo VAULT_ADDR="$VAULT_ADDR" \
+  VAULT_TOKEN="$(sudo cat /srv/vault/agent/run/vault-agent-token)" \
+  vault token lookup -format=json \
+  | jq '{display_name: .data.display_name, policies: .data.policies, renewable: .data.renewable, ttl: .data.ttl, period: .data.period, meta: .data.meta}'
+```
+
+Expected result: the service is active, `.ready` exists, the config uses the
+`approle` auth method, and the token lookup shows the `vault-agent` policy.
+
+To update runtime KV values, write only the new fields into a temporary file
+with restrictive permissions and patch the existing secret:
+
+```bash
+umask 077
+tmp="$(mktemp)"
+vi "$tmp"
+vault kv patch secret/abhaile/omada @"$tmp"
+rm -f "$tmp"
+```
+
+The admin policy includes Vault's `patch` capability so `vault kv patch` can use
+HTTP PATCH without falling back to older update semantics.
+
+For the Omada external MongoDB deployment, the temporary file should contain
+these fields:
+
+```json
+{
+  "mongodb_root_username": "<root-admin-username>",
+  "mongodb_root_password": "<root-admin-password>",
+  "mongodb_username": "<omada-application-username>",
+  "mongodb_password": "<omada-application-password>"
+}
+```
+
+Vault Agent can already read `secret/data/abhaile/omada` through the
+`vault-agent` policy. If a future service needs a new Vault path, update and
+apply the policy as an admin:
+
+```bash
+vault policy fmt policies/vault-agent.hcl
+vault policy write vault-agent policies/vault-agent.hcl
+vault policy read vault-agent
+```
+
+Then restart Vault Agent on each affected host or wait for the next normal
+template render interval:
+
+```bash
+sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  systemctl --user restart vault-agent.service
+```
+
 ### Vault-Agent Copy Units
 
 Services that copy Vault Agent output into bind-mounted runtime paths should

@@ -15,6 +15,10 @@ HealthCmd=["CMD-SHELL","redis-cli -a $$(awk '/requirepass/ {print $2}' /usr/loca
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3
+HealthStartPeriod=10s
+Notify=healthy
+StopSignal=SIGTERM
+StopTimeout=60
 
 [Service]
 Restart=on-failure
