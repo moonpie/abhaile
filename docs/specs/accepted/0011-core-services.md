@@ -218,14 +218,14 @@ addresses. coredns-common and chrony-common are composition-only targets
 **chrony-a** — NTP server on phobos.
 
 - `systemd.network: service-32` (host service with /32 drop-in).
-- `apply.restart_unit: chrony.service`
+- `apply.config_change_restart_unit: chrony.service`
 - Template variables: binds to own IP, peers with chrony-b, stratum 10.
 - Resolves as `ntp-a.abhaile.home.arpa` via CNAME.
 
 **chrony-b** — NTP server on deimos.
 
 - `systemd.network: service-32` (host service with /32 drop-in).
-- `apply.restart_unit: chrony.service`
+- `apply.config_change_restart_unit: chrony.service`
 - Template variables: binds to own IP, peers with chrony-a, stratum 11.
 - Resolves as `ntp-b.abhaile.home.arpa` via CNAME.
 

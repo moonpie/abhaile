@@ -305,6 +305,8 @@ composition:
 podman:
   user: root
   network: ipvlan-l2
+apply:
+  config_change_restart_unit: blocky.service
 composition:
   container: {}
   config:
@@ -338,7 +340,7 @@ composition:
     def test_host_daemon_service_config_emits_explicit_restart_hint(
         self, tmp_path: Path, write_file: Any
     ) -> None:
-        """Host-daemon services should use explicit apply.restart_unit hint."""
+        """Host-daemon services should use explicit config-change restart hints."""
         config_root = tmp_path / "config"
         rendered_root = tmp_path / "rendered" / "phobos"
         output_dir = rendered_root / "services"
@@ -349,7 +351,7 @@ composition:
 systemd:
   network: service-32
 apply:
-  restart_unit: chrony.service
+  config_change_restart_unit: chrony.service
 composition:
   config:
     - source: chrony-a/config/chrony.conf
@@ -376,10 +378,10 @@ composition:
         assert len(artifacts) == 1
         assert artifacts[0].apply_hints == {"restart_unit": "chrony.service"}
 
-    def test_pod_service_config_emits_app_restart_hint(
+    def test_pod_service_config_without_explicit_restart_hint_does_not_restart(
         self, tmp_path: Path, write_file: Any
     ) -> None:
-        """Pod-backed service config entries should emit -app.service restart hint."""
+        """Pod-backed service config entries should not derive restart hints."""
         config_root = tmp_path / "config"
         rendered_root = tmp_path / "rendered" / "phobos"
         output_dir = rendered_root / "services"
@@ -418,7 +420,7 @@ composition:
         assert len(artifacts) == 1
         hints = artifacts[0].apply_hints
         assert hints is not None
-        assert hints.get("restart_unit") == "authelia-app.service"
+        assert "restart_unit" not in hints
         assert hints.get("rootless") is True
 
     def test_static_data_service_config_emits_null_restart_unit(
@@ -458,6 +460,51 @@ composition:
         assert len(artifacts) == 1
         hints = artifacts[0].apply_hints
         assert hints is None or hints.get("restart_unit") is None
+
+    def test_explicit_null_config_change_restart_unit_is_preserved(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Services may explicitly mark static config writes as no direct restart."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "static-pod" / "service.yaml",
+            """name: static-pod
+podman:
+  user: root
+  network: ipvlan-l2
+apply:
+  config_change_restart_unit: null
+composition:
+  config:
+    - source: static-pod/config/init.txt
+      destination: /srv/static-pod/init.txt
+  pod:
+    containers:
+      - name: app
+""",
+        )
+        write_file(
+            config_root / "services" / "static-pod" / "config" / "init.txt",
+            "static input\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_configs(
+            "phobos",
+            ["static-pod"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = [a for a in collector.get_all_artifacts() if a.kind == "service.config"]
+        assert len(artifacts) == 1
+        assert artifacts[0].apply_hints == {"restart_unit": None, "rootless": False}
 
     def test_service_directory_emits_owner_group_mode_hints(
         self, tmp_path: Path, write_file: Any

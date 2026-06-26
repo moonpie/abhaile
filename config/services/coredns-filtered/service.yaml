@@ -1,6 +1,8 @@
 name: coredns-filtered
 systemd:
   network: service-32
+apply:
+  config_change_restart_unit: null
 composition:
   include:
     - coredns-common

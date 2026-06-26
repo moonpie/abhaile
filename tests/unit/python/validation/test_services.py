@@ -13,6 +13,7 @@ from abhaile.validation.services import (
     ensure_service_definitions,
     get_all_services_in_order,
     parse_mapping,
+    validate_config_change_restart_units,
     validate_service_names,
 )
 
@@ -154,3 +155,139 @@ class TestValidateServiceNames:
             yaml.dump({"type": "container"}),
         )
         validate_service_names(config_root)
+
+
+class TestValidateConfigChangeRestartUnits:
+    """Tests for explicit config-change restart policy validation."""
+
+    def test_service_config_requires_explicit_restart_policy(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Raise when mapped service.config writes omit restart policy."""
+        config_root = tmp_path / "config"
+        write_file(
+            config_root / "services" / "blocky" / "service.yaml",
+            """name: blocky
+composition:
+  config:
+    - source: blocky/config/config.yml
+      destination: /srv/blocky/config.yml
+""",
+        )
+
+        with pytest.raises(RenderError, match="apply.config_change_restart_unit"):
+            validate_config_change_restart_units(config_root, {"phobos": ["blocky"]})
+
+    def test_service_config_accepts_explicit_restart_unit(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Accept mapped service.config writes with an explicit restart unit."""
+        config_root = tmp_path / "config"
+        write_file(
+            config_root / "services" / "blocky" / "service.yaml",
+            """name: blocky
+apply:
+  config_change_restart_unit: blocky.service
+composition:
+  config:
+    - source: blocky/config/config.yml
+      destination: /srv/blocky/config.yml
+""",
+        )
+
+        validate_config_change_restart_units(config_root, {"phobos": ["blocky"]})
+
+    def test_service_config_accepts_explicit_null_restart_unit(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Accept mapped static service.config writes with explicit null."""
+        config_root = tmp_path / "config"
+        write_file(
+            config_root / "services" / "omada-controller" / "service.yaml",
+            """name: omada-controller
+apply:
+  config_change_restart_unit: null
+composition:
+  config:
+    - source: omada-controller/config/omada.js
+      destination: /srv/omada-controller/mongodb/initdb/omada.js
+""",
+        )
+
+        validate_config_change_restart_units(config_root, {"phobos": ["omada-controller"]})
+
+    def test_special_coredns_config_does_not_require_restart_policy(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Ignore special coredns.config artifacts."""
+        config_root = tmp_path / "config"
+        write_file(
+            config_root / "services" / "coredns-clean" / "service.yaml",
+            """name: coredns-clean
+composition:
+  config:
+    - source: coredns-clean/config/Corefile
+      destination: /etc/coredns/Corefile
+""",
+        )
+
+        validate_config_change_restart_units(config_root, {"deimos": ["coredns-clean"]})
+
+    def test_included_service_config_requires_including_service_policy(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Validate include-expanded service.config writes against mapped service."""
+        config_root = tmp_path / "config"
+        write_file(
+            config_root / "services" / "coredns-omada" / "service.yaml",
+            """name: coredns-omada
+composition:
+  config:
+    - source: coredns-omada/build/Containerfile
+      destination: /srv/build/coredns-omada/Containerfile
+""",
+        )
+        write_file(
+            config_root / "services" / "coredns-clean" / "service.yaml",
+            """name: coredns-clean
+composition:
+  include:
+    - coredns-omada
+  config:
+    - source: coredns-clean/config/Corefile
+      destination: /etc/coredns/Corefile
+""",
+        )
+
+        with pytest.raises(RenderError, match="coredns-clean"):
+            validate_config_change_restart_units(config_root, {"deimos": ["coredns-clean"]})
+
+    def test_included_service_config_accepts_including_service_policy(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Accept include-expanded service.config writes with mapped service policy."""
+        config_root = tmp_path / "config"
+        write_file(
+            config_root / "services" / "coredns-omada" / "service.yaml",
+            """name: coredns-omada
+composition:
+  config:
+    - source: coredns-omada/build/Containerfile
+      destination: /srv/build/coredns-omada/Containerfile
+""",
+        )
+        write_file(
+            config_root / "services" / "coredns-clean" / "service.yaml",
+            """name: coredns-clean
+apply:
+  config_change_restart_unit: null
+composition:
+  include:
+    - coredns-omada
+  config:
+    - source: coredns-clean/config/Corefile
+      destination: /etc/coredns/Corefile
+""",
+        )
+
+        validate_config_change_restart_units(config_root, {"deimos": ["coredns-clean"]})

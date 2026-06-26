@@ -2,6 +2,8 @@ name: blocky
 podman:
   user: root
   network: ipvlan-l2
+apply:
+  config_change_restart_unit: blocky.service
 composition:
   config:
     - source: blocky/config/config.yml

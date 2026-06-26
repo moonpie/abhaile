@@ -143,17 +143,11 @@ def _service_config_apply_hints(service: str, service_data: dict[str, Any]) -> d
 
     apply_block = service_data.get("apply")
     if isinstance(apply_block, dict):
-        restart_unit = apply_block.get("restart_unit")
+        restart_unit = apply_block.get("config_change_restart_unit")
         if isinstance(restart_unit, str) and restart_unit:
             hints["restart_unit"] = restart_unit
-
-    if "restart_unit" not in hints:
-        composition = service_data.get("composition")
-        if isinstance(composition, dict):
-            if "pod" in composition:
-                hints["restart_unit"] = f"{service}-app.service"
-            elif "container" in composition:
-                hints["restart_unit"] = f"{service}.service"
+        elif "config_change_restart_unit" in apply_block and restart_unit is None:
+            hints["restart_unit"] = None
 
     podman = service_data.get("podman")
     if isinstance(podman, dict):

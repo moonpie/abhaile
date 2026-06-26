@@ -34,6 +34,7 @@ from abhaile.validation.services import (
     ensure_service_definitions,
     get_all_services_in_order,
     parse_mapping,
+    validate_config_change_restart_units,
     validate_service_names,
 )
 from abhaile.validation.users import validate_user_management_ids
@@ -192,6 +193,8 @@ def _validate_services(
             str(service_path),
             roots.schemas_root / "service.schema.json",
         )
+
+    validate_config_change_restart_units(roots.config_root, host_services)
 
     return service_paths
 

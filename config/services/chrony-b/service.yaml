@@ -2,7 +2,7 @@ name: chrony-b
 systemd:
   network: service-32
 apply:
-  restart_unit: chrony.service
+  config_change_restart_unit: chrony.service
 composition:
   config:
     - source:

@@ -2,6 +2,8 @@ name: omada-controller
 podman:
   user: root
   network: ipvlan-l2
+apply:
+  config_change_restart_unit: omada-controller.service
 composition:
   config:
     - source: omada-controller/config/omada-controller.env

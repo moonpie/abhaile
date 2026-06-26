@@ -2,6 +2,7 @@
 
 ## Status
 
+2026-06-26: Updated Accepted
 2026-05-04: Updated Accepted
 2026-05-03: Updated Accepted
 2026-04-21: Accepted
@@ -33,7 +34,7 @@ Service configuration uses section-based semantics.
 ### Restart Behavior
 
 - authored entry-level `apply` blocks are not part of the model
-- host daemons without quadlet-derived unit names use explicit service-level `apply.restart_unit`
+- service-owned config/env writes use explicit service-level `apply.config_change_restart_unit`
 - renderer-internal apply hints carry the runtime metadata needed by apply
 - copy/update oneshots should use `try-restart` for downstream services so
   first startup and refresh use the same unit without creating ordering cycles

@@ -106,7 +106,7 @@ systemd executor already represents the operation.
 ### Vault Unseal Ownership
 
 The Vault unseal helper script must be hosted by Vault-host composition, not by `vault-agent`
-service composition. The script must not carry `restart_unit` behavior and must not restart or
+service composition. The script must not carry direct config-change restart behavior and must not restart or
 validate `vault-agent.service` when the script changes.
 
 `abhaile-vault-unseal.service` must be authored through host `composition.systemd`. The unit must:

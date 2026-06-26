@@ -103,7 +103,7 @@ Reference: `config/services/coredns-filtered/service.yaml`
 - [ ] Set `systemd.network: service-32` (or `host`)
 - [ ] Add `composition.config[]` for config files
 - [ ] Add `composition.systemd[]` for unit files (set `enable: true`, `start: true`)
-- [ ] Set `apply.restart_unit: <unit>.service` for config-change restarts
+- [ ] Set `apply.config_change_restart_unit: <unit>.service` for config-change restarts
 
 ## Optional: Vault-Agent Secrets
 
@@ -142,4 +142,4 @@ Reference: `config/services/coredns-filtered/service.yaml`
 | Pod + secrets + ingress | `authelia` | Pod with sidecar, path watchers, ingress |
 | Rootless container | `vault-agent` | Rootless podman, host network |
 | Host-mode (service-32) | `coredns-filtered` | Includes, template variables |
-| Host-mode (restart) | `chrony-a` | `apply.restart_unit`, template config |
+| Host-mode (restart) | `chrony-a` | `apply.config_change_restart_unit`, template config |

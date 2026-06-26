@@ -114,9 +114,9 @@
       "type": "object",
       "description": "Apply-time runtime hints for service-owned config artifacts",
       "properties": {
-        "restart_unit": {
-          "type": "string",
-          "description": "Explicit systemd unit to restart after service.config/service.env updates"
+        "config_change_restart_unit": {
+          "type": ["string", "null"],
+          "description": "Explicit systemd unit to restart after service.config/service.env updates, or null for static data that should not trigger a service restart"
         }
       },
       "additionalProperties": false

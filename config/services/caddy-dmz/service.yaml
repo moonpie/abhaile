@@ -2,6 +2,8 @@ name: caddy-dmz
 podman:
   user: root
   network: ipvlan-l2
+apply:
+  config_change_restart_unit: null
 composition:
   config:
     - source: caddy-dmz/build/Containerfile

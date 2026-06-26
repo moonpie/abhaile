@@ -2,23 +2,27 @@
 
 This document records the operator-facing apply behavior that was added for service-owned artifacts.
 
-## `apply.restart_unit`
+## `apply.config_change_restart_unit`
 
-`apply.restart_unit` lives in `config/services/*/service.yaml`.
+`apply.config_change_restart_unit` lives in `config/services/*/service.yaml`.
 
-Use it when a service emits `service.config` or `service.env` artifacts but does not declare `composition.container` or `composition.pod`.
+Use it when a mapped service emits `service.config` or `service.env` artifacts.
+The check is include-aware: config entries from included services are evaluated
+as part of the mapped service that renders them.
 
 ```yaml
 apply:
-  restart_unit: chrony.service
+  config_change_restart_unit: chrony.service
 ```
 
 ### Resolution rules
 
-1. If `apply.restart_unit` is set, that explicit value wins.
-1. Otherwise, pod-backed services derive `<service>-app.service`.
-1. Otherwise, container-backed services derive `<service>.service`.
-1. If no explicit or derived restart unit exists, service-owned config writes are treated as no-restart inputs.
+1. If `apply.config_change_restart_unit` is set to a unit name, service-owned
+   config/env writes try-restart that unit.
+1. If `apply.config_change_restart_unit` is set to `null`, service-owned
+   config/env writes intentionally do not trigger a direct restart.
+1. No pod or container unit name is derived implicitly. Service authors must
+   model direct restarts, path units, copy units, or static inputs explicitly.
 
 ### Rootless behavior
 
@@ -44,29 +48,24 @@ ownership or umask.
 
 The April 2026 audit of rendered `service.config` / `service.env` entries produced the following buckets.
 
-### Explicit restart coverage
+### Direct config-change restart coverage
 
 | Service | Artifact family | Restart unit |
 | --- | --- | --- |
+| `blocky` | `service.config` | `blocky.service` |
 | `chrony-a` | `service.config` | `chrony.service` |
 | `chrony-b` | `service.config` | `chrony.service` |
-
-### Derived restart coverage
-
-| Service | Artifact family | Derived runtime unit |
-| --- | --- | --- |
-| `authelia` | `service.config` | `authelia-app.service` |
-| `blocky` | `service.config` | `blocky.service` |
-| `caddy-dmz` | `service.config` | `caddy-dmz.service` |
-| `omada-controller` | `service.env` | `omada-controller.service` |
+| `omada-controller` | `service.config`, `service.env` | `omada-controller.service` |
 | `vault` | `service.config`, `service.env` | `vault.service` |
-| `vault-agent` | `service.config` | `vault-agent.service` |
 
-### Intentional no-restart service input
+### Explicit no-direct-restart coverage
 
-| Service | Artifact | Reason |
+| Service | Artifact family | Reason |
 | --- | --- | --- |
-| `coredns-omada` | `/srv/build/coredns-omada/Containerfile` | build-time input; no service runtime unit is derived or explicitly declared |
+| `authelia` | `service.config` | Static users database; secret refreshes are handled by copy/path units |
+| `caddy-dmz` | `service.config` | Caddy image build input; runtime Caddyfile and DNS env have separate handling |
+| `coredns-clean` | included `service.config` | CoreDNS Omada build input; CoreDNS runtime config uses `coredns.config` |
+| `coredns-filtered` | included `service.config` | CoreDNS Omada build input; CoreDNS runtime config uses `coredns.config` |
 
 ## Related files
 

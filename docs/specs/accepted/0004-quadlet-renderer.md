@@ -223,7 +223,7 @@ This dependency graph is consumed by diff/apply quadlet convergence and executio
 quadlet-managed services:
 
 - Include-first composition resolution for `composition.config` and `composition.systemd`.
-- Apply hints for service-owned files (`restart_unit`, rootless context hints).
+- Apply hints for service-owned files (explicit config-change restarts, rootless context hints).
 - Systemd entry apply hints for enable/start semantics.
 
 Operationally, quadlet and service renderers share the same service composition model and rootless

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
+from abhaile.renderers.metadata import classify_service_artifact
+from abhaile.utils.composition import walk_service_includes
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
@@ -141,3 +143,55 @@ def validate_service_names(config_root: Path) -> None:
     if errors:
         formatted = "\n".join(f"- {err}" for err in errors)
         raise RenderError(f"Service name validation failed:\n{formatted}")
+
+
+def validate_config_change_restart_units(
+    config_root: Path,
+    host_services: dict[str, list[str]],
+) -> None:
+    """Require explicit config-change restart policy for mapped service config writes."""
+    errors: list[str] = []
+    for host, services in host_services.items():
+        for service in services:
+            service_file = config_root / "services" / service / "service.yaml"
+            service_data = read_yaml_mapping(service_file)
+            if not _service_requires_config_change_restart_unit(config_root, service):
+                continue
+
+            apply_block = service_data.get("apply")
+            if not (isinstance(apply_block, dict) and "config_change_restart_unit" in apply_block):
+                errors.append(
+                    f"{service} on {host} emits service.config/service.env artifacts "
+                    "and must declare apply.config_change_restart_unit"
+                )
+
+    if errors:
+        formatted = "\n".join(f"- {err}" for err in errors)
+        raise RenderError(f"Config-change restart validation failed:\n{formatted}")
+
+
+def _service_requires_config_change_restart_unit(config_root: Path, service: str) -> bool:
+    """Return true when service or includes emit service config/env artifacts."""
+    for service_name in walk_service_includes(service, config_root):
+        service_file = config_root / "services" / service_name / "service.yaml"
+        service_data = read_yaml_mapping(service_file)
+        composition = service_data.get("composition")
+        if not isinstance(composition, dict):
+            continue
+
+        for entry in composition.get("config", []) or []:
+            if not isinstance(entry, dict):
+                continue
+            destination = entry.get("destination")
+            if not isinstance(destination, str) or not destination:
+                continue
+
+            artifact_kind, _owner_ref = classify_service_artifact(
+                destination,
+                default_owner_ref=f"service:{service}",
+                is_directory="source" not in entry,
+            )
+            if artifact_kind in {"service.config", "service.env"}:
+                return True
+
+    return False
