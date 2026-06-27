@@ -341,6 +341,7 @@ class TestQuadretsIntegration:
             "omada-controller-app-mongodb.service" in controller_content
         )
         assert "EnvironmentFile=/etc/omada-controller/omada-controller.env" in controller_content
+        assert "SuccessExitStatus=143" in controller_content
 
         mongodb_content = mongodb.read_text()
         assert "Pod=omada-controller-app.pod" in mongodb_content
@@ -355,6 +356,7 @@ class TestQuadretsIntegration:
         assert "Notify=healthy" in mongodb_content
         assert "StopSignal=SIGTERM" in mongodb_content
         assert "StopTimeout=60" in mongodb_content
+        assert "SuccessExitStatus=143" in mongodb_content
         assert (
             "Volume=/srv/omada-controller/mongodb/initdb/omada.js:/docker-entrypoint-initdb.d/omada.js:ro"
             in mongodb_content

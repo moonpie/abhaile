@@ -5,6 +5,6 @@ Requires=abhaile-secrets-ready.service
 
 [Service]
 Type=oneshot
+ExecCondition=/bin/sh -c 'test ! -e /etc/omada-controller/omada-mongodb.env || ! cmp -s /srv/vault/agent/out/omada-mongodb.env /etc/omada-controller/omada-mongodb.env'
 ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root /etc/omada-controller
 ExecStart=/usr/bin/install -m 0640 -o root -g root /srv/vault/agent/out/omada-mongodb.env /etc/omada-controller/omada-mongodb.env
-ExecStartPost=/usr/bin/systemctl --no-block try-restart omada-controller-app-mongodb.service

@@ -252,6 +252,9 @@ addresses. coredns-common and chrony-common are composition-only targets
 - `omada-controller-env.service` and `omada-mongodb-env.service` materialize
   those files into `/etc/omada-controller/` before the containers start, using
   the same service-facing config boundary as the original Omada controller unit.
+- Service-facing env copy units compare source and destination content before
+  copying so Vault Agent re-renders of unchanged data do not cause unnecessary
+  service restarts.
 - MongoDB is initialized from the repo-managed non-secret init script at
   `/srv/omada-controller/mongodb/initdb/omada.js`; the script reads the Omada
   database username and password from MongoDB container environment variables.
@@ -385,21 +388,30 @@ The secrets delivery path for core services:
    - `omada-mongodb-env.service` copies `omada-mongodb.env` into
      `/etc/omada-controller/`.
 1. Per-service systemd path units watch their specific output files and re-run
-   copy or restart handlers on refresh:
-   - `authelia-config.path` → starts `authelia-config.service`.
-   - `authelia-redis-conf.path` → starts `authelia-redis-conf.service`.
+   copy or restart handlers on refresh. Copy services skip unchanged content,
+   avoiding restarts when Vault Agent rewrites identical rendered output:
+   - `authelia-config.path` → starts `authelia-config.service`, which restarts
+     Authelia only when config content changed.
+   - `authelia-redis-conf.path` → starts `authelia-redis-conf.service`, which
+     restarts Redis only when config content changed.
    - `caddy-dns-desec.path` → restarts caddy-dmz with new env file.
-   - `coredns-omada-env.path` → restarts coredns with new Omada credentials.
+   - `coredns-omada-env.path` → restarts coredns only when Omada env content
+     changed.
    - `ddclient-conf.path` → restarts ddclient with new deSEC credentials.
-   - `omada-controller-env.path` → starts `omada-controller-env.service`.
-   - `omada-mongodb-env.path` → starts `omada-mongodb-env.service`.
+   - `omada-controller-env.path` → starts `omada-controller-env.service`, which
+     restarts the controller only when controller env content changed.
+   - `omada-mongodb-env.path` → starts `omada-mongodb-env.service`, which copies
+     changed MongoDB env content but does not automatically restart MongoDB.
 
 Omada controller and MongoDB Quadlets read service-facing env files from
 `/etc/omada-controller/`. The MongoDB init script is static and non-secret; the
 MongoDB credentials and controller `EAP_MONGOD_URI` come only from Vault
 Agent-rendered env files that are copied into that directory. Changing MongoDB
 credentials is a deliberate maintenance operation because existing MongoDB
-users are not recreated automatically after first boot.
+users are not recreated automatically after first boot, and restarting MongoDB
+under a running controller pod can stop the shared pod. MongoDB env changes are
+therefore materialized for the next controlled restart rather than
+auto-restarting the database.
 
 Authelia copy services use `systemctl try-restart` for downstream refresh so
 initial startup does not require the target container to already be active.

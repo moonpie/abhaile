@@ -266,9 +266,15 @@ class TestRenderApplyE2E:
         assert "--no-block try-restart omada-controller-app-omada-controller.service" in (
             omada_env_path / "omada-controller-env.service"
         ).read_text(encoding="utf-8")
-        assert "--no-block try-restart omada-controller-app-mongodb.service" in (
-            omada_env_path / "omada-mongodb-env.service"
-        ).read_text(encoding="utf-8")
+        omada_controller_env_unit = (omada_env_path / "omada-controller-env.service").read_text(
+            encoding="utf-8"
+        )
+        omada_mongodb_env_unit = (omada_env_path / "omada-mongodb-env.service").read_text(
+            encoding="utf-8"
+        )
+        assert "ExecCondition=" in omada_controller_env_unit
+        assert "ExecCondition=" in omada_mongodb_env_unit
+        assert "try-restart omada-controller-app-mongodb.service" not in omada_mongodb_env_unit
 
         for rendered_root in (phobos_root, deimos_root):
             zone_root = (
