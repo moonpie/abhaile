@@ -196,6 +196,50 @@ class TestQuadletExecutor:
             run_as_user=None,
         )
 
+    def test_validate_systemctl_rootless_uses_machine_user_manager(self, mocker: Any) -> None:
+        """Rootless systemctl validation should target the user's manager."""
+        mock_run = mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="validate-systemctl-user",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
+        )
+
+        QuadletExecutor.validate_systemctl(rootless=True, run_as_user="abhaile", strict=True)
+
+        mock_run.assert_called_once_with(
+            ["systemctl", "--user", "-M", "abhaile@", "--version"],
+            action_id="validate-systemctl-user",
+            action_type="validation",
+            run_as_user=None,
+            check=True,
+        )
+
+    def test_daemon_reload_rootless_uses_machine_user_manager(self, mocker: Any) -> None:
+        """Rootless daemon-reload should target the user's manager."""
+        mock_run = mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="systemctl-daemon-reload-user",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+
+        QuadletExecutor.daemon_reload(rootless=True, run_as_user="abhaile")
+
+        mock_run.assert_called_once_with(
+            ["systemctl", "--user", "-M", "abhaile@", "daemon-reload"],
+            action_id="systemctl-daemon-reload-user",
+            action_type="systemctl",
+            run_as_user=None,
+            check=True,
+        )
+
     def test_apply_owner_change_recreates_network_object_on_write(self, mocker: Any) -> None:
         """Changed quadlet networks should remove old object before reload/start."""
         mock_remove = mocker.patch.object(

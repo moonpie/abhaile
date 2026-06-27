@@ -359,6 +359,14 @@ class TestQuadretsIntegration:
             "Volume=/srv/omada-controller/mongodb/initdb/omada.js:/docker-entrypoint-initdb.d/omada.js:ro"
             in mongodb_content
         )
+        for bind_dir in (
+            "srv/omada-controller/omada-controller/cert",
+            "srv/omada-controller/omada-controller/data",
+            "srv/omada-controller/omada-controller/logs",
+            "srv/omada-controller/mongodb/config",
+            "srv/omada-controller/mongodb/data",
+        ):
+            assert (output_dir / f"omada-controller/{bind_dir}").is_dir()
 
         # Verify network quadlet
         network_file = (

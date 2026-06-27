@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -198,6 +199,33 @@ class TestRunSystemctlCommand:
             # May fail if systemctl is not available, but that's OK for this test
         except ApplyError:
             pass  # Expected in non-systemd environments
+
+    def test_user_systemctl_uses_machine_user_manager(self, mocker: Any) -> None:
+        """User systemd actions target the user manager without sudo env leakage."""
+        mock_run = mocker.patch("abhaile.apply.actions.subprocess.run")
+        mock_run.return_value = type(
+            "Completed",
+            (),
+            {"returncode": 0, "stdout": "", "stderr": ""},
+        )()
+
+        result = run_systemctl_command(
+            "restart",
+            "vault-agent.service",
+            user=True,
+            run_as_user="abhaile",
+        )
+
+        assert result.success
+        mock_run.assert_called_once()
+        assert mock_run.call_args.args[0] == [
+            "systemctl",
+            "--user",
+            "-M",
+            "abhaile@",
+            "restart",
+            "vault-agent.service",
+        ]
 
 
 class TestCheckDestructiveGate:

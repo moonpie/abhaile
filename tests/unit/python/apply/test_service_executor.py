@@ -107,6 +107,8 @@ class TestServiceConfigExecutor:
             [
                 "systemctl",
                 "--user",
+                "-M",
+                "abhaile@",
                 "show",
                 "authelia-app.service",
                 "-p",
@@ -115,7 +117,7 @@ class TestServiceConfigExecutor:
             ],
             action_id="systemctl show authelia-app.service",
             action_type="systemctl",
-            run_as_user="abhaile",
+            run_as_user=None,
         )
 
     def test_apply_owner_change_no_restart_when_restart_unit_null(self, mocker: Any) -> None:

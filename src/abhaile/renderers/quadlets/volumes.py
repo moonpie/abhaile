@@ -142,6 +142,15 @@ def _render_named_volumes(
             encoding="utf-8",
             newline="\n",
         )
+        _render_named_volume_host_directory(
+            service=service,
+            user=user,
+            host_path=host_path,
+            shared=shared,
+            output_dir=output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
         if collector is not None and rendered_root is not None:
             vol_target_root = Path("/") / output_root_relative
             volume_hints: dict[str, Any] = {
@@ -168,6 +177,46 @@ def _render_named_volumes(
         volume_owner_refs.append(f"unit:{_quadlet_unit_name(volume_filename)}")
 
     return (volume_lines, sorted(set(volume_owner_refs)))
+
+
+def _render_named_volume_host_directory(
+    *,
+    service: str,
+    user: str,
+    host_path: str,
+    shared: bool,
+    output_dir: Path,
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+) -> None:
+    """Render the host-side directory required by a bind-backed named volume."""
+    if shared:
+        return
+
+    output_path = output_dir / service / host_path.lstrip("/")
+    if output_path.exists():
+        return
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    if collector is None or rendered_root is None:
+        return
+
+    owner = user if user != "root" else "root"
+    group = owner if owner != "root" else "root"
+    collector.register_artifact(
+        render_path=output_path.relative_to(rendered_root).as_posix(),
+        target_path=host_path,
+        kind="service.directory",
+        owner_ref=f"service:{service}",
+        content="",
+        is_directory=True,
+        replace=True,
+        apply_hints={
+            "owner": owner,
+            "group": group,
+            "mode": "0750",
+        },
+    )
 
 
 def _build_mounted_file_lines(container_def: dict[str, Any]) -> list[str]:

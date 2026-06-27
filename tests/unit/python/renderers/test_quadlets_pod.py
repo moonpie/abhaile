@@ -670,3 +670,90 @@ composition:
             "unit:authelia-app-app-image.service",
             "unit:authelia-app.service",
         ]
+
+    def test_named_volume_host_directories_are_rendered(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Non-shared named volume host paths render as managed directories."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "omada" / "service.yaml",
+            """name: omada
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  pod:
+    containers:
+      - name: app
+        named_volumes:
+          - name: data
+            host_path: /srv/omada-controller/omada-controller/data
+            mount_path: /opt/tplink/EAPController/data
+          - name: host-certs
+            host_path: /etc/ssl/certs
+            mount_path: /etc/ssl/certs
+            shared: true
+        mounted_files: []
+""",
+        )
+        write_file(
+            config_root / "services" / "omada" / "quadlets" / "pod.pod.j2",
+            "[Pod]\nNetwork={{ network.services[service_name].vlan }}.network\n",
+        )
+        write_file(
+            config_root / "services" / "omada" / "quadlets" / "app" / "image.image",
+            "[Image]\nImage=omada:latest\n",
+        )
+        write_file(
+            config_root / "services" / "omada" / "quadlets" / "app" / "container.container.j2",
+            """[Container]
+Pod={{ pod }}
+Image={{ image }}
+{% for line in volume_lines %}
+{{ line }}
+{% endfor %}
+""",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2",
+            "[Volume]\nDevice={{ host_path }}\nOptions=bind\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "network.network.j2",
+            "[Network]\nDriver=ipvlan\n",
+        )
+
+        network: dict[str, Any] = {
+            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "services": {"omada": {"vlan": "services", "address": "172.20.20.220/32"}},
+        }
+
+        collector = ArtifactCollector()
+        render_service_quadlets(
+            "phobos",
+            ["omada"],
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        data_dir = output_dir / "omada" / "srv/omada-controller/omada-controller/data"
+        shared_certs_dir = output_dir / "omada" / "etc/ssl/certs"
+        assert data_dir.is_dir()
+        assert not shared_certs_dir.exists()
+
+        artifacts = {artifact.target_path: artifact for artifact in collector.get_all_artifacts()}
+        assert artifacts["/srv/omada-controller/omada-controller/data"].kind == "service.directory"
+        assert artifacts["/srv/omada-controller/omada-controller/data"].is_directory
+        assert artifacts["/srv/omada-controller/omada-controller/data"].apply_hints == {
+            "owner": "root",
+            "group": "root",
+            "mode": "0750",
+        }
+        assert "/etc/ssl/certs" not in artifacts

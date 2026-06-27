@@ -132,6 +132,9 @@ class QuadletExecutor:
         argv = ["systemctl"]
         if rootless:
             argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
         argv.append("--version")
         return run_command(
             argv,
@@ -147,6 +150,9 @@ class QuadletExecutor:
         argv = ["systemctl"]
         if rootless:
             argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
         argv.append("daemon-reload")
         return run_command(
             argv,

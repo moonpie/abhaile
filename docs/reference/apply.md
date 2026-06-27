@@ -26,7 +26,8 @@ apply:
 
 ### Rootless behavior
 
-- Rootless service restarts run through `systemctl --user`.
+- Rootless service restarts target the user's systemd manager with
+  `systemctl --user -M <user>@`.
 - The restart user comes from `podman.user`.
 
 ### Dry-run behavior

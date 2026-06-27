@@ -196,6 +196,9 @@ def run_systemctl_command(
     argv = ["systemctl"]
     if user:
         argv.append("--user")
+        if run_as_user:
+            argv.extend(["-M", f"{run_as_user}@"])
+            run_as_user = None
     argv.extend([action, unit_name])
     return run_command(
         argv,

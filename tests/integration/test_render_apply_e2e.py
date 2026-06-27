@@ -178,12 +178,12 @@ class TestRenderApplyE2E:
             "authelia-app-redis.service"
         ) in authelia_quadlet
         assert (
-            "ExecStartPost=/usr/bin/systemctl try-restart authelia-app-authelia.service"
-            in authelia_copy_unit
+            "ExecStartPost=/usr/bin/systemctl --no-block try-restart "
+            "authelia-app-authelia.service" in authelia_copy_unit
         )
         assert "ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root" in authelia_copy_unit
         assert (
-            "ExecStartPost=/usr/bin/systemctl try-restart authelia-app-redis.service"
+            "ExecStartPost=/usr/bin/systemctl --no-block try-restart authelia-app-redis.service"
             in redis_copy_unit
         )
         assert "ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root" in redis_copy_unit
@@ -246,6 +246,14 @@ class TestRenderApplyE2E:
         omada_init_content = omada_init.read_text(encoding="utf-8")
         assert "process.env.OMADA_MONGODB_USERNAME" in omada_init_content
         assert "process.env.OMADA_MONGODB_PASSWORD" in omada_init_content
+        for bind_dir in (
+            "srv/omada-controller/omada-controller/cert",
+            "srv/omada-controller/omada-controller/data",
+            "srv/omada-controller/omada-controller/logs",
+            "srv/omada-controller/mongodb/config",
+            "srv/omada-controller/mongodb/data",
+        ):
+            assert (phobos_root / f"services/omada-controller/{bind_dir}").is_dir()
 
         omada_env_path = phobos_root / "services/omada-controller/etc/systemd/system"
         assert not (omada_env_path / "omada-mongodb-ready.service").exists()
@@ -253,6 +261,12 @@ class TestRenderApplyE2E:
         assert (omada_env_path / "omada-controller-env.service").exists()
         assert (omada_env_path / "omada-mongodb-env.path").exists()
         assert (omada_env_path / "omada-mongodb-env.service").exists()
+        assert "--no-block try-restart omada-controller-app-omada-controller.service" in (
+            omada_env_path / "omada-controller-env.service"
+        ).read_text(encoding="utf-8")
+        assert "--no-block try-restart omada-controller-app-mongodb.service" in (
+            omada_env_path / "omada-mongodb-env.service"
+        ).read_text(encoding="utf-8")
 
         for rendered_root in (phobos_root, deimos_root):
             zone_root = (

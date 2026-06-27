@@ -95,6 +95,9 @@ class ServiceConfigExecutor:
         argv = ["systemctl"]
         if rootless:
             argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
         argv.extend(["show", unit_name, "-p", "ActiveState", "--value"])
         result = run_command(
             argv,
