@@ -2,4 +2,6 @@
 Description=Restart CoreDNS after Omada env update
 [Service]
 Type=oneshot
-ExecStart=/bin/systemctl restart coredns.service
+ExecStartPre=/usr/bin/install -d -m 0750 -o root -g coredns /etc/coredns
+ExecStart=/usr/bin/install -m 0640 -o root -g coredns /srv/vault/agent/out/coredns-omada.env /etc/coredns/omada.env
+ExecStartPost=/bin/systemctl --no-block restart coredns.service

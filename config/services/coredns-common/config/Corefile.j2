@@ -15,16 +15,15 @@
     # Omada dynamic client/device/DHCP records
     # URL/site and credentials come from /etc/coredns/omada.env.
     omada {
-        controller_url ${OMADA_URL}
-        site ${OMADA_SITE}
-        username ${OMADA_USERNAME}
-        password ${OMADA_PASSWORD}
+        controller_url {$OMADA_URL}
+        site {$OMADA_SITE}
+        username {$OMADA_USERNAME}
+        password {$OMADA_PASSWORD}
         resolve_clients true
         resolve_devices true
         resolve_dhcp_reservations true
         stale_record_duration 24h
         ignore_startup_errors true
-        fallthrough
     }
 }
 {% endfor %}

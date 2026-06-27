@@ -153,8 +153,10 @@ class TestRenderApplyE2E:
             corefile = (rendered_root / f"services/{service_name}/etc/coredns/Corefile").read_text(
                 encoding="utf-8"
             )
-            assert "controller_url ${OMADA_URL}" in corefile
-            assert "site ${OMADA_SITE}" in corefile
+            assert "controller_url {$OMADA_URL}" in corefile
+            assert "site {$OMADA_SITE}" in corefile
+            omada_block = corefile.split("omada {", 1)[1].split("}", 1)[0]
+            assert "fallthrough" not in omada_block
             assert "controller_url https://172.20.20.220:8043" not in corefile
 
         authelia_quadlet = (
