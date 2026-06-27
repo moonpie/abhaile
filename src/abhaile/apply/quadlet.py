@@ -200,8 +200,12 @@ class QuadletExecutor:
         changed_phases: set[str],
         rootless: bool,
         run_as_user: str | None,
+        restart_mode: str = "try-restart",
     ) -> dict[str, Any]:
         """Converge runtime state for a quadlet owner."""
+        if restart_mode not in {"try-restart", "manual"}:
+            raise ApplyError(f"Unsupported quadlet restart_mode: {restart_mode}")
+
         unit_name = QuadletExecutor.unit_from_owner(owner_ref)
         actions: list[dict[str, Any]] = []
 
@@ -280,6 +284,16 @@ class QuadletExecutor:
                     "return_code": start.return_code,
                 }
             )
+        elif restart_mode == "manual":
+            actions.append(
+                {
+                    "action": "skip-restart",
+                    "unit": unit_name,
+                    "reason": "manual-restart",
+                    "success": True,
+                    "return_code": 0,
+                }
+            )
         else:
             restart = run_systemctl_command(
                 "try-restart",
@@ -301,6 +315,7 @@ class QuadletExecutor:
             "unit": unit_name,
             "kinds": sorted(kinds_set),
             "rootless": rootless,
+            "restart_mode": restart_mode,
             "actions": actions,
         }
         if rootless and run_as_user:

@@ -207,6 +207,7 @@ def _render_pod_quadlets(
                 container_owner_requires.append(f"unit:{Path(image_filename).stem}-image.service")
             if build_filename is not None:
                 container_owner_requires.append(f"unit:{Path(build_filename).stem}-build.service")
+            container_apply_hints = {**_apply_hints, "restart_mode": "manual"}
             _register_quadlet_artifact(
                 collector=collector,
                 rendered_root=rendered_root,
@@ -215,8 +216,8 @@ def _render_pod_quadlets(
                 kind=_quadlet_kind_from_filename(container_output_name),
                 owner_ref=container_owner,
                 content=container_rendered,
-                apply_hints=_apply_hints,
-                owner_apply_hints=_apply_hints,
+                apply_hints=container_apply_hints,
+                owner_apply_hints=container_apply_hints,
                 owner_requires=sorted(set(container_owner_requires)),
             )
 

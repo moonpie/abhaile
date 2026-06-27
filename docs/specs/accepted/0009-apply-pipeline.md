@@ -179,6 +179,10 @@ Quadlet convergence plans (`_build_quadlet_convergence_plans`):
 - Identify changed `quadlet.network` and `quadlet.volume` owners.
 - Expand reverse dependency closure to find container dependents.
 - Emit `stop` actions before infrastructure owner change and `start` actions after.
+- Pod member container owners use `apply_hints.restart_mode: manual`. Apply stages
+  the changed quadlet and runs `daemon-reload`, but does not `try-restart` one
+  container inside a shared pod. Pod member restarts must be done as a controlled
+  pod/service sequence.
 
 ### File Staging (Phase 7.1)
 

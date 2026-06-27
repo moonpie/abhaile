@@ -12,6 +12,7 @@ from abhaile.apply.dispatch import (
     _resolve_parent_unit_name,
     _run_caddy_owner_actions,
     _run_coredns_owner_actions,
+    _run_quadlet_owner_actions,
     _run_systemd_owner_actions,
     _run_vault_owner_actions,
 )
@@ -248,3 +249,48 @@ class TestVaultOwnerActionsRemovals:
         assert results[0]["phase"] == "converge"
         assert results[0]["kind"] == "vault.owner"
         mock_change.assert_called_once_with("service:vault-agent", run_as_user="abhaile")
+
+
+class TestQuadletOwnerActions:
+    """Tests for quadlet owner dispatch."""
+
+    @patch("abhaile.apply.dispatch.QuadletExecutor.apply_owner_change")
+    def test_owner_apply_hints_control_restart_mode(self, mock_change: Any) -> None:
+        """Owner restart hints should be passed to the quadlet executor."""
+        mock_change.return_value = {
+            "owner_ref": "unit:omada-controller-app-mongodb.service",
+            "unit": "omada-controller-app-mongodb.service",
+            "restart_mode": "manual",
+            "actions": [{"action": "skip-restart", "success": True, "return_code": 0}],
+        }
+
+        writes: list[dict[str, object]] = [
+            {
+                "kind": "quadlet.container",
+                "target_path": "/etc/containers/systemd/omada-controller-app-mongodb.container",
+                "owner_ref": "unit:omada-controller-app-mongodb.service",
+                "apply_hints": {"rootless": False, "restart_mode": "manual"},
+            }
+        ]
+
+        results = _run_quadlet_owner_actions(
+            writes,
+            [],
+            owner_apply_hints={
+                "unit:omada-controller-app-mongodb.service": {
+                    "rootless": False,
+                    "restart_mode": "manual",
+                }
+            },
+        )
+
+        assert len(results) == 1
+        assert results[0]["kind"] == "quadlet.owner"
+        mock_change.assert_called_once_with(
+            "unit:omada-controller-app-mongodb.service",
+            kinds=["quadlet.container"],
+            changed_phases={"write"},
+            rootless=False,
+            run_as_user=None,
+            restart_mode="manual",
+        )

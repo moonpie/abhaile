@@ -130,10 +130,11 @@ class TestApplyIntegration:
         )
         monkeypatch.setattr(
             "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
-            lambda owner_ref, kinds, changed_phases, rootless, run_as_user: {
+            lambda owner_ref, kinds, changed_phases, rootless, run_as_user, restart_mode: {
                 "owner_ref": owner_ref,
                 "unit": "demo.service",
                 "kinds": kinds,
+                "restart_mode": restart_mode,
                 "actions": [{"action": "try-restart", "success": True, "return_code": 0}],
             },
         )

@@ -127,6 +127,39 @@ class TestQuadletExecutor:
             run_as_user=None,
         )
 
+    def test_apply_owner_change_manual_restart_skips_systemctl_restart(self, mocker: Any) -> None:
+        """Manual restart mode should reload unit files without restarting a pod member."""
+        mocker.patch.object(
+            QuadletExecutor,
+            "daemon_reload",
+            return_value=ExecutionResult(
+                action_id="systemctl-daemon-reload",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+        mock_systemctl = mocker.patch("abhaile.apply.quadlet.run_systemctl_command")
+
+        summary = QuadletExecutor.apply_owner_change(
+            "unit:omada-controller-app-mongodb.service",
+            kinds=["quadlet.container"],
+            changed_phases={"write"},
+            rootless=False,
+            run_as_user=None,
+            restart_mode="manual",
+        )
+
+        assert summary["restart_mode"] == "manual"
+        assert summary["actions"][1] == {
+            "action": "skip-restart",
+            "unit": "omada-controller-app-mongodb.service",
+            "reason": "manual-restart",
+            "success": True,
+            "return_code": 0,
+        }
+        mock_systemctl.assert_not_called()
+
     def test_apply_owner_change_stop_for_remove_only(self, mocker: Any) -> None:
         """Removal-only owner changes should stop the generated unit."""
         mocker.patch.object(

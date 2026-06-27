@@ -413,6 +413,11 @@ under a running controller pod can stop the shared pod. MongoDB env changes are
 therefore materialized for the next controlled restart rather than
 auto-restarting the database.
 
+Omada pod member container quadlets declare `apply_hints.restart_mode: manual`.
+Apply may stage changed unit files and reload systemd, but it must not restart
+MongoDB or the controller as isolated pod members. Runtime changes to those
+containers require an operator-controlled pod restart sequence.
+
 Authelia copy services use `systemctl try-restart` for downstream refresh so
 initial startup does not require the target container to already be active.
 Omada env copy services use the same `try-restart` pattern.

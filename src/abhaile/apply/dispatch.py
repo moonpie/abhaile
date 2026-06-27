@@ -862,6 +862,26 @@ def _run_quadlet_owner_actions(
 
         return (False, None)
 
+    def _restart_mode_for_owner(owner_ref: str, raw_entries: list[object]) -> str:
+        if owner_apply_hints is not None:
+            hints = owner_apply_hints.get(owner_ref)
+            if isinstance(hints, dict):
+                restart_mode = hints.get("restart_mode")
+                if isinstance(restart_mode, str) and restart_mode:
+                    return restart_mode
+
+        for raw_entry in raw_entries:
+            if not isinstance(raw_entry, dict):
+                continue
+            hints = raw_entry.get("apply_hints")
+            if not isinstance(hints, dict):
+                continue
+            restart_mode = hints.get("restart_mode")
+            if isinstance(restart_mode, str) and restart_mode:
+                return restart_mode
+
+        return "try-restart"
+
     for owner_ref in sorted(owner_changes.keys()):
         state = owner_changes[owner_ref]
         raw_entries = state.get("raw_entries")
@@ -901,6 +921,7 @@ def _run_quadlet_owner_actions(
             changed_phases=phases if isinstance(phases, set) else set(),
             rootless=rootless,
             run_as_user=owner_run_as_user,
+            restart_mode=_restart_mode_for_owner(owner_ref, raw_entries),
         )
 
         if convergence_plans is not None:

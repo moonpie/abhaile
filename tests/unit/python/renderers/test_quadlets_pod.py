@@ -653,6 +653,7 @@ composition:
         container_art = artifacts[container_key]
         assert container_art.kind == "quadlet.container"
         assert container_art.owner_ref == "unit:authelia-app-app.service"
+        assert container_art.apply_hints == {"rootless": False, "restart_mode": "manual"}
 
         image_key = next(k for k in artifacts if k.endswith("authelia-app-app.image"))
         image_art = artifacts[image_key]
@@ -670,6 +671,10 @@ composition:
             "unit:authelia-app-app-image.service",
             "unit:authelia-app.service",
         ]
+        assert owners["unit:authelia-app-app.service"].apply_hints == {
+            "rootless": False,
+            "restart_mode": "manual",
+        }
 
     def test_named_volume_host_directories_are_rendered(
         self, tmp_path: Path, write_file: Any

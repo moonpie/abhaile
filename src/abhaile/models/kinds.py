@@ -33,6 +33,6 @@ KNOWN_APPLY_HINTS: dict[str, list[str]] = {
     "caddy": ["contributors", "restart_on_failure"],
     "vault": ["write_order", "restart_mode", "rootless", "podman_user"],
     "networkd": [],
-    "quadlet": ["rootless", "podman_user", "shared"],
+    "quadlet": ["rootless", "podman_user", "restart_mode", "shared"],
     "service": ["restart_unit", "rootless", "podman_user", "owner", "group", "mode"],
 }

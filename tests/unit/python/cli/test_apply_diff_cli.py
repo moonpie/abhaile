@@ -959,11 +959,12 @@ class TestApplyCli:
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
             "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
-            lambda owner_ref, kinds, changed_phases, rootless, run_as_user: {
+            lambda owner_ref, kinds, changed_phases, rootless, run_as_user, restart_mode: {
                 "owner_ref": owner_ref,
                 "unit": "blocky.service",
                 "kinds": kinds,
                 "rootless": rootless,
+                "restart_mode": restart_mode,
                 "actions": [
                     {"action": "daemon-reload", "success": True, "return_code": 0},
                     {"action": "try-restart", "success": True, "return_code": 0},
@@ -1096,8 +1097,9 @@ class TestApplyCli:
             changed_phases: set[str],
             rootless: bool,
             run_as_user: str | None,
+            restart_mode: str,
         ) -> dict[str, object]:
-            del changed_phases, run_as_user
+            del changed_phases, run_as_user, restart_mode
             primary_calls.append(owner_ref)
             return {
                 "owner_ref": owner_ref,
@@ -1259,8 +1261,9 @@ class TestApplyCli:
             changed_phases: set[str],
             rootless: bool,
             run_as_user: str | None,
+            restart_mode: str,
         ) -> dict[str, object]:
-            del changed_phases, run_as_user
+            del changed_phases, run_as_user, restart_mode
             primary_calls.append(owner_ref)
             return {
                 "owner_ref": owner_ref,
