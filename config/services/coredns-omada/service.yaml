@@ -8,7 +8,6 @@ composition:
   systemd:
     - source: coredns-omada/systemd/install.service
       destination: /etc/systemd/system/coredns-omada-install.service
-      enable: true
     - source: coredns-omada/systemd/service.service
       destination: /etc/systemd/system/coredns.service
       enable: true

@@ -25,6 +25,8 @@ env/
 out/
 tmp/
 .old_docs/
+!config/**/build/
+!config/**/build/**
 
 # IDE/editor junk
 .vscode/

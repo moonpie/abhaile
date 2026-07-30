@@ -116,6 +116,100 @@ Subnet={{ network.vlans[vlan_name].cidr }}
         image_content = image_file.read_text()
         assert "ghcr.io/0xerr0r/blocky:v0.27.0" in image_content
 
+    def test_render_container_inherits_quadlets_from_include(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Container services can inherit container and image quadlets from includes."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output" / "services"
+
+        write_file(
+            config_root / "services" / "blocky-common" / "service.yaml",
+            """name: blocky-common
+composition:
+  container:
+    named_volumes: []
+    mounted_files: []
+""",
+        )
+        write_file(
+            config_root / "services" / "blocky-common" / "quadlets" / "image.image",
+            "[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPolicy=missing\n",
+        )
+        write_file(
+            config_root / "services" / "blocky-common" / "quadlets" / "container.container.j2",
+            "[Container]\nImage={{ image }}\n",
+        )
+        write_file(
+            config_root / "services" / "blocky-a" / "service.yaml",
+            """name: blocky-a
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  include:
+    - blocky-common
+  config: []
+""",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "network.network.j2",
+            "[Unit]\nDescription={{ vlan_name }} network\n[Network]\nDriver=ipvlan\n",
+        )
+
+        network: dict[str, Any] = {
+            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "services": {"blocky-a": {"vlan": "services", "address": "172.20.20.233/32"}},
+        }
+
+        render_service_quadlets(
+            "phobos",
+            ["blocky-a"],
+            network,
+            config_root,
+            output_dir,
+        )
+
+        container_file = output_dir / "blocky-a" / "etc/containers/systemd/blocky-a.container"
+        image_file = output_dir / "blocky-a" / "etc/containers/systemd/blocky-a.image"
+
+        assert container_file.read_text() == "[Container]\nImage=blocky-a.image\n"
+        assert image_file.read_text() == (
+            "[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPolicy=missing\n"
+        )
+
+    def test_podman_service_without_resolved_container_raises(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Podman services must define or inherit pod/container composition."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output" / "services"
+
+        write_file(
+            config_root / "services" / "common" / "service.yaml",
+            "name: common\ncomposition: {}\n",
+        )
+        write_file(
+            config_root / "services" / "broken" / "service.yaml",
+            """name: broken
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  include:
+    - common
+""",
+        )
+
+        with pytest.raises(RenderError, match="must define or include composition"):
+            render_service_quadlets(
+                "phobos",
+                ["broken"],
+                {"services": {}},
+                config_root,
+                output_dir,
+            )
+
     def test_render_named_volumes(self, tmp_path: Path, write_file: Any) -> None:
         """Named volumes generate .volume files and volume lines."""
         config_root = tmp_path / "config"

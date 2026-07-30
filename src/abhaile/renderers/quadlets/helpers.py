@@ -88,20 +88,37 @@ def _discover_build_image_files(
     quadlets_dir: Path,
     service: str,
     container_name: str | None = None,
+    services_root: Path | None = None,
 ) -> tuple[Path | None, Path | None, str | None, str | None]:
     """Discover build/image files and compute target filenames."""
     name_base = f"{service}-app-{container_name}" if container_name else service
 
-    _build = quadlets_dir / "build.build"
-    _image = quadlets_dir / "image.image"
+    if services_root is not None and container_name is None:
+        build_path = _resolve_quadlet_source_file(service, services_root, "build.build")
+        image_path = _resolve_quadlet_source_file(service, services_root, "image.image")
+    else:
+        build_path = quadlets_dir / "build.build"
+        image_path = quadlets_dir / "image.image"
 
-    build_path = _build if _build.exists() else None
-    image_path = _image if _image.exists() else None
+    build_path = build_path if build_path and build_path.exists() else None
+    image_path = image_path if image_path and image_path.exists() else None
 
     build_filename = f"{name_base}.build" if build_path else None
     image_filename = f"{name_base}.image" if image_path else None
 
     return build_path, image_path, build_filename, image_filename
+
+
+def _resolve_quadlet_source_file(service: str, services_root: Path, filename: str) -> Path | None:
+    """Resolve a service quadlet source file, allowing direct files to override includes."""
+    from abhaile.utils.composition import walk_service_includes
+
+    ordered_services = walk_service_includes(service, services_root.parent)
+    for service_name in reversed(ordered_services):
+        candidate = services_root / service_name / "quadlets" / filename
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def _resolve_composition_definition(

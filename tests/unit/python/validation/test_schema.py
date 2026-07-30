@@ -292,6 +292,29 @@ class TestServiceCompositionSchema:
 
         validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
 
+    def test_service_schema_accepts_podman_include_with_direct_container(self) -> None:
+        """podman services may include common composition and override container config."""
+        repo_root = self._repo_root()
+        service_schema_path = repo_root / "schemas" / "service.schema.json"
+        service_schema = read_json(service_schema_path)
+
+        service_data: dict[str, Any] = {
+            "name": "example",
+            "podman": {
+                "user": "root",
+                "network": "ipvlan-l2",
+            },
+            "composition": {
+                "include": ["example-common"],
+                "container": {
+                    "named_volumes": [],
+                    "mounted_files": [],
+                },
+            },
+        }
+
+        validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
+
     def test_service_schema_accepts_directory_metadata(self) -> None:
         """service config directory entries may declare owner/group/mode directly."""
         repo_root = self._repo_root()

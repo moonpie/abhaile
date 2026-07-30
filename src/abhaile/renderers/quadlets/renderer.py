@@ -10,7 +10,10 @@ from abhaile.renderers.quadlets.container import (
     _render_service_quadlet_files,
     _resolve_container_definition,
 )
-from abhaile.renderers.quadlets.helpers import _discover_build_image_files
+from abhaile.renderers.quadlets.helpers import (
+    _discover_build_image_files,
+    _resolve_quadlet_source_file,
+)
 from abhaile.renderers.quadlets.network import (
     _lookup_service_vlan,
     _render_network_quadlets,
@@ -21,6 +24,7 @@ from abhaile.renderers.quadlets.volumes import (
     _build_mounted_file_lines,
     _quadlet_output_root,
     _render_named_volumes,
+    _validate_named_volumes,
 )
 from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
@@ -98,24 +102,47 @@ def render_service_quadlets(
             continue
 
         if not container_def:
-            continue
+            raise RenderError(
+                f"Podman service '{service}' must define or include composition.pod "
+                "or composition.container"
+            )
 
         user = podman.get("user")
         if not user:
             raise RenderError(f"Podman user missing for service '{service}'")
 
         quadlets_dir = services_root / service / "quadlets"
-        if not quadlets_dir.exists():
-            raise RenderError(f"Quadlets directory missing: {quadlets_dir}")
+
+        named_volumes = container_def.get("named_volumes", []) or []
+        if named_volumes:
+            volume_template_path = (
+                config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2"
+            )
+            if not volume_template_path.exists():
+                raise RenderError(f"Missing volume template: {volume_template_path}")
+
+        if named_volumes:
+            _validate_named_volumes(service=service, container_def=container_def)
+
+        container_template_path = _resolve_quadlet_source_file(
+            service,
+            services_root,
+            "container.container.j2",
+        )
+        if container_template_path is None:
+            if not quadlets_dir.exists():
+                raise RenderError(f"Quadlets directory missing: {quadlets_dir}")
+            raise RenderError(f"Missing container template for service '{service}'")
 
         output_root = _quadlet_output_root(user)
         output_root_relative = output_root.as_posix().lstrip("/")
         service_output_dir = output_dir / service / output_root_relative
         service_output_dir.mkdir(parents=True, exist_ok=True)
 
-        _build_path, _image_path, build_filename, image_filename = _discover_build_image_files(
+        build_path, image_path, build_filename, image_filename = _discover_build_image_files(
             quadlets_dir=quadlets_dir,
             service=service,
+            services_root=services_root,
         )
 
         volume_lines, volume_owner_refs = _render_named_volumes(
@@ -153,6 +180,9 @@ def render_service_quadlets(
             network=network,
             host=host,
             volume_lines=volume_lines,
+            container_template_path=container_template_path,
+            build_path=build_path,
+            image_path=image_path,
             build_filename=build_filename,
             image_filename=image_filename,
             output_root=output_root,

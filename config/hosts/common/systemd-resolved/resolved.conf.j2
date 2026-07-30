@@ -1,8 +1,8 @@
 [Resolve]
 # DNS servers for abhaile homelab
-# Primary: CoreDNS filtered
-# Secondary: CoreDNS clean
-DNS={{ network.services['coredns-filtered'].address | strip_cidr }} {{ network.services['coredns-clean'].address | strip_cidr }}
+# Primary: CoreDNS A
+# Secondary: CoreDNS B
+DNS={{ network.services['coredns-a'].address | strip_cidr }} {{ network.services['coredns-b'].address | strip_cidr }}
 
 # Use systemd-resolved stub resolver
 # Creates /run/systemd/resolve/stub-resolv.conf with 127.0.0.53

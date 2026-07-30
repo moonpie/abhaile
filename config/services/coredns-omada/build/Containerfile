@@ -1,6 +1,6 @@
 ARG GO_VERSION
 
-FROM golang:${GO_VERSION} AS build
+FROM docker.io/library/golang:${GO_VERSION} AS build
 
 RUN apt update && apt install git curl jq -y
 
@@ -15,6 +15,8 @@ RUN git clone https://github.com/coredns/coredns.git && \
 WORKDIR /src/coredns
 
 # Insert the omada plugin just ABOVE the route53 line in plugin.cfg
+RUN grep -q '^view:view$' /src/coredns/plugin.cfg || \
+    sed -i '/^route53:route53$/i view:view' /src/coredns/plugin.cfg
 RUN sed -i '/^route53:route53$/i omada:github.com/dougbw/coredns_omada' /src/coredns/plugin.cfg
 
 # Pin the external plugin module before generating the CoreDNS build.
@@ -24,7 +26,7 @@ RUN go get github.com/dougbw/coredns_omada@${COREDNS_OMADA_VERSION}
 RUN make
 
 # --- Dist stage ---
-FROM alpine:3.20 AS dist
+FROM docker.io/library/alpine:3.20 AS dist
 RUN adduser -S -D -H -h /nonexistent -s /sbin/nologin coredns
 COPY --from=build /src/coredns/coredns /coredns
 ENTRYPOINT ["/coredns"]

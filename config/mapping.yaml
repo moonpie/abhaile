@@ -2,8 +2,8 @@ abhaile:
   - phobos:
       - ddclient
       - chrony-a
-      - coredns-filtered
-      - blocky
+      - coredns-a
+      - blocky-a
       - caddy-internal
       - caddy-dmz
       - vault
@@ -12,5 +12,6 @@ abhaile:
       - omada-controller
   - deimos:
       - chrony-b
-      - coredns-clean
+      - coredns-b
+      - blocky-b
       - vault-agent

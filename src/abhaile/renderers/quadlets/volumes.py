@@ -64,6 +64,24 @@ def _quadlet_output_root(user: str) -> Path:
     return Path(f"/home/{user}/.config/containers/systemd")
 
 
+def _validate_named_volumes(
+    *,
+    service: str,
+    container_def: dict[str, Any],
+    container_name: str | None = None,
+) -> None:
+    """Validate named volume entries without rendering side effects."""
+    named_volumes = container_def.get("named_volumes", []) or []
+    for volume in named_volumes:
+        name = volume.get("name")
+        host_path = volume.get("host_path")
+        mount_path = volume.get("mount_path")
+        if not name or not host_path or not mount_path:
+            if container_name:
+                raise RenderError(f"Invalid named volume entry: {volume}")
+            raise RenderError(f"Invalid named volume for service '{service}': {volume}")
+
+
 def _render_named_volumes(
     *,
     service: str,
@@ -84,6 +102,12 @@ def _render_named_volumes(
     named_volumes = container_def.get("named_volumes", []) or []
     if not named_volumes:
         return ([], [])
+
+    _validate_named_volumes(
+        service=service,
+        container_def=container_def,
+        container_name=container_name,
+    )
 
     if name_prefix is None:
         if container_name:

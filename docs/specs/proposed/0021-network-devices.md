@@ -8,7 +8,7 @@ title: Network Device Configuration
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-21
+updated: 2026-07-28
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -196,19 +196,19 @@ adapter surface is proven.
 
 ### VLAN Architecture
 
-| VLAN ID | Name | Subnet | Gateway | Purpose |
-| --- | --- | --- | --- | --- |
-| 1 | Default | — | — | Native VLAN (unused, management transition) |
-| 99 | Management | 172.20.99.0/24 | 172.20.99.1 | Network device management (switches, APs, ER605) |
-| 20 | Services | 172.20.20.0/24 | 172.20.20.1 | Abhaile hosts and containerized services |
-| 30 | Trusted | 172.20.30.0/24 | 172.20.30.1 | Trusted client devices (workstations, phones) |
-| 40 | Gaming | 172.20.40.0/24 | 172.20.40.1 | Gaming consoles and PCs (UPnP exception) |
-| 50 | Guest | 172.20.50.0/24 | 172.20.50.1 | Guest network (internet only, isolated) |
-| 60 | IoT | 172.20.60.0/24 | 172.20.60.1 | IoT devices (sensors, smart home, cameras) |
-| 70 | Cast | 172.20.70.0/24 | 172.20.70.1 | Casting devices (Chromecast, AirPlay receivers) |
-| 80 | Camera | 172.20.80.0/24 | 172.20.80.1 | IP cameras (isolated, NVR access only) |
-| 90 | VPN | 172.20.90.0/24 | 172.20.90.1 | WireGuard VPN clients |
-| 100 | DMZ | 172.20.100.0/24 | 172.20.100.1 | Public-facing services (Caddy-DMZ) |
+| VLAN ID | Name | Subnet | Gateway | SSID | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Adoption (Default) | 192.168.0.0/24 | 192.168.0.1 | N/A | Default/adoption network for initial device onboarding |
+| 20 | Services | 172.20.20.0/24 | 172.20.20.1 | N/A | Abhaile hosts and containerized services |
+| 30 | General | 172.20.30.0/24 | 172.20.30.1 | an t-idirlion | General client devices |
+| 40 | Gaming | 172.20.40.0/24 | 172.20.40.1 | an t-idirlion.gaming | Gaming consoles and PCs (UPnP exception) |
+| 50 | IoT | 172.20.50.0/24 | 172.20.50.1 | an t-idirlion.iot | IoT devices and smart-home endpoints |
+| 60 | Camera | 172.20.60.0/24 | 172.20.60.1 | N/A | IP cameras (isolated, NVR access only) |
+| 70 | Cast | 172.20.70.0/24 | 172.20.70.1 | an t-idirlion.cast | Casting devices (Chromecast, AirPlay receivers) |
+| 80 | Guest | 172.20.80.0/24 | 172.20.80.1 | an t-idirlion.guest | Guest network (internet only, isolated) |
+| 90 | VPN | 172.20.90.0/24 | 172.20.90.1 | N/A | WireGuard VPN clients |
+| 99 | Mgmt | 172.20.99.0/24 | 172.20.99.1 | an t-idirlion.mgmt | Network device management (switches, APs, ER605) |
+| 100 | DMZ | 172.20.100.0/24 | 172.20.100.1 | N/A | Public-facing services (Caddy-DMZ) |
 
 ### ER605 Gateway Configuration
 
@@ -218,14 +218,15 @@ Each VLAN gets a DHCP scope with appropriate options:
 
 | VLAN | Range | Option 6 (DNS) | Option 42 (NTP) | Option 15/119 (Domain) |
 | --- | --- | --- | --- | --- |
+| 1 | .100–.199 | coredns-clean | chrony-a, chrony-b | — |
 | 99 | .100–.199 | coredns-clean | chrony-a, chrony-b | mgmt.abhaile.home.arpa |
-| 20 | .100–.199 | coredns-filtered | chrony-a, chrony-b | svc.abhaile.home.arpa |
+| 20 | .100–.199 | coredns-clean | chrony-a, chrony-b | svc.abhaile.home.arpa |
 | 30 | .100–.199 | coredns-filtered | chrony-a, chrony-b | abhaile.home.arpa |
-| 40 | .100–.199 | coredns-filtered | chrony-a, chrony-b | abhaile.home.arpa |
-| 50 | .100–.199 | coredns-clean | chrony-a, chrony-b | — |
-| 60 | .100–.199 | coredns-clean | chrony-a, chrony-b | iot.abhaile.home.arpa |
-| 70 | .100–.199 | coredns-filtered | chrony-a, chrony-b | abhaile.home.arpa |
-| 80 | .100–.199 | coredns-clean | chrony-a, chrony-b | — |
+| 40 | .100–.199 | coredns-filtered-light | chrony-a, chrony-b | abhaile.home.arpa |
+| 50 | .100–.199 | coredns-filtered-strict | chrony-a, chrony-b | iot.abhaile.home.arpa |
+| 60 | .100–.199 | coredns-filtered-strict | chrony-a, chrony-b | camera.abhaile.home.arpa |
+| 70 | .100–.199 | coredns-filtered-light | chrony-a, chrony-b | abhaile.home.arpa |
+| 80 | .100–.199 | coredns-filtered-strict | chrony-a, chrony-b | guest.abhaile.home.arpa |
 
 VPN (90) and DMZ (100) do not run DHCP on the ER605 — VPN addresses are
 assigned by WireGuard, and DMZ uses static /32 addressing.
@@ -237,6 +238,11 @@ DNS server addresses reference service IPs from `config/network.yaml`:
 - chrony-a: 172.20.20.237
 - chrony-b: 172.20.20.238
 
+If CoreDNS implements source-CIDR policy internally, ER605 DHCP may instead
+provide the same highly available CoreDNS pair to every VLAN and let CoreDNS
+select clean, filtered, lightly filtered, or strictly filtered upstream policy
+from the client source subnet.
+
 #### Inter-VLAN ACL Policy
 
 Default stance: deny all inter-VLAN traffic, then add explicit allows.
@@ -245,16 +251,16 @@ Key allow rules:
 
 | Source | Destination | Ports/Protocol | Purpose |
 | --- | --- | --- | --- |
-| VLAN 30 (Trusted) | VLAN 20 (Services) | TCP/\* | Full service access |
-| VLAN 30 (Trusted) | VLAN 99 (Mgmt) | TCP/443, TCP/22 | Network device management |
-| VLAN 30 (Trusted) | VLAN 60 (IoT) | TCP/\* | IoT device management |
-| VLAN 30 (Trusted) | VLAN 70 (Cast) | TCP/UDP/\* | Casting |
+| VLAN 30 (General) | VLAN 20 (Services) | TCP/\* | Full service access |
+| VLAN 30 (General) | VLAN 99 (Mgmt) | TCP/443, TCP/22 | Network device management |
+| VLAN 30 (General) | VLAN 50 (IoT) | TCP/\* | IoT device management |
+| VLAN 30 (General) | VLAN 70 (Cast) | TCP/UDP/\* | Casting |
 | VLAN 40 (Gaming) | WAN | TCP/UDP/\* | Internet access (QoS priority) |
-| VLAN 60 (IoT) | VLAN 20 (Services) | TCP/1883 | MQTT to mosquitto |
-| VLAN 60 (IoT) | VLAN 20 (Services) | TCP/8123 | Home Assistant API |
-| VLAN 80 (Camera) | VLAN 20 (Services) | — | Deny (go2rtc/frigate pull from cameras) |
-| VLAN 20 (Services) | VLAN 60 (IoT) | TCP/554 | RTSP pull (go2rtc → cameras) |
-| VLAN 20 (Services) | VLAN 80 (Camera) | TCP/554 | RTSP pull (go2rtc → cameras) |
+| VLAN 50 (IoT) | VLAN 20 (Services) | TCP/1883 | MQTT to mosquitto |
+| VLAN 50 (IoT) | VLAN 20 (Services) | TCP/8123 | Home Assistant API |
+| VLAN 60 (Camera) | VLAN 20 (Services) | — | Deny (go2rtc/frigate pull from cameras) |
+| VLAN 20 (Services) | VLAN 50 (IoT) | TCP/554 | RTSP pull (go2rtc → cameras, if needed) |
+| VLAN 20 (Services) | VLAN 60 (Camera) | TCP/554 | RTSP pull (go2rtc → cameras) |
 | VLAN 90 (VPN) | VLAN 20 (Services) | TCP/\* | VPN admin access |
 | VLAN 90 (VPN) | VLAN 99 (Mgmt) | TCP/443, TCP/22 | VPN network management |
 | All VLANs | VLAN 20 (Services) | UDP/53, TCP/53 | DNS resolution |
@@ -264,9 +270,9 @@ Key deny rules:
 
 | Source | Destination | Ports/Protocol | Purpose |
 | --- | --- | --- | --- |
-| VLAN 50 (Guest) | RFC1918 | `*` | Guest isolation — internet only |
-| VLAN 60 (IoT) | WAN | UDP/53, TCP/53, TCP/443 (DoH/DoT) | Force local DNS |
-| VLAN 80 (Camera) | WAN | `*` | Camera internet block |
+| VLAN 80 (Guest) | RFC1918 | `*` | Guest isolation — internet only |
+| VLAN 50 (IoT) | WAN | UDP/53, TCP/53, TCP/443 (DoH/DoT) | Force local DNS |
+| VLAN 60 (Camera) | WAN | `*` | Camera internet block |
 | All (except Admin/VPN) | WAN | UDP/123 | Block direct NTP to internet |
 | All | All | UPnP | UPnP disabled (exception VLAN 40) |
 
@@ -282,7 +288,7 @@ Client profiles:
 | Profile | Allowed IPs | Purpose |
 | --- | --- | --- |
 | admin | 0.0.0.0/0 (full tunnel) | Full network access including management |
-| user | 172.20.20.0/24, 172.20.30.0/24, 172.20.70.0/24 | Service and trusted VLAN access |
+| user | 172.20.20.0/24, 172.20.30.0/24, 172.20.70.0/24 | Service, general, and cast VLAN access |
 | travel | 0.0.0.0/0 (full tunnel) | Internet privacy, DNS through home |
 
 #### NAT Hairpin
@@ -294,7 +300,7 @@ for the WAN IP back to the DMZ VLAN (172.20.100.0/24).
 #### Additional WAN Rules
 
 - DoH/DoT blocklist enforcement: block outbound TCP/443 and TCP/853 to known
-  DoH/DoT resolvers from IoT and Camera VLANs.
+  DoH/DoT resolvers from IoT, Camera, and Guest VLANs.
 - UPnP disabled globally, exception for VLAN 40 (Gaming).
 
 ### Switch Configuration
@@ -315,10 +321,10 @@ for the WAN IP back to the DMZ VLAN (172.20.100.0/24).
 | TRUNK-Phobos | 20, 100 | 20 | Phobos host (services + DMZ) |
 | TRUNK-Deimos | 20 | 20 | Deimos host (services only) |
 | TRUNK-AccessSwitch | All | 99 | Core ↔ access switch |
-| AP-Uplink | 20, 30, 40, 50, 60, 70 | 99 | AP trunk ports |
-| ACCESS-Trusted | — | 30 | Wired trusted devices |
-| ACCESS-IoT | — | 60 | Wired IoT devices |
-| ACCESS-Camera | — | 80 | Wired IP cameras |
+| AP-Uplink | 20, 30, 40, 50, 70, 80, 99 | 1 | AP trunk ports; native VLAN 1 remains adoption/default only |
+| ACCESS-General | — | 30 | Wired general client devices |
+| ACCESS-IoT | — | 50 | Wired IoT devices |
+| ACCESS-Camera | — | 60 | Wired IP cameras |
 | ACCESS-Gaming | — | 40 | Wired gaming devices |
 
 #### Spanning Tree (RSTP)
@@ -351,12 +357,12 @@ Four EAP653 (Wi-Fi 6, 802.11ax) deployed across the premises.
 
 | SSID | VLAN | Band | Security | Notes |
 | --- | --- | --- | --- | --- |
-| Abhaile | 30 | 2.4 + 5 GHz | WPA3-Personal | Primary trusted network |
-| Abhaile-Gaming | 40 | 5 GHz only | WPA3-Personal | Low-latency, 5 GHz band steering |
-| Abhaile-Guest | 50 | 2.4 + 5 GHz | WPA2-Personal | Captive portal optional, isolated |
-| Abhaile-IoT | 60 | 2.4 GHz only | WPA2-Personal | Legacy device compatibility |
-| Abhaile-Cast | 70 | 2.4 + 5 GHz | WPA3-Personal | Casting devices |
-| Abhaile-Cameras | 80 | 2.4 GHz only | WPA2-Personal | Wireless cameras (if any) |
+| an t-idirlion | 30 | 2.4 + 5 GHz | WPA3-Personal | General client network |
+| an t-idirlion.gaming | 40 | 5 GHz only | WPA3-Personal | Low-latency, 5 GHz band steering |
+| an t-idirlion.iot | 50 | 2.4 GHz only | WPA2-Personal | Legacy device compatibility |
+| an t-idirlion.cast | 70 | 2.4 + 5 GHz | WPA3-Personal | Casting devices |
+| an t-idirlion.guest | 80 | 2.4 + 5 GHz | WPA2-Personal | Captive portal optional, isolated |
+| an t-idirlion.mgmt | 99 | 5 GHz only | WPA3-Personal | Restricted network management access |
 
 #### Wi-Fi 6 Optimization
 
@@ -368,16 +374,16 @@ Four EAP653 (Wi-Fi 6, 802.11ax) deployed across the premises.
 
 #### Per-SSID Settings
 
-- **Abhaile-IoT**: PMF (Protected Management Frames) optional, 802.11k/v/r
+- **an t-idirlion.iot**: PMF (Protected Management Frames) optional, 802.11k/v/r
   disabled (legacy device compatibility)
-- **Abhaile-Guest**: client isolation enabled
-- **Abhaile-Cameras**: client isolation enabled
-- **Abhaile-Cast**: multicast enhancement enabled for mDNS/SSDP
+- **an t-idirlion.guest**: client isolation enabled
+- **an t-idirlion.cast**: multicast enhancement enabled for mDNS/SSDP
+- **an t-idirlion.mgmt**: restricted to admin devices and management workflows
 
 #### Bonjour Gateway
 
-One-way Bonjour/mDNS forwarding from VLAN 70 (Cast) to VLAN 30 (Trusted).
-Allows trusted devices to discover casting targets without full L2 bridging.
+One-way Bonjour/mDNS forwarding from VLAN 70 (Cast) to VLAN 30 (General).
+Allows general client devices to discover casting targets without full L2 bridging.
 
 ### QoS Configuration
 
@@ -437,9 +443,11 @@ Allows trusted devices to discover casting targets without full L2 bridging.
 
 - ADR: null
 
-- Decision: Management VLAN 99 replaces default VLAN 1.
+- Decision: Mgmt VLAN 99 replaces adoption/default VLAN 1 for steady-state device management.
 
-- Rationale: Default VLAN 1 is a common attack surface. Migrating management traffic to VLAN 99 with ACL-restricted access improves security posture.
+- Rationale: Default VLAN 1 is a common attack surface and should remain limited to initial
+  adoption. Migrating management traffic to VLAN 99 with ACL-restricted access improves
+  security posture.
 
 - Impact: All device management interfaces must be re-addressed after initial VLAN migration.
 
@@ -447,9 +455,14 @@ Allows trusted devices to discover casting targets without full L2 bridging.
 
 - Decision: Separate DNS pools (filtered vs clean) per VLAN purpose.
 
-- Rationale: IoT and camera VLANs get unfiltered DNS (coredns-clean) because ad-blocking can break device functionality. Client VLANs get filtered DNS (coredns-filtered via Blocky) for ad/tracker blocking.
+- Rationale: Services, Mgmt, DMZ, and Adoption need predictable clean DNS for infrastructure
+  and recovery. General, IoT, Camera, Cast, and Guest need filtered DNS policy, with lighter
+  filtering for Gaming/Cast where compatibility is more fragile and stricter filtering for
+  IoT/Camera/Guest.
 
-- Impact: DHCP Option 6 differs between VLANs. Devices cannot bypass local DNS due to ACL blocking outbound DoH/DoT.
+- Impact: DHCP Option 6 may differ between VLANs, or CoreDNS may apply source-CIDR policy
+  while DHCP provides the same HA resolver pair everywhere. Devices cannot bypass local DNS
+  due to ACL blocking outbound DoH/DoT.
 
 - ADR: null
 
@@ -481,7 +494,7 @@ Allows trusted devices to discover casting targets without full L2 bridging.
 - [ ] Document IGMP snooping and storm control settings
 - [ ] Document SSID-to-VLAN mappings and per-SSID security settings
 - [ ] Document Wi-Fi 6 optimization and band steering configuration
-- [ ] Document Bonjour gateway rules (Cast → Trusted)
+- [ ] Document Bonjour gateway rules (Cast → General)
 - [ ] Document QoS DSCP marking and priority queuing rules
 - [ ] Configure automated Omada site backups (daily/weekly/monthly)
 - [ ] Validate Omada backup restore process

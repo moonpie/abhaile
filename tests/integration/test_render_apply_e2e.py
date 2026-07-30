@@ -147,8 +147,8 @@ class TestRenderApplyE2E:
         assert "EnvironmentFile=/etc/caddy/dns.env" not in caddy_dmz_quadlet
 
         for rendered_root, service_name in (
-            (phobos_root, "coredns-filtered"),
-            (deimos_root, "coredns-clean"),
+            (phobos_root, "coredns-a"),
+            (deimos_root, "coredns-b"),
         ):
             corefile = (rendered_root / f"services/{service_name}/etc/coredns/Corefile").read_text(
                 encoding="utf-8"
@@ -158,6 +158,21 @@ class TestRenderApplyE2E:
             omada_block = corefile.split("omada {", 1)[1].split("}", 1)[0]
             assert "fallthrough" not in omada_block
             assert "controller_url https://172.20.20.220:8043" not in corefile
+            assert "view filtered" in corefile
+            assert "incidr(client_ip(), '172.20.30.0/24')" in corefile
+            assert "incidr(client_ip(), '172.20.50.0/24')" in corefile
+            assert "incidr(client_ip(), '172.20.60.0/24')" in corefile
+            assert "incidr(client_ip(), '172.20.80.0/24')" in corefile
+            assert "forward . 9.9.9.9 149.112.112.112 1.1.1.1 1.0.0.1" in corefile
+
+        phobos_corefile = (phobos_root / "services/coredns-a/etc/coredns/Corefile").read_text(
+            encoding="utf-8"
+        )
+        deimos_corefile = (deimos_root / "services/coredns-b/etc/coredns/Corefile").read_text(
+            encoding="utf-8"
+        )
+        assert "forward . 172.20.20.233:8053" in phobos_corefile
+        assert "forward . 172.20.20.234:8053" in deimos_corefile
 
         authelia_quadlet = (
             phobos_root / "services/authelia/etc/containers/systemd/authelia-app-authelia.container"
@@ -180,12 +195,12 @@ class TestRenderApplyE2E:
             "authelia-app-redis.service"
         ) in authelia_quadlet
         assert (
-            "ExecStartPost=/usr/bin/systemctl --no-block try-restart "
+            "ExecStartPost=/usr/bin/systemctl --no-block restart "
             "authelia-app-authelia.service" in authelia_copy_unit
         )
         assert "ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root" in authelia_copy_unit
         assert (
-            "ExecStartPost=/usr/bin/systemctl --no-block try-restart authelia-app-redis.service"
+            "ExecStartPost=/usr/bin/systemctl --no-block restart authelia-app-redis.service"
             in redis_copy_unit
         )
         assert "ExecStartPre=/usr/bin/install -d -m 0750 -o root -g root" in redis_copy_unit
@@ -263,7 +278,7 @@ class TestRenderApplyE2E:
         assert (omada_env_path / "omada-controller-env.service").exists()
         assert (omada_env_path / "omada-mongodb-env.path").exists()
         assert (omada_env_path / "omada-mongodb-env.service").exists()
-        assert "--no-block try-restart omada-controller-app-omada-controller.service" in (
+        assert "--no-block restart omada-controller-app-omada-controller.service" in (
             omada_env_path / "omada-controller-env.service"
         ).read_text(encoding="utf-8")
         omada_controller_env_unit = (omada_env_path / "omada-controller-env.service").read_text(
@@ -275,12 +290,13 @@ class TestRenderApplyE2E:
         assert "ExecCondition=" in omada_controller_env_unit
         assert "ExecCondition=" in omada_mongodb_env_unit
         assert "try-restart omada-controller-app-mongodb.service" not in omada_mongodb_env_unit
+        assert "--no-block restart omada-controller-app-mongodb.service" in omada_mongodb_env_unit
 
         for rendered_root in (phobos_root, deimos_root):
             zone_root = (
-                rendered_root / "services/coredns-clean/etc/coredns/zones"
+                rendered_root / "services/coredns-b/etc/coredns/zones"
                 if rendered_root == deimos_root
-                else rendered_root / "services/coredns-filtered/etc/coredns/zones"
+                else rendered_root / "services/coredns-a/etc/coredns/zones"
             )
             zones_content = "\n".join(
                 path.read_text(encoding="utf-8")

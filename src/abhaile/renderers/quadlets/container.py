@@ -33,6 +33,9 @@ def _render_service_quadlet_files(
     network: dict[str, Any],
     host: str,
     volume_lines: list[str],
+    container_template_path: Path,
+    build_path: Path | None,
+    image_path: Path | None,
     build_filename: str | None,
     image_filename: str | None,
     *,
@@ -42,7 +45,7 @@ def _render_service_quadlet_files(
     container_owner_requires: list[str] | None = None,
 ) -> None:
     """Render container quadlet files for a service into the output directory."""
-    jinja_env = create_jinja_env(quadlets_dir)
+    jinja_env = create_jinja_env(container_template_path.parent)
     is_rootless = bool(output_root and not output_root.as_posix().startswith("/etc"))
     apply_hints: dict[str, Any] = {"rootless": is_rootless}
     if is_rootless and output_root is not None:
@@ -50,7 +53,49 @@ def _render_service_quadlet_files(
         if len(output_root_parts) > 2:
             apply_hints["podman_user"] = output_root_parts[2]
 
-    for source_path in sorted(quadlets_dir.rglob("*")):
+    _validate_trailing_newline(
+        container_template_path,
+        context="quadlet source file",
+    )
+    template_text = container_template_path.read_text(encoding="utf-8")
+    if "{{ image" in template_text and not image_filename:
+        raise RenderError(
+            f"Template requires image variable but image.image not found: {container_template_path}"
+        )
+    if "{{ build" in template_text and not build_filename:
+        raise RenderError(
+            f"Template requires build variable but build.build not found: {container_template_path}"
+        )
+
+    template = jinja_env.get_template(container_template_path.name)
+    rendered = template.render(
+        network=network,
+        host_name=host,
+        service_name=service,
+        volume_lines=volume_lines,
+        image=image_filename,
+        build=build_filename,
+    )
+    container_filename = f"{service}.container"
+    container_path = output_dir / container_filename
+    container_path.write_text(rendered, encoding="utf-8", newline="\n")
+    if collector is not None and rendered_root is not None and output_root is not None:
+        _register_quadlet_artifact(
+            collector=collector,
+            rendered_root=rendered_root,
+            output_path=container_path,
+            target_path=str(output_root / container_filename),
+            kind=_quadlet_kind_from_filename(container_filename),
+            owner_ref=f"unit:{_quadlet_unit_name(container_filename)}",
+            content=rendered,
+            apply_hints=apply_hints,
+            owner_apply_hints=apply_hints,
+            owner_requires=container_owner_requires,
+        )
+
+    rendered_aux_paths: set[Path] = set()
+    source_paths = sorted(quadlets_dir.rglob("*")) if quadlets_dir.exists() else []
+    for source_path in source_paths:
         if source_path.is_dir():
             continue
         if source_path.parent != quadlets_dir:
@@ -63,49 +108,12 @@ def _render_service_quadlet_files(
         )
 
         if source_path.suffix == ".j2":
-            if source_path.name != "container.container.j2":
+            if source_path != container_template_path:
                 raise RenderError(f"Unsupported quadlet template: {source_path}")
-
-            template_text = source_path.read_text(encoding="utf-8")
-
-            # Check for conditional requirements
-            if "{{ image" in template_text and not image_filename:
-                raise RenderError(
-                    f"Template requires image variable but image.image not found: {source_path}"
-                )
-            if "{{ build" in template_text and not build_filename:
-                raise RenderError(
-                    f"Template requires build variable but build.build not found: {source_path}"
-                )
-
-            template = jinja_env.get_template(source_path.name)
-            rendered = template.render(
-                network=network,
-                host_name=host,
-                service_name=service,
-                volume_lines=volume_lines,
-                image=image_filename,
-                build=build_filename,
-            )
-            container_filename = f"{service}.container"
-            container_path = output_dir / container_filename
-            container_path.write_text(rendered, encoding="utf-8", newline="\n")
-            if collector is not None and rendered_root is not None and output_root is not None:
-                _register_quadlet_artifact(
-                    collector=collector,
-                    rendered_root=rendered_root,
-                    output_path=container_path,
-                    target_path=str(output_root / container_filename),
-                    kind=_quadlet_kind_from_filename(container_filename),
-                    owner_ref=f"unit:{_quadlet_unit_name(container_filename)}",
-                    content=rendered,
-                    apply_hints=apply_hints,
-                    owner_apply_hints=apply_hints,
-                    owner_requires=container_owner_requires,
-                )
             continue
 
         if source_path.name == "image.image":
+            rendered_aux_paths.add(source_path)
             image_out_name = f"{service}.image"
             target = output_dir / image_out_name
             content = source_path.read_text(encoding="utf-8")
@@ -125,6 +133,7 @@ def _render_service_quadlet_files(
             continue
 
         if source_path.name == "build.build":
+            rendered_aux_paths.add(source_path)
             build_out_name = f"{service}.build"
             target = output_dir / build_out_name
             content = source_path.read_text(encoding="utf-8")
@@ -156,6 +165,50 @@ def _render_service_quadlet_files(
                 target_path=str(output_root / out_name),
                 kind=_quadlet_kind_from_filename(out_name),
                 owner_ref=f"unit:{_quadlet_unit_name(out_name)}",
+                content=content,
+                apply_hints=apply_hints,
+                owner_apply_hints=apply_hints,
+            )
+
+    if image_path is not None and image_path not in rendered_aux_paths:
+        _validate_trailing_newline(
+            image_path,
+            context="quadlet source file",
+        )
+        image_out_name = f"{service}.image"
+        target = output_dir / image_out_name
+        content = image_path.read_text(encoding="utf-8")
+        target.write_text(content, encoding="utf-8", newline="\n")
+        if collector is not None and rendered_root is not None and output_root is not None:
+            _register_quadlet_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=target,
+                target_path=str(output_root / image_out_name),
+                kind=_quadlet_kind_from_filename(image_out_name),
+                owner_ref=f"unit:{_quadlet_unit_name(image_out_name)}",
+                content=content,
+                apply_hints=apply_hints,
+                owner_apply_hints=apply_hints,
+            )
+
+    if build_path is not None and build_path not in rendered_aux_paths:
+        _validate_trailing_newline(
+            build_path,
+            context="quadlet source file",
+        )
+        build_out_name = f"{service}.build"
+        target = output_dir / build_out_name
+        content = build_path.read_text(encoding="utf-8")
+        target.write_text(content, encoding="utf-8", newline="\n")
+        if collector is not None and rendered_root is not None and output_root is not None:
+            _register_quadlet_artifact(
+                collector=collector,
+                rendered_root=rendered_root,
+                output_path=target,
+                target_path=str(output_root / build_out_name),
+                kind=_quadlet_kind_from_filename(build_out_name),
+                owner_ref=f"unit:{_quadlet_unit_name(build_out_name)}",
                 content=content,
                 apply_hints=apply_hints,
                 owner_apply_hints=apply_hints,

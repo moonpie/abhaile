@@ -1,0 +1,12 @@
+name: blocky-a
+podman:
+  user: root
+  network: ipvlan-l2
+apply:
+  config_change_restart_unit: blocky-a.service
+composition:
+  include:
+    - blocky-common
+  config:
+    - source: blocky-common/config/config.yml
+      destination: /srv/blocky/config.yml

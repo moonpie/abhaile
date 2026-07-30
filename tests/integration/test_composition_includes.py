@@ -27,8 +27,8 @@ class TestCompositionIncludes:
         output_dir = tmp_path / "output"
         network = read_yaml(config_root / "network.yaml")
 
-        # coredns-filtered includes coredns-omada which has vault_agent template
-        host_services = ["vault-agent", "coredns-filtered"]
+        # coredns-a includes coredns-omada which has a vault_agent template.
+        host_services = ["vault-agent", "coredns-a"]
 
         render_vault_agent_configs(
             host="phobos",
@@ -88,8 +88,8 @@ class TestCompositionIncludes:
         # but the resolver functions exist to support it.
         # This test verifies the renderer doesn't crash with includes.
 
-        # blocky has a direct container definition
-        services = ["blocky"]
+        # blocky-a inherits its container quadlet from blocky-common.
+        services = ["blocky-a"]
 
         render_service_quadlets(
             host="phobos",
@@ -101,7 +101,7 @@ class TestCompositionIncludes:
 
         # Verify blocky quadlet was rendered
         # (blocky is rootless, so output is in home directory)
-        quadlet_file = list((output_dir / "blocky").rglob("blocky.container"))
+        quadlet_file = list((output_dir / "blocky-a").rglob("blocky-a.container"))
         assert len(quadlet_file) >= 1
 
     def test_nested_includes_work(self, tmp_path: Path, config_root: Path) -> None:
@@ -109,9 +109,9 @@ class TestCompositionIncludes:
         output_dir = tmp_path / "output"
         network = read_yaml(config_root / "network.yaml")
 
-        # coredns-filtered includes coredns-common and coredns-omada
+        # coredns-a includes coredns-common and coredns-omada.
         # This tests multi-level include resolution
-        host_services = ["vault-agent", "coredns-filtered"]
+        host_services = ["vault-agent", "coredns-a"]
 
         render_vault_agent_configs(
             host="phobos",

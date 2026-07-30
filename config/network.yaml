@@ -20,33 +20,33 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20260624
+        date: 20260730
         counter: 00
-        content_hash: b2da49d2184f193bc0d64406a06d4419ecf275fb04d975f6bad64fb3bcee5270
+        content_hash: 20402fd61518bcf7b7e4d91c91f2c64981f6a2a581bd182d4fafec9f4b54d591
     - name: abhaile.home.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260624
+        date: 20260730
         counter: 00
-        content_hash: 9b78482a74c6edcd3132cd8357c7e2a4dcda8dcbee71bb5397b73d4062c5e01b
+        content_hash: 83d08bc07ecb1bf2a1f8e6b9ecc9a1f28b39f091989c81059270b278afb648c1
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260624
+        date: 20260730
         counter: 00
-        content_hash: d9a3202ddc7afb10cfa541e3908b543ddbf62e8d04e6323e265011a21363db56
+        content_hash: 3836646254daae71ae311bb0b3a14732725f9e6e6421f764351fed2c89de1cbb
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260624
+        date: 20260730
         counter: 00
-        content_hash: bc79bb791d775f779472ab2bccd39b8f303c4fdcbf8a93f8e93199868f06ca56
+        content_hash: 3a893649de42ffba375bfe4bb4b1325b4d22d4c4f84101e5c2ba618aeb5ccab5
 hosts:
   phobos:
     interfaces:
@@ -383,51 +383,66 @@ services:
             name: frigate
             rdata: "%%network.services.frigate.address | strip_cidr%%"
             ptr: true
-  blocky:
+  blocky-a:
+    address: 172.20.20.233/32
+    vlan: services
+    dns:
+      - zone: svc.abhaile.home.arpa.
+        records:
+          - type: a
+            name: blocky-a
+            rdata: "%%network.services.blocky-a.address | strip_cidr%%"
+            ptr: true
+      - zone: abhaile.home.arpa.
+        records:
+          - type: cname
+            name: blocky-a
+            rdata: blocky-a.svc.abhaile.home.arpa.
+  blocky-b:
     address: 172.20.20.234/32
     vlan: services
     dns:
       - zone: svc.abhaile.home.arpa.
         records:
           - type: a
-            name: blocky
-            rdata: "%%network.services.blocky.address | strip_cidr%%"
+            name: blocky-b
+            rdata: "%%network.services.blocky-b.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
           - type: cname
-            name: blocky
-            rdata: blocky.svc.abhaile.home.arpa.
-  coredns-filtered:
+            name: blocky-b
+            rdata: blocky-b.svc.abhaile.home.arpa.
+  coredns-a:
     address: 172.20.20.235/32
     vlan: services
     dns:
       - zone: svc.abhaile.home.arpa.
         records:
           - type: a
-            name: coredns-filtered
-            rdata: "%%network.services.coredns-filtered.address | strip_cidr%%"
+            name: coredns-a
+            rdata: "%%network.services.coredns-a.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
           - type: a
             name: ns1
-            rdata: "%%network.services.coredns-filtered.address | strip_cidr%%"
-  coredns-clean:
+            rdata: "%%network.services.coredns-a.address | strip_cidr%%"
+  coredns-b:
     address: 172.20.20.236/32
     vlan: services
     dns:
       - zone: svc.abhaile.home.arpa.
         records:
           - type: a
-            name: coredns-clean
-            rdata: "%%network.services.coredns-clean.address | strip_cidr%%"
+            name: coredns-b
+            rdata: "%%network.services.coredns-b.address | strip_cidr%%"
             ptr: true
       - zone: abhaile.home.arpa.
         records:
           - type: a
             name: ns2
-            rdata: "%%network.services.coredns-clean.address | strip_cidr%%"
+            rdata: "%%network.services.coredns-b.address | strip_cidr%%"
   chrony-a:
     address: 172.20.20.237/32
     vlan: services

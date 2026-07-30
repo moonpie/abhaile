@@ -8,14 +8,28 @@ title: Monitoring and Observability Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-25
+updated: 2026-07-28
 related_adrs:
   - 0005-service-authoring-model
 supersedes: null
 superseded_by: null
 scope:
   hosts: [phobos, deimos]
-  services: [prometheus, alertmanager, grafana, loki, promtail, node-exporter, podman-exporter, snmp-exporter, blackbox-exporter, uptime-kuma, librespeed, smokeping]
+  services:
+    - prometheus
+    - alertmanager
+    - grafana
+    - loki
+    - promtail
+    - node-exporter
+    - podman-exporter
+    - snmp-exporter
+    - blackbox-exporter
+    - uptime-kuma
+    - librespeed
+    - smokeping
+    - coredns
+    - blocky
 ```
 
 ## Context
@@ -64,6 +78,12 @@ the full service definitions and render/deploy requirements.
   last-successful run (SPEC-2026-012).
 - [ ] Monitoring consumes GitOps runner diagnostic state and logs without requiring the
   runner to implement Prometheus exposition itself.
+- [ ] DNS monitoring combines CoreDNS service-health metrics/logs with Blocky filtering
+  metrics so operators can identify noisy clients, suspicious domains, and devices that
+  should move from clean DNS policy to filtered DNS policy.
+- [ ] Each monitored service is assessed for the same observability profile: health signal,
+  Prometheus metrics, logs, client/request attribution, state freshness, dependency health,
+  and actionable alerts.
 
 ## Constraints
 
@@ -268,6 +288,63 @@ Prometheus can initially derive these signals from node-exporter textfile metric
 unit metrics, or log-derived metrics once Loki/Promtail is available. The runner should not
 grow a long-running metrics endpoint.
 
+### DNS Observability
+
+DNS is a critical dependency for bootstrap, GitOps convergence, container image pulls,
+Vault/Caddy/Omada integration, and client network health. Monitoring should distinguish
+resolver health from filtering policy:
+
+- CoreDNS provides the resolver control-plane view:
+  - total query rate by server, zone, query type, protocol, and response code;
+  - authoritative-zone health for `abhaile.home.arpa`, `svc.abhaile.home.arpa`, and reverse
+    zones;
+  - recursive forwarding health, upstream latency, cache behavior, and SERVFAIL/NXDOMAIN
+    rates;
+  - query logs with source client IP, query name, query type, and response code for
+    investigations where client attribution matters.
+- Blocky provides the filtering-policy view:
+  - total queries, blocked queries, response type, block reason, allowlist/denylist cache
+    state, and request latency;
+  - top queried domains, top blocked domains, and top clients when client identity is
+    preserved.
+
+For the default `client -> CoreDNS -> Blocky` flow, CoreDNS is the authoritative source for
+client attribution unless EDNS Client Subnet or direct-to-Blocky client queries are explicitly
+configured. Prometheus metrics should cover aggregate DNS health, while Loki/CoreDNS query
+logs should support ad hoc investigation of noisy clients, repeated NXDOMAINs, DoH/DoT
+bootstrap attempts, and IoT devices phoning home.
+
+The intended operational questions are:
+
+- Which clients generate the most DNS queries over a given interval?
+- Which clients repeatedly query suspicious, vendor telemetry, or blocked domains?
+- Which clients generate high NXDOMAIN, SERVFAIL, or timeout rates?
+- Which VLANs or clients should move from clean DNS policy to filtered DNS policy?
+- Are both DNS instances serving internal zones and recursive queries correctly?
+
+Alerting should cover resolver unavailability, high SERVFAIL rate, upstream failure, stale or
+missing CoreDNS Omada env delivery, Blocky unavailable behind a filtered DNS path, and sudden
+blocked-query spikes that may indicate a compromised or misbehaving device.
+
+### Service Observability Profile
+
+Each in-scope service should be reviewed against a common observability profile before it is
+considered production-ready:
+
+| Signal | Purpose |
+| --- | --- |
+| Health endpoint or unit state | Detect service down, crash loops, failed dependencies, and unhealthy containers |
+| Prometheus metrics | Track request rates, error rates, latency, queue/backlog pressure, and resource use |
+| Logs in Loki | Preserve enough context to explain failures without SSH-first investigation |
+| Client/request attribution | Identify noisy clients, abusive callers, misrouted traffic, or suspicious devices |
+| Dependency health | Distinguish local service failure from upstream DNS, Vault, database, storage, or network failure |
+| State freshness | Detect stale generated files, stale runner state, expired certs, old backups, or outdated snapshots |
+| Alert actionability | Ensure each alert points to a likely cause, immediate check, or runbook section |
+
+Not every service exposes every signal directly. When a service lacks native metrics, the
+implementation should use the nearest reliable substitute: systemd unit state, container
+health, blackbox probes, textfile metrics, structured logs, or explicit runbook checks.
+
 ### Secrets Requirements
 
 | Secret | Delivery | Consumer |
@@ -319,6 +396,12 @@ _To be recorded during implementation._
 - [ ] Promtail config ships journal and log files to Loki with correct labels
 - [ ] Monitoring captures GitOps runner status from systemd, runner state files, and/or
   journald so checkout, render, apply, rollback, and dirty-worktree failures are diagnosable
+- [ ] DNS monitoring captures CoreDNS resolver health, CoreDNS query logs for client
+  attribution, and Blocky filtering metrics/statistics
+- [ ] DNS dashboards or runbooks support identifying noisy clients, suspicious query patterns,
+  and clients that should move from clean DNS policy to filtered DNS policy
+- [ ] Each service in scope has an observability profile covering health, metrics, logs,
+  attribution needs, dependency health, state freshness, and actionable alert/runbook coverage
 - [ ] Grafana provisioning includes Prometheus and Loki datasource definitions
 - [ ] Blackbox exporter config includes probe modules and target lists for internal, DMZ, and
   external endpoints

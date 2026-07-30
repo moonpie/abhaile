@@ -238,9 +238,10 @@
       "then": {
         "properties": {
           "composition": {
-            "oneOf": [
+            "anyOf": [
               {"required": ["pod"]},
-              {"required": ["container"]}
+              {"required": ["container"]},
+              {"required": ["include"]}
             ]
           }
         }
