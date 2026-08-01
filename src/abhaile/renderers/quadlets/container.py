@@ -36,6 +36,7 @@ def _render_service_quadlet_files(
     container_template_path: Path,
     build_path: Path | None,
     image_path: Path | None,
+    device_lines: list[str],
     build_filename: str | None,
     image_filename: str | None,
     *,
@@ -73,6 +74,7 @@ def _render_service_quadlet_files(
         host_name=host,
         service_name=service,
         volume_lines=volume_lines,
+        device_lines=device_lines,
         image=image_filename,
         build=build_filename,
     )
@@ -93,71 +95,16 @@ def _render_service_quadlet_files(
             owner_requires=container_owner_requires,
         )
 
-    rendered_aux_paths: set[Path] = set()
-    source_paths = sorted(quadlets_dir.rglob("*")) if quadlets_dir.exists() else []
-    for source_path in source_paths:
-        if source_path.is_dir():
-            continue
-        if source_path.parent != quadlets_dir:
-            # Only render files at the service quadlets root for container services
-            continue
-
+    def render_static_quadlet(source_path: Path, out_name: str) -> None:
+        """Copy and register one static quadlet source file."""
         _validate_trailing_newline(
             source_path,
             context="quadlet source file",
         )
-
-        if source_path.suffix == ".j2":
-            if source_path != container_template_path:
-                raise RenderError(f"Unsupported quadlet template: {source_path}")
-            continue
-
-        if source_path.name == "image.image":
-            rendered_aux_paths.add(source_path)
-            image_out_name = f"{service}.image"
-            target = output_dir / image_out_name
-            content = source_path.read_text(encoding="utf-8")
-            target.write_text(content, encoding="utf-8", newline="\n")
-            if collector is not None and rendered_root is not None and output_root is not None:
-                _register_quadlet_artifact(
-                    collector=collector,
-                    rendered_root=rendered_root,
-                    output_path=target,
-                    target_path=str(output_root / image_out_name),
-                    kind=_quadlet_kind_from_filename(image_out_name),
-                    owner_ref=f"unit:{_quadlet_unit_name(image_out_name)}",
-                    content=content,
-                    apply_hints=apply_hints,
-                    owner_apply_hints=apply_hints,
-                )
-            continue
-
-        if source_path.name == "build.build":
-            rendered_aux_paths.add(source_path)
-            build_out_name = f"{service}.build"
-            target = output_dir / build_out_name
-            content = source_path.read_text(encoding="utf-8")
-            target.write_text(content, encoding="utf-8", newline="\n")
-            if collector is not None and rendered_root is not None and output_root is not None:
-                _register_quadlet_artifact(
-                    collector=collector,
-                    rendered_root=rendered_root,
-                    output_path=target,
-                    target_path=str(output_root / build_out_name),
-                    kind=_quadlet_kind_from_filename(build_out_name),
-                    owner_ref=f"unit:{_quadlet_unit_name(build_out_name)}",
-                    content=content,
-                    apply_hints=apply_hints,
-                    owner_apply_hints=apply_hints,
-                )
-            continue
-
-        # Copy any other static quadlet files as-is
-        target = output_dir / source_path.name
+        target = output_dir / out_name
         content = source_path.read_text(encoding="utf-8")
         target.write_text(content, encoding="utf-8", newline="\n")
         if collector is not None and rendered_root is not None and output_root is not None:
-            out_name = source_path.name
             _register_quadlet_artifact(
                 collector=collector,
                 rendered_root=rendered_root,
@@ -170,46 +117,38 @@ def _render_service_quadlet_files(
                 owner_apply_hints=apply_hints,
             )
 
-    if image_path is not None and image_path not in rendered_aux_paths:
-        _validate_trailing_newline(
-            image_path,
-            context="quadlet source file",
-        )
-        image_out_name = f"{service}.image"
-        target = output_dir / image_out_name
-        content = image_path.read_text(encoding="utf-8")
-        target.write_text(content, encoding="utf-8", newline="\n")
-        if collector is not None and rendered_root is not None and output_root is not None:
-            _register_quadlet_artifact(
-                collector=collector,
-                rendered_root=rendered_root,
-                output_path=target,
-                target_path=str(output_root / image_out_name),
-                kind=_quadlet_kind_from_filename(image_out_name),
-                owner_ref=f"unit:{_quadlet_unit_name(image_out_name)}",
-                content=content,
-                apply_hints=apply_hints,
-                owner_apply_hints=apply_hints,
+    rendered_aux_paths: set[Path] = set()
+    source_paths = sorted(quadlets_dir.rglob("*")) if quadlets_dir.exists() else []
+    for source_path in source_paths:
+        if source_path.is_dir():
+            continue
+        if source_path.parent != quadlets_dir:
+            # Only render files at the service quadlets root for container services
+            continue
+
+        if source_path.suffix == ".j2":
+            _validate_trailing_newline(
+                source_path,
+                context="quadlet source file",
             )
+            if source_path != container_template_path:
+                raise RenderError(f"Unsupported quadlet template: {source_path}")
+            continue
+
+        if source_path.name == "image.image":
+            rendered_aux_paths.add(source_path)
+            render_static_quadlet(source_path, f"{service}.image")
+            continue
+
+        if source_path.name == "build.build":
+            rendered_aux_paths.add(source_path)
+            render_static_quadlet(source_path, f"{service}.build")
+            continue
+
+        render_static_quadlet(source_path, source_path.name)
+
+    if image_path is not None and image_path not in rendered_aux_paths:
+        render_static_quadlet(image_path, f"{service}.image")
 
     if build_path is not None and build_path not in rendered_aux_paths:
-        _validate_trailing_newline(
-            build_path,
-            context="quadlet source file",
-        )
-        build_out_name = f"{service}.build"
-        target = output_dir / build_out_name
-        content = build_path.read_text(encoding="utf-8")
-        target.write_text(content, encoding="utf-8", newline="\n")
-        if collector is not None and rendered_root is not None and output_root is not None:
-            _register_quadlet_artifact(
-                collector=collector,
-                rendered_root=rendered_root,
-                output_path=target,
-                target_path=str(output_root / build_out_name),
-                kind=_quadlet_kind_from_filename(build_out_name),
-                owner_ref=f"unit:{_quadlet_unit_name(build_out_name)}",
-                content=content,
-                apply_hints=apply_hints,
-                owner_apply_hints=apply_hints,
-            )
+        render_static_quadlet(build_path, f"{service}.build")

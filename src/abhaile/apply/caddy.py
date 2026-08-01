@@ -38,6 +38,7 @@ class CaddyExecutor:
 
     @staticmethod
     def _validate_argv(segment: str) -> list[str]:
+        """Build the Podman command that validates a segment Caddyfile."""
         podman = shutil.which("podman")
         if podman is None:
             raise ApplyError("podman is required for caddy config validation")
@@ -53,6 +54,7 @@ class CaddyExecutor:
 
     @staticmethod
     def _reload_argv(segment: str) -> list[str]:
+        """Build the Podman command that reloads a segment Caddyfile."""
         podman = shutil.which("podman")
         if podman is None:
             raise ApplyError("podman is required for caddy config reload")
@@ -68,6 +70,7 @@ class CaddyExecutor:
 
     @staticmethod
     def _container_exists_argv(segment: str) -> list[str]:
+        """Build the Podman command that checks for a segment container."""
         podman = shutil.which("podman")
         if podman is None:
             raise ApplyError("podman is required for caddy config validation")

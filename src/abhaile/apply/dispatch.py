@@ -29,6 +29,7 @@ _VAULT_KINDS = KIND_FAMILIES["vault"]
 _NETWORKD_KINDS = KIND_FAMILIES["networkd"]
 _QUADLET_KINDS = KIND_FAMILIES["quadlet"]
 _SERVICE_KINDS = KIND_FAMILIES["service"]
+_SYSTEMD_VERIFY_KINDS = {"systemd.unit", "systemd.dropin"}
 
 
 def _entry_user_context(entry: dict[str, object]) -> tuple[bool, str | None]:
@@ -171,20 +172,21 @@ def _run_dry_run_validations(
         if not isinstance(render_path, str) or not isinstance(target_path, str):
             raise ApplyError("Validation action missing render_path/target_path")
 
-        source = resolve_rendered_source(rendered_dir, render_path)
-        validation = run_validation(
-            ["systemd-analyze", "verify", source.as_posix()],
-            action_id=f"validate:{target_path}",
-            is_blocker=True,
-        )
-        results.append(
-            {
-                "target_path": target_path,
-                "kind": kind,
-                "success": validation.success,
-                "return_code": validation.return_code,
-            }
-        )
+        if kind in _SYSTEMD_VERIFY_KINDS:
+            source = resolve_rendered_source(rendered_dir, render_path)
+            validation = run_validation(
+                ["systemd-analyze", "verify", source.as_posix()],
+                action_id=f"validate:{target_path}",
+                is_blocker=True,
+            )
+            results.append(
+                {
+                    "target_path": target_path,
+                    "kind": kind,
+                    "success": validation.success,
+                    "return_code": validation.return_code,
+                }
+            )
 
     return results
 
@@ -324,7 +326,9 @@ def _run_coredns_owner_actions(
     removals_to_apply: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     """Run phase 7.4 CoreDNS actions for changed entries."""
-    owner_results: list[dict[str, object]] = []
+    config_changed = False
+    zone_writes: list[dict[str, object]] = []
+    zone_removals: list[dict[str, object]] = []
 
     for action in writes:
         kind = action.get("kind")
@@ -334,27 +338,10 @@ def _run_coredns_owner_actions(
             continue
         if not isinstance(target_path, str) or not isinstance(owner_ref, str):
             raise ApplyError("CoreDNS write action missing target_path/owner_ref")
-
-        entry: dict[str, object] = {
-            "kind": kind,
-            "owner_ref": owner_ref,
-            "apply_hints": action.get("apply_hints"),
-        }
-
         if kind == "coredns.config":
-            summary = CorednsExecutor.apply_config_write(entry)
+            config_changed = True
         else:
-            summary = CorednsExecutor.apply_zone_write(entry, target_path)
-
-        owner_results.append(
-            {
-                "phase": "write",
-                "target_path": target_path,
-                "kind": kind,
-                "owner_ref": owner_ref,
-                "summary": summary,
-            }
-        )
+            zone_writes.append(action)
 
     for removal in removals_to_apply:
         kind = removal.get("kind") if isinstance(removal, dict) else None
@@ -364,25 +351,42 @@ def _run_coredns_owner_actions(
             continue
         if not isinstance(target_path, str) or not isinstance(owner_ref, str):
             raise ApplyError("CoreDNS removal action missing target_path/owner_ref")
-
-        removal_entry: dict[str, object] = {
-            "kind": kind,
-            "owner_ref": owner_ref,
-            "apply_hints": removal.get("apply_hints"),
-        }
-
         if kind == "coredns.config":
-            summary = CorednsExecutor.apply_config_write(removal_entry)
+            config_changed = True
         else:
-            summary = CorednsExecutor.apply_zone_remove(removal_entry, target_path)
+            zone_removals.append(removal)
 
+    owner_results: list[dict[str, object]] = []
+    if config_changed or zone_writes or zone_removals:
+        summary = CorednsExecutor.apply_transaction(
+            config_changed=config_changed,
+            zone_writes=zone_writes,
+            zone_removals=zone_removals,
+        )
         owner_results.append(
             {
-                "phase": "remove",
-                "target_path": target_path,
-                "kind": kind,
-                "owner_ref": owner_ref,
+                "phase": "transaction",
+                "kind": "coredns.transaction",
+                "owner_ref": "service:coredns",
                 "summary": summary,
+                "entries": [
+                    *[
+                        {
+                            "phase": "write",
+                            "kind": action.get("kind"),
+                            "target_path": action.get("target_path"),
+                        }
+                        for action in zone_writes
+                    ],
+                    *[
+                        {
+                            "phase": "remove",
+                            "kind": action.get("kind"),
+                            "target_path": action.get("target_path"),
+                        }
+                        for action in zone_removals
+                    ],
+                ],
             }
         )
 
@@ -493,6 +497,7 @@ def _run_vault_owner_actions(
         target_path: str,
         apply_hints: object,
     ) -> None:
+        """Record a vault-owned file change under one owner action."""
         if owner_ref not in owner_changes:
             owner_changes[owner_ref] = {
                 "run_as_user": VaultExecutor.DEFAULT_USER,
@@ -591,6 +596,7 @@ def _run_networkd_owner_actions(
     owner_changes: dict[str, dict[str, object]] = {}
 
     def _record_change(*, phase: str, kind: str, owner_ref: str, target_path: str) -> None:
+        """Record a networkd-owned change for batched convergence."""
         if owner_ref not in owner_changes:
             owner_changes[owner_ref] = {
                 "phases": set(),
@@ -773,6 +779,7 @@ def _run_quadlet_owner_actions(
         target_path: str,
         apply_hints: object,
     ) -> None:
+        """Record a quadlet-owned change while preserving raw apply hints."""
         if owner_ref not in owner_changes:
             owner_changes[owner_ref] = {
                 "phases": set(),
@@ -842,6 +849,7 @@ def _run_quadlet_owner_actions(
     owner_results: list[dict[str, object]] = []
 
     def _user_context_for_owner(owner_ref: str) -> tuple[bool, str | None]:
+        """Resolve rootless execution context for an owner or dependent owner."""
         state = owner_changes.get(owner_ref)
         if isinstance(state, dict):
             raw_entries = state.get("raw_entries")
@@ -863,6 +871,7 @@ def _run_quadlet_owner_actions(
         return (False, None)
 
     def _restart_mode_for_owner(owner_ref: str, raw_entries: list[object]) -> str:
+        """Resolve a quadlet owner's restart mode from owner or entry hints."""
         if owner_apply_hints is not None:
             hints = owner_apply_hints.get(owner_ref)
             if isinstance(hints, dict):
@@ -881,6 +890,51 @@ def _run_quadlet_owner_actions(
                 return restart_mode
 
         return "try-restart"
+
+    reload_contexts: dict[tuple[bool, str | None], dict[str, object]] = {}
+    for owner_ref in sorted(owner_changes.keys()):
+        state = owner_changes[owner_ref]
+        raw_entries = state.get("raw_entries")
+        if not isinstance(raw_entries, list):
+            continue
+        context = QuadletExecutor.user_context_from_entries(raw_entries)
+        reload_contexts.setdefault(
+            context,
+            {
+                "owner_refs": [],
+                "result": None,
+            },
+        )
+        owner_refs = reload_contexts[context].get("owner_refs")
+        if isinstance(owner_refs, list):
+            owner_refs.append(owner_ref)
+
+    batch_reload_results: dict[tuple[bool, str | None], dict[str, object]] = {}
+    for context, payload in sorted(reload_contexts.items(), key=lambda item: str(item[0])):
+        rootless, run_as_user = context
+        reload_result = QuadletExecutor.daemon_reload(
+            rootless=rootless,
+            run_as_user=run_as_user,
+        )
+        batch_reload_results[context] = {
+            "phase": "reload",
+            "kind": "quadlet.daemon-reload",
+            "owner_ref": "quadlet:rootless" if rootless else "quadlet:system",
+            "summary": {
+                "rootless": rootless,
+                "run_as_user": run_as_user,
+                "owners": payload.get("owner_refs", []),
+                "actions": [
+                    {
+                        "action": "daemon-reload",
+                        "success": reload_result.success,
+                        "return_code": reload_result.return_code,
+                    }
+                ],
+            },
+        }
+
+    owner_results.extend(batch_reload_results.values())
 
     for owner_ref in sorted(owner_changes.keys()):
         state = owner_changes[owner_ref]
@@ -922,6 +976,8 @@ def _run_quadlet_owner_actions(
             rootless=rootless,
             run_as_user=owner_run_as_user,
             restart_mode=_restart_mode_for_owner(owner_ref, raw_entries),
+            daemon_reloaded=True,
+            verify_unit=True,
         )
 
         if convergence_plans is not None:
@@ -969,6 +1025,7 @@ def _run_service_owner_actions(
     owner_changes: dict[str, dict[str, object]] = {}
 
     def _ensure_owner(owner_ref: str) -> dict[str, object]:
+        """Return mutable service owner state, creating it when needed."""
         if owner_ref not in owner_changes:
             owner_changes[owner_ref] = {
                 "config_writes": [],

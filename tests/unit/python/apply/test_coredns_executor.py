@@ -42,77 +42,164 @@ class TestCorednsExecutor:
         with pytest.raises(ApplyError, match="named-checkzone is required"):
             CorednsExecutor.validate_zone_file("abhaile.home.arpa", zone_file, strict=True)
 
-    def test_apply_zone_write_runs_validation_then_reload(
-        self, mocker: Any, tmp_path: Path
-    ) -> None:
-        """coredns.zone write should validate then start coredns-zones.service."""
+    def test_transaction_zone_only_reloads_once(self, mocker: Any, tmp_path: Path) -> None:
+        """Multiple zone writes should validate all zones and reload CoreDNS once."""
+        calls: list[str] = []
+
+        def result(name: str) -> ExecutionResult:
+            calls.append(name)
+            return ExecutionResult(
+                action_id=name,
+                action_type="test",
+                success=True,
+                return_code=0,
+                stdout="active" if name.startswith("wait") else "",
+            )
+
         mock_validate = mocker.patch.object(
             CorednsExecutor,
             "validate_zone_file",
-            return_value=ExecutionResult(
-                action_id="validate-zone:abhaile.home.arpa",
-                action_type="validation",
+            side_effect=lambda *_args, **_kwargs: result("validate"),
+        )
+        mocker.patch.object(
+            CorednsExecutor, "stop_zone_watcher", side_effect=lambda: result("stop")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "wait_coredns_active", side_effect=lambda: result("wait")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "reload_coredns_service", side_effect=lambda: result("reload")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "start_zone_watcher", side_effect=lambda: result("start")
+        )
+
+        zone_a = tmp_path / "abhaile.home.arpa.zone"
+        zone_b = tmp_path / "svc.abhaile.home.arpa.zone"
+        zone_a.write_text("$ORIGIN abhaile.home.arpa.\n", encoding="utf-8")
+        zone_b.write_text("$ORIGIN svc.abhaile.home.arpa.\n", encoding="utf-8")
+
+        summary = CorednsExecutor.apply_transaction(
+            config_changed=False,
+            zone_writes=[
+                {"target_path": zone_a.as_posix()},
+                {"target_path": zone_b.as_posix()},
+            ],
+            zone_removals=[],
+        )
+
+        assert summary["kind"] == "coredns.transaction"
+        assert summary["zones"] == ["abhaile.home.arpa", "svc.abhaile.home.arpa"]
+        assert calls == ["validate", "validate", "stop", "wait", "reload", "wait", "start"]
+        assert mock_validate.call_count == 2
+
+    def test_transaction_config_change_restarts_without_reload(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Corefile changes should restart once and skip zone reload in the same transaction."""
+        calls: list[str] = []
+
+        def result(name: str) -> ExecutionResult:
+            calls.append(name)
+            return ExecutionResult(
+                action_id=name,
+                action_type="test",
                 success=True,
                 return_code=0,
-            ),
+                stdout="active" if name.startswith("wait") else "",
+            )
+
+        mocker.patch.object(
+            CorednsExecutor,
+            "validate_zone_file",
+            side_effect=lambda *_args, **_kwargs: result("validate"),
+        )
+        mocker.patch.object(
+            CorednsExecutor, "stop_zone_watcher", side_effect=lambda: result("stop")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "restart_coredns_service", side_effect=lambda: result("restart")
         )
         mock_reload = mocker.patch.object(
-            CorednsExecutor,
-            "start_zone_reload_service",
-            return_value=ExecutionResult(
-                action_id="systemctl-start-coredns-zones",
-                action_type="systemctl",
+            CorednsExecutor, "reload_coredns_service", side_effect=lambda: result("reload")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "wait_coredns_active", side_effect=lambda: result("wait")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "start_zone_watcher", side_effect=lambda: result("start")
+        )
+
+        zone = tmp_path / "abhaile.home.arpa.zone"
+        zone.write_text("$ORIGIN abhaile.home.arpa.\n", encoding="utf-8")
+
+        summary = CorednsExecutor.apply_transaction(
+            config_changed=True,
+            zone_writes=[{"target_path": zone.as_posix()}],
+            zone_removals=[],
+        )
+
+        assert summary["config_changed"] is True
+        assert calls == ["validate", "stop", "restart", "wait", "start"]
+        mock_reload.assert_not_called()
+
+    def test_transaction_noop_runs_no_systemd_actions(self, mocker: Any) -> None:
+        """No effective CoreDNS changes should not touch systemd."""
+        mock_stop = mocker.patch.object(CorednsExecutor, "stop_zone_watcher")
+
+        summary = CorednsExecutor.apply_transaction(
+            config_changed=False,
+            zone_writes=[],
+            zone_removals=[],
+        )
+
+        assert summary == {"kind": "coredns.transaction", "zones": [], "actions": []}
+        mock_stop.assert_not_called()
+
+    def test_transaction_restarts_watcher_when_reload_fails(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """The zone watcher should be restored even when the serialized reload fails."""
+        calls: list[str] = []
+
+        def result(name: str) -> ExecutionResult:
+            calls.append(name)
+            return ExecutionResult(
+                action_id=name,
+                action_type="test",
                 success=True,
                 return_code=0,
-            ),
-        )
+                stdout="active" if name.startswith("wait") else "",
+            )
 
-        target = tmp_path / "abhaile.home.arpa.zone"
-        target.write_text("$ORIGIN abhaile.home.arpa.\n")
-        summary = CorednsExecutor.apply_zone_write({"kind": "coredns.zone"}, target.as_posix())
-
-        assert summary["kind"] == "coredns.zone"
-        assert summary["zone"] == "abhaile.home.arpa"
-        assert summary["actions"][0]["action"] == "validate-zone"
-        assert summary["actions"][1]["action"] == "start"
-        mock_validate.assert_called_once()
-        mock_reload.assert_called_once()
-
-    def test_apply_config_write_restarts_coredns(self, mocker: Any) -> None:
-        """coredns.config write should restart coredns.service."""
-        mock_restart = mocker.patch.object(
+        mocker.patch.object(
             CorednsExecutor,
-            "restart_coredns_service",
-            return_value=ExecutionResult(
-                action_id="systemctl-try-restart-coredns",
-                action_type="systemctl",
-                success=True,
-                return_code=0,
-            ),
+            "validate_zone_file",
+            side_effect=lambda *_args, **_kwargs: result("validate"),
         )
-
-        summary = CorednsExecutor.apply_config_write({"kind": "coredns.config"})
-        assert summary["kind"] == "coredns.config"
-        assert summary["actions"][0]["action"] == "try-restart"
-        mock_restart.assert_called_once()
-
-    def test_apply_zone_remove_reloads_zones(self, mocker: Any) -> None:
-        """coredns.zone removal should trigger zone reload service."""
-        mock_reload = mocker.patch.object(
+        mocker.patch.object(
+            CorednsExecutor, "stop_zone_watcher", side_effect=lambda: result("stop")
+        )
+        mocker.patch.object(
+            CorednsExecutor, "wait_coredns_active", side_effect=lambda: result("wait")
+        )
+        mocker.patch.object(
             CorednsExecutor,
-            "start_zone_reload_service",
-            return_value=ExecutionResult(
-                action_id="systemctl-start-coredns-zones",
-                action_type="systemctl",
-                success=True,
-                return_code=0,
-            ),
+            "reload_coredns_service",
+            side_effect=ApplyError("reload failed"),
+        )
+        mocker.patch.object(
+            CorednsExecutor, "start_zone_watcher", side_effect=lambda: result("start")
         )
 
-        summary = CorednsExecutor.apply_zone_remove(
-            {"kind": "coredns.zone"},
-            "/etc/coredns/zones/svc.abhaile.home.arpa.zone",
-        )
-        assert summary["zone"] == "svc.abhaile.home.arpa"
-        assert summary["actions"][0]["action"] == "start"
-        mock_reload.assert_called_once()
+        zone = tmp_path / "abhaile.home.arpa.zone"
+        zone.write_text("$ORIGIN abhaile.home.arpa.\n", encoding="utf-8")
+
+        with pytest.raises(ApplyError, match="reload failed"):
+            CorednsExecutor.apply_transaction(
+                config_changed=False,
+                zone_writes=[{"target_path": zone.as_posix()}],
+                zone_removals=[],
+            )
+
+        assert calls == ["validate", "stop", "wait", "start"]

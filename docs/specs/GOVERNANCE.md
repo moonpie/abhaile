@@ -15,6 +15,7 @@ Specs move through these directories:
 1. `proposed/`
 1. `active/`
 1. `accepted/`
+1. `superseded/` when replaced by a newer accepted or active spec
 
 ### Status Handling And Transitions
 
@@ -23,12 +24,14 @@ Spec lifecycle is represented by directory location.
 - `proposed` specs live in `proposed/`.
 - `active` specs live in `active/`.
 - `accepted` specs live in `accepted/`.
+- `superseded` specs live in `superseded/`.
 
 Statuses `rejected` and `superseded` are valid metadata values for historical outcomes.
 
 - A `rejected` spec is moved to `docs/specs/archive/rejected/` when status changes to `rejected`.
 - A `superseded` spec should include `superseded_by` and link to the replacement spec.
-- A `superseded` spec remains in `accepted/` to preserve historical delivery context.
+- A `superseded` spec is moved to `docs/specs/superseded/` to preserve historical delivery
+  context while making the authoritative replacement easier to discover.
 - Reactivating a `rejected` or `superseded` spec requires setting `status: active`, clearing or updating
   supersession metadata as appropriate, and moving the file to `active/`.
 
@@ -36,7 +39,7 @@ Directory location is authoritative for lifecycle state. Metadata `status` must 
 directory, except:
 
 - `status: rejected` lives in `docs/specs/archive/rejected/`
-- `status: superseded` lives in `docs/specs/accepted/`
+- `status: superseded` lives in `docs/specs/superseded/`
 
 If status and directory disagree, do not implement against the spec until the mismatch is
 resolved. The resolution should update the file location, metadata, or both in one change.

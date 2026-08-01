@@ -14,14 +14,13 @@ class TestQuadretsIntegration:
     """Integration tests using actual repository configuration."""
 
     def test_render_actual_blocky_service(self, tmp_path: Path) -> None:
-        """Test rendering blocky service with actual config structure."""
+        """Test rendering blocky-a service with actual config structure."""
         # Use __file__ to navigate from tests/ dir to repo root
         repo_root = Path(__file__).parent.parent.parent
         config_root = repo_root / "config"
 
-        blocky_yaml = config_root / "services" / "blocky" / "service.yaml"
-        if not blocky_yaml.exists():
-            pytest.skip(f"Test requires blocky service config at {blocky_yaml}")
+        blocky_yaml = config_root / "services" / "blocky-a" / "service.yaml"
+        assert blocky_yaml.exists(), f"Test requires blocky-a service config at {blocky_yaml}"
 
         network_yaml = config_root / "network.yaml"
         if not network_yaml.exists():
@@ -32,16 +31,16 @@ class TestQuadretsIntegration:
 
         render_service_quadlets(
             "phobos",
-            ["blocky"],
+            ["blocky-a"],
             network,
             config_root,
             output_dir,
         )
 
         # Verify quadlet files exist
-        service_dir = output_dir / "blocky" / "etc/containers/systemd"
-        assert (service_dir / "blocky.container").exists()
-        assert (service_dir / "blocky.image").exists()
+        service_dir = output_dir / "blocky-a" / "etc/containers/systemd"
+        assert (service_dir / "blocky-a.container").exists()
+        assert (service_dir / "blocky-a.image").exists()
 
         # Verify volume files for shared volumes
         shared_dir = output_dir / "_shared" / "etc/containers/systemd"
@@ -82,9 +81,8 @@ class TestQuadretsIntegration:
         repo_root = Path(__file__).parent.parent.parent
         config_root = repo_root / "config"
 
-        blocky_yaml = config_root / "services" / "blocky" / "service.yaml"
-        if not blocky_yaml.exists():
-            pytest.skip(f"Test requires blocky service config at {blocky_yaml}")
+        blocky_yaml = config_root / "services" / "blocky-a" / "service.yaml"
+        assert blocky_yaml.exists(), f"Test requires blocky-a service config at {blocky_yaml}"
 
         network_yaml = config_root / "network.yaml"
         if not network_yaml.exists():
@@ -95,7 +93,7 @@ class TestQuadretsIntegration:
 
         render_service_quadlets(
             "phobos",
-            ["blocky", "vault"],
+            ["blocky-a", "vault"],
             network,
             config_root,
             output_dir,
@@ -114,9 +112,8 @@ class TestQuadretsIntegration:
         repo_root = Path(__file__).parent.parent.parent
         config_root = repo_root / "config"
 
-        blocky_yaml = config_root / "services" / "blocky" / "service.yaml"
-        if not blocky_yaml.exists():
-            pytest.skip(f"Test requires blocky service config at {blocky_yaml}")
+        blocky_yaml = config_root / "services" / "blocky-a" / "service.yaml"
+        assert blocky_yaml.exists(), f"Test requires blocky-a service config at {blocky_yaml}"
 
         network_yaml = config_root / "network.yaml"
         if not network_yaml.exists():
@@ -129,25 +126,29 @@ class TestQuadretsIntegration:
         output_dir2 = tmp_path / "output2"
 
         render_service_quadlets(
-            "phobos", ["blocky"], network, config_root, output_dir1 / "services"
+            "phobos", ["blocky-a"], network, config_root, output_dir1 / "services"
         )
         render_service_quadlets(
-            "phobos", ["blocky"], network, config_root, output_dir2 / "services"
+            "phobos", ["blocky-a"], network, config_root, output_dir2 / "services"
         )
 
         # Compare all rendered files
         container_file1 = (
-            output_dir1 / "services" / "blocky" / "etc/containers/systemd/blocky.container"
+            output_dir1 / "services" / "blocky-a" / "etc/containers/systemd/blocky-a.container"
         )
         container_file2 = (
-            output_dir2 / "services" / "blocky" / "etc/containers/systemd/blocky.container"
+            output_dir2 / "services" / "blocky-a" / "etc/containers/systemd/blocky-a.container"
         )
 
         assert container_file1.exists() and container_file2.exists()
         assert container_file1.read_text() == container_file2.read_text()
 
-        image_file1 = output_dir1 / "services" / "blocky" / "etc/containers/systemd/blocky.image"
-        image_file2 = output_dir2 / "services" / "blocky" / "etc/containers/systemd/blocky.image"
+        image_file1 = (
+            output_dir1 / "services" / "blocky-a" / "etc/containers/systemd/blocky-a.image"
+        )
+        image_file2 = (
+            output_dir2 / "services" / "blocky-a" / "etc/containers/systemd/blocky-a.image"
+        )
 
         assert image_file1.exists() and image_file2.exists()
         assert image_file1.read_text() == image_file2.read_text()

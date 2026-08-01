@@ -22,6 +22,7 @@ setup(
     entry_points={
         "console_scripts": [
             "abhaile-render=abhaile.cli:main",
+            "abhaile-health=abhaile.cli.health:main",
         ],
     },
 )

@@ -68,7 +68,7 @@ No secrets in git or rendered output. Vault Agent renders credentials at runtime
 | Adding or modifying a service | `config/services/<name>/service.yaml`, [ADR 0005](adr/0005-service-authoring-model.md) |
 | Apply phases | [Spec 0009](specs/accepted/0009-apply-pipeline.md) |
 | Secrets boundary | [ADR 0006](adr/0006-secrets-model-and-bootstrap-artifacts.md) |
-| Running render/apply locally | `make render`, `make apply HOST=<host>` |
+| Running render/apply locally | `make render`, `make validate`, `make validate-host HOST=<host>` |
 | Spec status | [docs/specs/README.md](specs/README.md) |
 | Operations runbook | [docs/runbooks/operations.md](runbooks/operations.md) |
 | Emergency procedures | [docs/runbooks/break-glass.md](runbooks/break-glass.md) |

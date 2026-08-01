@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -66,70 +67,162 @@ class CorednsExecutor:
         return result
 
     @staticmethod
-    def start_zone_reload_service() -> ExecutionResult:
-        """Trigger coredns-zones.service to reload zones deterministically."""
-        return run_systemctl_command("start", "coredns-zones.service")
-
-    @staticmethod
     def restart_coredns_service() -> ExecutionResult:
         """Restart CoreDNS service after Corefile changes."""
-        return run_systemctl_command("try-restart", "coredns.service")
+        return run_systemctl_command("restart", "coredns.service")
 
     @staticmethod
-    def apply_config_write(entry: dict[str, Any]) -> dict[str, Any]:
-        """Apply runtime step for coredns.config writes."""
-        restart = CorednsExecutor.restart_coredns_service()
-        return {
-            "kind": entry.get("kind", "coredns.config"),
-            "actions": [
-                {
-                    "action": "try-restart",
-                    "service": "coredns.service",
-                    "success": restart.success,
-                    "return_code": restart.return_code,
-                }
-            ],
-        }
+    def reload_coredns_service() -> ExecutionResult:
+        """Reload CoreDNS through systemd's serialized ExecReload path."""
+        return run_systemctl_command("reload", "coredns.service")
 
     @staticmethod
-    def apply_zone_write(entry: dict[str, Any], target_path: str) -> dict[str, Any]:
-        """Apply runtime step for coredns.zone writes (validate then reload zones)."""
-        zone_name = CorednsExecutor.zone_name_from_target(target_path)
-        validate = CorednsExecutor.validate_zone_file(zone_name, Path(target_path), strict=True)
-        reload_result = CorednsExecutor.start_zone_reload_service()
+    def stop_zone_watcher() -> ExecutionResult:
+        """Stop the CoreDNS zone watcher while GitOps owns the transaction."""
+        return run_systemctl_command("stop", "coredns-zones.path")
 
-        return {
-            "kind": entry.get("kind", "coredns.zone"),
-            "zone": zone_name,
-            "actions": [
+    @staticmethod
+    def start_zone_watcher() -> ExecutionResult:
+        """Start the CoreDNS zone watcher after a GitOps transaction."""
+        return run_systemctl_command("start", "coredns-zones.path")
+
+    @staticmethod
+    def wait_coredns_active(*, timeout_seconds: float = 15.0) -> ExecutionResult:
+        """Wait until coredns.service is active, bounded by timeout_seconds."""
+        deadline = time.monotonic() + timeout_seconds
+        last = ExecutionResult(
+            action_id="systemctl is-active coredns.service",
+            action_type="systemctl",
+            success=False,
+            return_code=None,
+        )
+        while time.monotonic() <= deadline:
+            last = run_command(
+                ["systemctl", "is-active", "coredns.service"],
+                action_id="systemctl is-active coredns.service",
+                action_type="systemctl",
+                check=False,
+            )
+            if last.stdout.strip() == "active":
+                return ExecutionResult(
+                    action_id=last.action_id,
+                    action_type=last.action_type,
+                    success=True,
+                    return_code=last.return_code,
+                    stdout=last.stdout,
+                    stderr=last.stderr,
+                )
+            time.sleep(0.25)
+
+        raise ApplyError(
+            "CoreDNS readiness check failed: "
+            f"coredns.service did not become active within {timeout_seconds:.0f}s "
+            f"(last={last.stdout.strip() or last.stderr.strip() or 'unknown'})"
+        )
+
+    @staticmethod
+    def apply_transaction(
+        *,
+        config_changed: bool,
+        zone_writes: list[dict[str, Any]],
+        zone_removals: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Apply one serialized CoreDNS runtime transaction after all file sync is complete."""
+        actions: list[dict[str, Any]] = []
+        zones: list[str] = []
+
+        for entry in zone_writes:
+            target_path = entry.get("target_path")
+            if not isinstance(target_path, str):
+                raise ApplyError("CoreDNS zone write missing target_path")
+            zone_name = CorednsExecutor.zone_name_from_target(target_path)
+            zones.append(zone_name)
+            validate = CorednsExecutor.validate_zone_file(zone_name, Path(target_path), strict=True)
+            actions.append(
                 {
                     "action": "validate-zone",
+                    "zone": zone_name,
                     "success": validate.success,
                     "return_code": validate.return_code,
-                },
-                {
-                    "action": "start",
-                    "service": "coredns-zones.service",
-                    "success": reload_result.success,
-                    "return_code": reload_result.return_code,
-                },
-            ],
-        }
-
-    @staticmethod
-    def apply_zone_remove(entry: dict[str, Any], target_path: str) -> dict[str, Any]:
-        """Apply runtime step for coredns.zone removals (reload zones after deletion)."""
-        zone_name = CorednsExecutor.zone_name_from_target(target_path)
-        reload_result = CorednsExecutor.start_zone_reload_service()
-        return {
-            "kind": entry.get("kind", "coredns.zone"),
-            "zone": zone_name,
-            "actions": [
-                {
-                    "action": "start",
-                    "service": "coredns-zones.service",
-                    "success": reload_result.success,
-                    "return_code": reload_result.return_code,
                 }
-            ],
+            )
+
+        for entry in zone_removals:
+            target_path = entry.get("target_path")
+            if isinstance(target_path, str):
+                zones.append(CorednsExecutor.zone_name_from_target(target_path))
+
+        if not config_changed and not zone_writes and not zone_removals:
+            return {
+                "kind": "coredns.transaction",
+                "zones": [],
+                "actions": [],
+            }
+
+        stop_watcher = CorednsExecutor.stop_zone_watcher()
+        actions.append(
+            {
+                "action": "stop",
+                "service": "coredns-zones.path",
+                "success": stop_watcher.success,
+                "return_code": stop_watcher.return_code,
+            }
+        )
+
+        try:
+            if config_changed:
+                restart = CorednsExecutor.restart_coredns_service()
+                actions.append(
+                    {
+                        "action": "restart",
+                        "service": "coredns.service",
+                        "success": restart.success,
+                        "return_code": restart.return_code,
+                    }
+                )
+            else:
+                ready_before = CorednsExecutor.wait_coredns_active()
+                actions.append(
+                    {
+                        "action": "wait-active",
+                        "service": "coredns.service",
+                        "success": ready_before.success,
+                        "return_code": ready_before.return_code,
+                    }
+                )
+                reload_result = CorednsExecutor.reload_coredns_service()
+                actions.append(
+                    {
+                        "action": "reload",
+                        "service": "coredns.service",
+                        "success": reload_result.success,
+                        "return_code": reload_result.return_code,
+                    }
+                )
+
+            ready_after = CorednsExecutor.wait_coredns_active()
+            actions.append(
+                {
+                    "action": "wait-active",
+                    "service": "coredns.service",
+                    "success": ready_after.success,
+                    "return_code": ready_after.return_code,
+                }
+            )
+        finally:
+            start_watcher = CorednsExecutor.start_zone_watcher()
+            actions.append(
+                {
+                    "action": "start",
+                    "service": "coredns-zones.path",
+                    "success": start_watcher.success,
+                    "return_code": start_watcher.return_code,
+                }
+            )
+
+        return {
+            "kind": "coredns.transaction",
+            "zones": sorted(set(zones)),
+            "config_changed": config_changed,
+            "actions": actions,
         }

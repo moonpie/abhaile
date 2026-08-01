@@ -87,6 +87,25 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 - `abhaile-diff` (`abhaile.cli.diff:main`) — read-only desired vs applied drift summary
 - `abhaile-apply` (`abhaile.cli.apply:main`) — reconcile desired state with dry-run and prune safety gates
 
+## Operator Make Targets
+
+Use these targets from a workstation after `make install`:
+
+```bash
+make render
+make render-host HOST=phobos
+make validate
+make validate-host HOST=phobos
+make apply HOST=phobos
+```
+
+- `make render` renders all hosts only.
+- `make render-host HOST=x` renders one host only.
+- `make validate` renders all hosts, then dry-run applies `phobos` and `deimos`.
+- `make validate-host HOST=x` renders one host, then dry-run applies that host.
+- `make apply HOST=x` remains the host-scoped render plus dry-run apply workflow.
+- `ALLOW_HOST_MISMATCH=1` adds only `--allow-host-mismatch` to dry-run apply commands and prints a dry-run-only override notice.
+
 **Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 
 Abhaile keeps the configuration declarative and the deployment steps explicit, so changes remain auditable and reversible.

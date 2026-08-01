@@ -3,13 +3,37 @@
 from __future__ import annotations
 
 import json
+import os
+import grp
+import pwd
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from abhaile.cli.apply import main as main_apply
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def _stub_abhaile_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the synthetic abhaile user/group in temp apply tests."""
+    real_getpwnam = pwd.getpwnam
+    real_getgrnam = grp.getgrnam
+
+    def fake_getpwnam(name: str) -> object:
+        if name == "abhaile":
+            return SimpleNamespace(pw_uid=os.getuid())
+        return real_getpwnam(name)
+
+    def fake_getgrnam(name: str) -> object:
+        if name == "abhaile":
+            return SimpleNamespace(gr_gid=os.getgid())
+        return real_getgrnam(name)
+
+    monkeypatch.setattr(pwd, "getpwnam", fake_getpwnam)
+    monkeypatch.setattr(grp, "getgrnam", fake_getgrnam)
 
 
 def _sha_of(content: str) -> str:
@@ -130,13 +154,21 @@ class TestApplyIntegration:
         )
         monkeypatch.setattr(
             "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
-            lambda owner_ref, kinds, changed_phases, rootless, run_as_user, restart_mode: {
+            lambda owner_ref, kinds, changed_phases, rootless, run_as_user, restart_mode, daemon_reloaded=False, verify_unit=False: {
                 "owner_ref": owner_ref,
                 "unit": "demo.service",
                 "kinds": kinds,
                 "restart_mode": restart_mode,
                 "actions": [{"action": "try-restart", "success": True, "return_code": 0}],
             },
+        )
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.QuadletExecutor.daemon_reload",
+            lambda rootless, run_as_user: type(
+                "Result",
+                (),
+                {"success": True, "return_code": 0},
+            )(),
         )
         monkeypatch.setattr(
             "abhaile.apply.dispatch.VaultExecutor.apply_owner_change",

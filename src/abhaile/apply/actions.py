@@ -75,7 +75,9 @@ def atomic_copy_file_with_perms(
         if mode is not None:
             tmp_path.chmod(mode)
 
-        # Enforce ownership if specified
+        # Enforce ownership if specified. Live apply is expected to run as root;
+        # non-root test/dry-run flows may copy into temp targets and cannot
+        # reliably chown root-owned files on all filesystems.
         if owner_user is not None or owner_group is not None:
             uid = -1
             gid = -1
@@ -91,7 +93,8 @@ def atomic_copy_file_with_perms(
                     gid = grp.getgrnam(owner_group).gr_gid
                 except KeyError as exc:
                     raise ApplyError(f"Group not found: {owner_group}") from exc
-            os.chown(tmp_path, uid, gid)
+            if os.geteuid() == 0:
+                os.chown(tmp_path, uid, gid)
 
         os.replace(tmp_path, target)
     except OSError as exc:

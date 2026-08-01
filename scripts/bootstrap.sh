@@ -169,6 +169,7 @@ install_abhaile_entrypoints() {
     write_abhaile_entrypoint "abhaile-apply" "abhaile.cli.apply"
     write_abhaile_entrypoint "abhaile-diff" "abhaile.cli.diff"
     write_abhaile_entrypoint "abhaile-inventory" "abhaile.cli.inventory"
+    write_abhaile_entrypoint "abhaile-health" "abhaile.cli.health"
 }
 
 write_vault_agent_secret_file() {

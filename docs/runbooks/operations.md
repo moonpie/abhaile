@@ -23,6 +23,29 @@ test -f /srv/vault/agent/out/.ready && echo "OK" || echo "NOT READY"
 
 ## Quick Reference
 
+### Workstation Validation
+
+```bash
+# Render all hosts only.
+make render
+
+# Render one host only.
+make render-host HOST=phobos
+
+# Render all hosts, then dry-run apply phobos and deimos.
+make validate
+
+# Render one host, then dry-run apply that host.
+make validate-host HOST=phobos
+
+# Host-scoped render plus dry-run apply.
+make apply HOST=phobos
+```
+
+Use `ALLOW_HOST_MISMATCH=1` only for workstation dry-run validation from a non-target host. It
+adds only `--allow-host-mismatch` to dry-run apply commands and prints a dry-run-only override
+notice.
+
 ### Render, Diff, Apply (Core 3 Commands)
 
 ```bash

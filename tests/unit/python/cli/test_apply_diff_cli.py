@@ -473,10 +473,10 @@ class TestApplyCli:
 
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
-            "abhaile.apply.dispatch.CorednsExecutor.apply_zone_write",
-            lambda entry, target_path: {
-                "kind": entry.get("kind", "coredns.zone"),
-                "zone": "abhaile.home.arpa",
+            "abhaile.apply.dispatch.CorednsExecutor.apply_transaction",
+            lambda config_changed, zone_writes, zone_removals: {
+                "kind": "coredns.transaction",
+                "zones": ["abhaile.home.arpa"],
                 "actions": [{"action": "validate-zone", "success": True, "return_code": 0}],
             },
         )
@@ -487,7 +487,7 @@ class TestApplyCli:
         assert rc == 0
         assert payload["mode"] == "apply"
         assert len(payload["owner_execution"]) == 1
-        assert payload["owner_execution"][0]["kind"] == "coredns.zone"
+        assert payload["owner_execution"][0]["kind"] == "coredns.transaction"
 
     def test_apply_dry_run_validations_caddy_missing_podman_warns(
         self,
@@ -959,7 +959,7 @@ class TestApplyCli:
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
         monkeypatch.setattr(
             "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
-            lambda owner_ref, kinds, changed_phases, rootless, run_as_user, restart_mode: {
+            lambda owner_ref, kinds, changed_phases, rootless, run_as_user, restart_mode, daemon_reloaded=False, verify_unit=False: {
                 "owner_ref": owner_ref,
                 "unit": "blocky.service",
                 "kinds": kinds,
@@ -971,15 +971,25 @@ class TestApplyCli:
                 ],
             },
         )
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.QuadletExecutor.daemon_reload",
+            lambda rootless, run_as_user: type(
+                "Result",
+                (),
+                {"success": True, "return_code": 0},
+            )(),
+        )
 
         rc = main_apply(["--desired-manifest", desired.as_posix(), "--json"])
 
         payload = json.loads(capsys.readouterr().out)
         assert rc == 0
         assert payload["mode"] == "apply"
-        assert len(payload["owner_execution"]) == 1
-        assert payload["owner_execution"][0]["kind"] == "quadlet.owner"
-        assert payload["owner_execution"][0]["owner_ref"] == "unit:blocky.service"
+        quadlet_results = [
+            item for item in payload["owner_execution"] if item["kind"] == "quadlet.owner"
+        ]
+        assert len(quadlet_results) == 1
+        assert quadlet_results[0]["owner_ref"] == "unit:blocky.service"
 
     def test_apply_quadlet_convergence_plan_stops_and_starts_dependents(
         self,
@@ -1098,8 +1108,10 @@ class TestApplyCli:
             rootless: bool,
             run_as_user: str | None,
             restart_mode: str,
+            daemon_reloaded: bool = False,
+            verify_unit: bool = False,
         ) -> dict[str, object]:
-            del changed_phases, run_as_user, restart_mode
+            del changed_phases, run_as_user, restart_mode, daemon_reloaded, verify_unit
             primary_calls.append(owner_ref)
             return {
                 "owner_ref": owner_ref,
@@ -1119,6 +1131,14 @@ class TestApplyCli:
         monkeypatch.setattr(
             "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             _fake_apply_owner_change,
+        )
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.QuadletExecutor.daemon_reload",
+            lambda rootless, run_as_user: type(
+                "Result",
+                (),
+                {"success": True, "return_code": 0},
+            )(),
         )
 
         rc = main_apply(
@@ -1262,8 +1282,10 @@ class TestApplyCli:
             rootless: bool,
             run_as_user: str | None,
             restart_mode: str,
+            daemon_reloaded: bool = False,
+            verify_unit: bool = False,
         ) -> dict[str, object]:
-            del changed_phases, run_as_user, restart_mode
+            del changed_phases, run_as_user, restart_mode, daemon_reloaded, verify_unit
             primary_calls.append(owner_ref)
             return {
                 "owner_ref": owner_ref,
@@ -1283,6 +1305,14 @@ class TestApplyCli:
         monkeypatch.setattr(
             "abhaile.apply.dispatch.QuadletExecutor.apply_owner_change",
             _fake_apply_owner_change,
+        )
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.QuadletExecutor.daemon_reload",
+            lambda rootless, run_as_user: type(
+                "Result",
+                (),
+                {"success": True, "return_code": 0},
+            )(),
         )
 
         rc = main_apply(

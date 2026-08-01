@@ -163,6 +163,35 @@ class QuadletExecutor:
         )
 
     @staticmethod
+    def verify_generated_unit(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> ExecutionResult:
+        """Verify systemd loaded the unit generated from a Quadlet source file."""
+        argv = ["systemctl"]
+        if rootless:
+            argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
+        argv.extend(["show", unit_name, "--property=LoadState", "--value"])
+        result = run_command(
+            argv,
+            action_id=f"verify-generated-unit:{unit_name}",
+            action_type="validation",
+            run_as_user=run_as_user if rootless else None,
+            check=True,
+        )
+        if result.stdout.strip() != "loaded":
+            raise ApplyError(
+                f"Quadlet generation failed for {unit_name}: "
+                f"systemd LoadState={result.stdout.strip() or 'unknown'} after daemon-reload"
+            )
+        return result
+
+    @staticmethod
     def apply_convergence_action(
         owner_ref: str,
         *,
@@ -201,6 +230,8 @@ class QuadletExecutor:
         rootless: bool,
         run_as_user: str | None,
         restart_mode: str = "try-restart",
+        daemon_reloaded: bool = False,
+        verify_unit: bool = False,
     ) -> dict[str, Any]:
         """Converge runtime state for a quadlet owner."""
         if restart_mode not in {"try-restart", "manual"}:
@@ -228,17 +259,42 @@ class QuadletExecutor:
                 }
             )
 
-        reload_result = QuadletExecutor.daemon_reload(
-            rootless=rootless,
-            run_as_user=run_as_user,
-        )
-        actions.append(
-            {
-                "action": "daemon-reload",
-                "success": reload_result.success,
-                "return_code": reload_result.return_code,
-            }
-        )
+        if not daemon_reloaded:
+            reload_result = QuadletExecutor.daemon_reload(
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+            actions.append(
+                {
+                    "action": "daemon-reload",
+                    "success": reload_result.success,
+                    "return_code": reload_result.return_code,
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "action": "daemon-reload",
+                    "success": True,
+                    "return_code": 0,
+                    "scope": "batch",
+                }
+            )
+
+        if verify_unit and not only_remove:
+            verify = QuadletExecutor.verify_generated_unit(
+                unit_name,
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+            actions.append(
+                {
+                    "action": "verify-generated-unit",
+                    "unit": unit_name,
+                    "success": verify.success,
+                    "return_code": verify.return_code,
+                }
+            )
 
         if only_remove:
             stop = run_systemctl_command(

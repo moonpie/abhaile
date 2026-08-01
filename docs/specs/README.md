@@ -9,7 +9,7 @@ Specs are structured design documents that describe what to build and why. They 
 | Proposed | `proposed/` | Drafted, awaiting review and agreement |
 | Active | `active/` | Agreed and currently being implemented |
 | Accepted | `accepted/` | Implementation complete and verified |
-| Superseded | `accepted/` | Replaced by a newer spec, kept for history |
+| Superseded | `superseded/` | Replaced by a newer spec, kept for history |
 | Rejected | `archive/rejected/` | Decided against, with rationale recorded |
 
 ## Template

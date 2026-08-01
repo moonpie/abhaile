@@ -257,6 +257,16 @@ def _build_mounted_file_lines(container_def: dict[str, Any]) -> list[str]:
     return volume_lines
 
 
+def _build_device_lines(container_def: dict[str, Any]) -> list[str]:
+    """Build AddDevice= lines for device passthrough entries."""
+    device_lines: list[str] = []
+    for device in container_def.get("devices", []) or []:
+        if not isinstance(device, str) or not device:
+            raise RenderError(f"Invalid device entry: {device}")
+        device_lines.append(f"AddDevice={device}")
+    return device_lines
+
+
 def _format_volume_line(source: str, target: str, mode: str | None) -> str:
     """Format a quadlet Volume= line for the given mount."""
     suffix = f":{mode}" if mode else ""

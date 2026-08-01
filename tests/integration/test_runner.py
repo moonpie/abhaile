@@ -118,6 +118,10 @@ def _prepare_successful_runner(repo: Path) -> dict[str, str]:
         venv_bin / "abhaile-apply",
         "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
     )
+    _make_runner_executable(
+        venv_bin / "abhaile-health",
+        "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+    )
     fake_bin = repo.parent / "fake-bin"
     _make_runner_executable(
         fake_bin / "sudo",
@@ -148,8 +152,10 @@ class TestRunnerExitCodes:
         assert 'readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"' in script
         assert 'readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"' in script
         assert 'readonly ABHAILE_APPLY="${ABHAILE_VENV_BIN}/abhaile-apply"' in script
+        assert 'readonly ABHAILE_HEALTH="${ABHAILE_VENV_BIN}/abhaile-health"' in script
         assert '"$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT"' in script
         assert 'sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT"' in script
+        assert 'sudo "$ABHAILE_HEALTH" --output "$ABHAILE_OUTPUT"' in script
 
     def test_runner_uses_gitops_deploy_key(self) -> None:
         """Runner selects the non-default Git deploy key for fetches."""
@@ -297,6 +303,56 @@ class TestRunnerExitCodes:
         assert "outcome=success" in summary_text
         assert f"target_sha={target_sha}" in summary_text
         assert not current.exists()
+
+    def test_failed_commit_retry_is_suppressed(self, runner_repo: Path) -> None:
+        """Runner records a failed target and suppresses identical automatic retries."""
+        env = _prepare_successful_runner(runner_repo)
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-apply",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 42\n",
+        )
+        (runner_repo / "bad.txt").write_text("bad\n")
+        target_sha = _commit_and_push(runner_repo, "bad deploy")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        first = _run_runner(runner_repo, env)
+        second = _run_runner(runner_repo, env)
+
+        failed_target = runner_repo.parent / "output" / "runner" / "failed-target"
+        assert first.returncode == 1
+        assert failed_target.read_text().startswith(target_sha)
+        assert second.returncode == 1
+        assert "suppressing retry of failed commit" in second.stdout
+
+    def test_newer_commit_after_failed_target_is_deployed(self, runner_repo: Path) -> None:
+        """A correcting commit remains eligible after a previous target failed."""
+        env = _prepare_successful_runner(runner_repo)
+        apply_path = Path(env["ABHAILE_VENV_BIN"]) / "abhaile-apply"
+        _make_runner_executable(
+            apply_path,
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 42\n",
+        )
+        (runner_repo / "bad.txt").write_text("bad\n")
+        _commit_and_push(runner_repo, "bad deploy")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        first = _run_runner(runner_repo, env)
+        assert first.returncode == 1
+
+        _make_runner_executable(
+            apply_path,
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        (runner_repo / "fix.txt").write_text("fix\n")
+        target_sha = _commit_and_push(runner_repo, "fix deploy")
+
+        second = _run_runner(runner_repo, env)
+
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert _git(runner_repo, "rev-parse", "HEAD") == target_sha
+        assert not (runner_repo.parent / "output" / "runner" / "failed-target").exists()
 
     def test_lock_contention_exits_2(self, runner_repo: Path) -> None:
         """Runner exits 2 when lock is already held."""

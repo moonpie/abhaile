@@ -22,6 +22,7 @@ from abhaile.renderers.quadlets.pod import _render_pod_quadlets, _resolve_pod_de
 from abhaile.renderers.quadlets.volumes import (
     HostPathRegistry,
     _build_mounted_file_lines,
+    _build_device_lines,
     _quadlet_output_root,
     _render_named_volumes,
     _validate_named_volumes,
@@ -103,8 +104,8 @@ def render_service_quadlets(
 
         if not container_def:
             raise RenderError(
-                f"Podman service '{service}' must define or include composition.pod "
-                "or composition.container"
+                f"Podman service '{service}' must define or include composition.container "
+                "or composition.pod"
             )
 
         user = podman.get("user")
@@ -160,6 +161,7 @@ def render_service_quadlets(
             rendered_root=rendered_root,
         )
         volume_lines.extend(_build_mounted_file_lines(container_def))
+        device_lines = _build_device_lines(container_def)
 
         container_owner_requires = list(volume_owner_refs)
 
@@ -183,6 +185,7 @@ def render_service_quadlets(
             container_template_path=container_template_path,
             build_path=build_path,
             image_path=image_path,
+            device_lines=device_lines,
             build_filename=build_filename,
             image_filename=image_filename,
             output_root=output_root,

@@ -391,7 +391,7 @@ Run these checks before implementing work that references a spec:
 Spec lifecycle is directory-first. Metadata `status` must match the directory, except:
 
 - `rejected` specs live in `docs/specs/archive/rejected/`
-- `superseded` specs live in `docs/specs/accepted/`
+- `superseded` specs live in `docs/specs/superseded/`
 
 If directory and status disagree, pause implementation for that spec and ask whether to correct
 the file location, metadata, or both.

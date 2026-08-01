@@ -5,18 +5,21 @@
 ```yaml
 id: SPEC-2026-013
 title: Ops Tooling
-status: accepted
+status: superseded
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-07-31
 related_adrs:
   - 0007-sops-bootstrap-policy-and-layout
 supersedes: null
-superseded_by: null
+superseded_by: SPEC-2026-027
 scope:
   hosts: [phobos, deimos]
   services: ["*"]
 ```
+
+Superseded by [SPEC-2026-027 Ops Tooling v2](../accepted/0027-ops-tooling-v2.md). This spec is
+kept as historical context for the original ops tooling implementation.
 
 ## Context
 

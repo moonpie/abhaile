@@ -233,5 +233,8 @@ None.
 - `src/abhaile/cli/inventory.py` (current implementation)
 - `config/mapping.yaml`
 - `config/network.yaml`
-- `docs/specs/accepted/0013-ops-tooling.md` (SPEC-2026-013 — original inventory task)
+- `docs/specs/accepted/0027-ops-tooling-v2.md` (SPEC-2026-027 — current ops tooling
+  contract)
+- `docs/specs/superseded/0013-ops-tooling.md` (SPEC-2026-013 — original inventory task,
+  historical)
 - `Makefile`

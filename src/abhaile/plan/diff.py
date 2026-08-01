@@ -277,6 +277,7 @@ def _toposort_owners(
     visiting: set[str] = set()
 
     def visit(owner_ref: str) -> None:
+        """Visit one owner and append it after its dependencies."""
         if owner_ref in permanent:
             return
         if owner_ref in visiting:
@@ -310,6 +311,7 @@ def _build_owner_plan(
     owner_changes: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
     def ensure_owner(owner_ref: str) -> None:
+        """Create a change bucket for an owner if absent."""
         owner_changes.setdefault(
             owner_ref,
             {
