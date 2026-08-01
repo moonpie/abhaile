@@ -1,3 +1,2 @@
 [Image]
 Image=docker.io/authelia/authelia:4.39.13
-PodmanArgs=--policy=missing
