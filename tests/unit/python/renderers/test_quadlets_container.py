@@ -134,7 +134,7 @@ composition:
         )
         write_file(
             config_root / "services" / "blocky-common" / "quadlets" / "image.image",
-            "[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPolicy=missing\n",
+            "[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPodmanArgs=--policy=missing\n",
         )
         write_file(
             config_root / "services" / "blocky-common" / "quadlets" / "container.container.j2",
@@ -175,7 +175,7 @@ composition:
 
         assert container_file.read_text() == "[Container]\nImage=blocky-a.image\n"
         assert image_file.read_text() == (
-            "[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPolicy=missing\n"
+            "[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPodmanArgs=--policy=missing\n"
         )
 
     def test_podman_service_without_resolved_container_raises(
