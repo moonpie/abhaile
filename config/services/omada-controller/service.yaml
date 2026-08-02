@@ -10,6 +10,7 @@ composition:
       destination: /srv/omada-controller/mongodb/initdb/omada.js
     - source: omada-controller/tools/rebuild-omada-cert.sh
       destination: /usr/local/lib/abhaile/tools/rebuild-omada-cert.sh
+      mode: '0755'
   systemd:
     - source: omada-controller/systemd/rebuild-omada-cert.service
       destination: /etc/systemd/system/rebuild-omada-cert.service

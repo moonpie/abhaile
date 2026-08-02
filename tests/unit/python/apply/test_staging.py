@@ -123,6 +123,45 @@ class TestDefaultFileHints:
         with pytest.raises(ApplyError, match="missing podman_user"):
             _default_file_hints(entry)
 
+    def test_rootful_file_uses_explicit_mode_hint(self) -> None:
+        entry: dict[str, object] = {
+            "kind": "service.config",
+            "apply_hints": {
+                "mode": "0755",
+            },
+        }
+
+        user, group, mode = _default_file_hints(entry)
+        assert user == "root"
+        assert group == "root"
+        assert mode == 0o755
+
+    def test_rootless_file_uses_explicit_mode_hint(self) -> None:
+        entry: dict[str, object] = {
+            "kind": "quadlet.container",
+            "apply_hints": {
+                "rootless": True,
+                "podman_user": "abhaile",
+                "mode": "0755",
+            },
+        }
+
+        user, group, mode = _default_file_hints(entry)
+        assert user == "abhaile"
+        assert group == "abhaile"
+        assert mode == 0o755
+
+    def test_non_user_file_invalid_mode_hint_raises(self) -> None:
+        entry: dict[str, object] = {
+            "kind": "service.config",
+            "apply_hints": {
+                "mode": "bad",
+            },
+        }
+
+        with pytest.raises(ApplyError, match="Invalid mode apply_hints"):
+            _default_file_hints(entry)
+
 
 class TestCopyArtifactForApply:
     """Tests for _copy_artifact_for_apply."""

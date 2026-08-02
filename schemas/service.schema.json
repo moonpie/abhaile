@@ -4,34 +4,25 @@
   "description": "Schema for config/services/*/service.yaml - defines service configuration",
   "type": "object",
   "definitions": {
-    "serviceConfigSource": {
-      "oneOf": [
-        {
-          "type": "string",
-          "description": "Static source file path"
-        },
-        {
-          "$ref": "common.schema.json#/definitions/templateSource"
-        }
-      ]
-    },
     "serviceConfigFileEntry": {
-      "type": "object",
       "description": "Plain copied or templated service config file",
-      "required": ["source", "destination"],
-      "properties": {
-        "source": {
-          "$ref": "#/definitions/serviceConfigSource"
+      "allOf": [
+        {
+          "$ref": "common.schema.json#/definitions/configFileEntry"
         },
-        "destination": {
-          "type": "string",
-          "description": "Destination path on target system (absolute path)",
-          "not": {
-            "pattern": "^/etc/systemd/system/.+"
+        {
+          "type": "object",
+          "properties": {
+            "destination": {
+              "type": "string",
+              "description": "Destination path on target system (absolute path)",
+              "not": {
+                "pattern": "^/etc/systemd/system/.+"
+              }
+            }
           }
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "serviceConfigDirectoryEntry": {
       "type": "object",

@@ -84,12 +84,25 @@ def _prepare_authorized_keys_parent(
 def _default_file_hints(entry: dict[str, object]) -> tuple[str, str, int]:
     """Return default owner/group/mode for apply-managed non-user artifacts."""
     apply_hints = entry.get("apply_hints")
+    mode = _DEFAULT_FILE_MODE
+    if isinstance(apply_hints, dict):
+        mode_hint = apply_hints.get("mode")
+        if mode_hint is not None:
+            if not isinstance(mode_hint, str) or not mode_hint:
+                raise ApplyError("Invalid mode apply_hints for non-user artifact")
+            try:
+                mode = int(mode_hint, 8)
+            except ValueError as exc:
+                raise ApplyError(
+                    f"Invalid mode apply_hints for non-user artifact: {mode_hint}"
+                ) from exc
+
     if isinstance(apply_hints, dict) and bool(apply_hints.get("rootless")):
         podman_user = apply_hints.get("podman_user")
         if not isinstance(podman_user, str) or not podman_user:
             raise ApplyError("Rootless artifact missing podman_user in apply_hints")
-        return podman_user, podman_user, _DEFAULT_FILE_MODE
-    return "root", "root", _DEFAULT_FILE_MODE
+        return podman_user, podman_user, mode
+    return "root", "root", mode
 
 
 def _copy_artifact_for_apply(action: dict[str, object], rendered_dir: Path) -> None:

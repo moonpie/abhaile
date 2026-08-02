@@ -236,3 +236,71 @@ class TestRenderConfigEntries:
         artifacts = collector.get_all_artifacts()
         artifact = artifacts[0]
         assert artifact.apply_hints == {"enable_mode": "enable"}
+
+    def test_authored_mode_propagates_to_apply_hints(self, tmp_path: Path, write_file: Any) -> None:
+        """Authored file mode should be emitted in apply_hints metadata."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+
+        write_file(config_root / "script.sh", "#!/usr/bin/env bash\necho ok\n")
+
+        entries = [
+            {
+                "source": "script.sh",
+                "destination": "/usr/local/lib/abhaile/tools/script.sh",
+                "mode": "0755",
+            }
+        ]
+
+        collector = ArtifactCollector()
+        render_config_entries(
+            entries,
+            config_root,
+            config_root,
+            output_dir,
+            {},
+            collector=collector,
+            rendered_root=output_dir,
+        )
+
+        artifacts = collector.get_all_artifacts()
+        assert len(artifacts) == 1
+        assert artifacts[0].apply_hints == {"mode": "0755"}
+
+    def test_authored_mode_merges_with_precomputed_apply_hints(
+        self,
+        tmp_path: Path,
+        write_file: Any,
+    ) -> None:
+        """Authored file mode should merge with internal precomputed apply hints."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output"
+
+        write_file(config_root / "script.sh", "#!/usr/bin/env bash\necho ok\n")
+
+        entries = [
+            {
+                "source": "script.sh",
+                "destination": "/usr/local/lib/abhaile/tools/script.sh",
+                "mode": "0755",
+                "_abhaile_apply_hints": {"restart_unit": "example.service"},
+            }
+        ]
+
+        collector = ArtifactCollector()
+        render_config_entries(
+            entries,
+            config_root,
+            config_root,
+            output_dir,
+            {},
+            collector=collector,
+            rendered_root=output_dir,
+        )
+
+        artifacts = collector.get_all_artifacts()
+        assert len(artifacts) == 1
+        assert artifacts[0].apply_hints == {
+            "restart_unit": "example.service",
+            "mode": "0755",
+        }

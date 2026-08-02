@@ -225,9 +225,15 @@ def resolve_config_entry_variables(
 def _entry_apply_hints(entry: dict[str, Any]) -> dict[str, Any] | None:
     """Return internal precomputed apply hints when present."""
     precomputed = entry.get("_abhaile_apply_hints")
+    hints: dict[str, Any] = {}
     if isinstance(precomputed, dict):
-        return dict(precomputed) or None
-    return None
+        hints.update(precomputed)
+
+    mode = entry.get("mode")
+    if isinstance(mode, str) and mode:
+        hints["mode"] = mode
+
+    return hints or None
 
 
 def _entry_contributor_ref(entry: dict[str, Any]) -> str | None:
