@@ -595,13 +595,22 @@ def _run_networkd_owner_actions(
     """Run phase 7.7 systemd-networkd actions for changed entries."""
     owner_changes: dict[str, dict[str, object]] = {}
 
-    def _record_change(*, phase: str, kind: str, owner_ref: str, target_path: str) -> None:
+    def _record_change(
+        *,
+        phase: str,
+        kind: str,
+        owner_ref: str,
+        target_path: str,
+        is_directory: bool,
+        apply_hints: object,
+    ) -> None:
         """Record a networkd-owned change for batched convergence."""
         if owner_ref not in owner_changes:
             owner_changes[owner_ref] = {
                 "phases": set(),
                 "kinds": set(),
                 "entries": [],
+                "directory_writes": [],
             }
 
         state = owner_changes[owner_ref]
@@ -620,6 +629,15 @@ def _run_networkd_owner_actions(
                     "target_path": target_path,
                 }
             )
+        if phase == "write" and is_directory:
+            directory_writes = state.get("directory_writes")
+            if isinstance(directory_writes, list):
+                directory_writes.append(
+                    {
+                        "target_path": target_path,
+                        "apply_hints": apply_hints,
+                    }
+                )
 
     for action in writes:
         kind = action.get("kind")
@@ -634,6 +652,8 @@ def _run_networkd_owner_actions(
             kind=kind,
             owner_ref=owner_ref,
             target_path=target_path,
+            is_directory=bool(action.get("is_directory")),
+            apply_hints=action.get("apply_hints"),
         )
 
     for removal in removals_to_apply:
@@ -649,6 +669,8 @@ def _run_networkd_owner_actions(
             kind=kind,
             owner_ref=owner_ref,
             target_path=target_path,
+            is_directory=bool(removal.get("is_directory")),
+            apply_hints=removal.get("apply_hints"),
         )
 
     remove_only_netdev_owners: set[str] = set()
@@ -688,6 +710,17 @@ def _run_networkd_owner_actions(
         entries = state.get("entries")
         if not isinstance(entries, list) or not entries:
             continue
+        directory_writes = state.get("directory_writes")
+        if isinstance(directory_writes, list):
+            for directory in directory_writes:
+                target_path = directory.get("target_path")
+                if not isinstance(target_path, str):
+                    raise ApplyError("Networkd directory write action missing target_path")
+                hints = directory.get("apply_hints")
+                NetworkdExecutor.apply_directory_change(
+                    target_path,
+                    hints if isinstance(hints, dict) else None,
+                )
 
         sample_target = entries[0].get("target_path")
         if not isinstance(sample_target, str):

@@ -49,6 +49,7 @@ class TestHealthCli:
                 "output_root": tmp_path / "out",
                 "repo_root": tmp_path,
                 "timeout_seconds": 9,
+                "cluster": False,
             }
         ]
         assert json.loads(capsys.readouterr().out) == [
@@ -84,3 +85,24 @@ class TestHealthCli:
             "ok unit-active:coredns.service",
             "fail dns-soa-consistent:abhaile.home.arpa. detail=mismatch",
         ]
+
+    def test_cluster_flag_passthrough(self, tmp_path: Path, monkeypatch: Any) -> None:
+        calls: list[dict[str, object]] = []
+
+        monkeypatch.setattr(health_cli, "get_repo_root", lambda _path: tmp_path)
+        monkeypatch.setattr(
+            health_cli,
+            "load_paths",
+            lambda _repo_root: {"output_root_default": (tmp_path / "state").as_posix()},
+        )
+
+        def fake_audit(**kwargs: object) -> list[HealthResult]:
+            calls.append(kwargs)
+            return []
+
+        monkeypatch.setattr(health_cli, "run_health_audit", fake_audit)
+
+        rc = health_cli.main(["--host", "deimos", "--cluster"])
+
+        assert rc == 0
+        assert calls and calls[0]["cluster"] is True

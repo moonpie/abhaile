@@ -58,6 +58,12 @@ sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
 
 # Live apply
 sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
+
+# Local post-apply health gate
+sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile
+
+# Cluster consistency audit (non-local checks such as cross-node DNS SOA consistency)
+sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile --cluster
 ```
 
 <details>
@@ -116,6 +122,12 @@ journalctl -u abhaile-runner.service --no-pager -n 50
 
 # Trigger manual run
 sudo systemctl start abhaile-runner.service
+
+# Optional: enable report-only cluster audit after the runner's local health gate
+sudo systemctl edit abhaile-runner.service
+# Add:
+# [Service]
+# Environment=ABHAILE_CLUSTER_HEALTH=1
 ```
 
 If the runner reports a dirty worktree, inspect staged and unstaged state before

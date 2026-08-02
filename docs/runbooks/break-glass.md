@@ -282,8 +282,8 @@ systemctl restart systemd-networkd
 
 ## 6. Vault-Agent AppRole Auth Recovery
 
-**Symptoms:** `.ready` sentinel missing or stale. Vault Agent logs show AppRole authentication
-errors. Services wait on secrets indefinitely.
+**Symptoms:** `.ready` sentinel missing, empty, or `abhaile-secrets-ready.service` is not active.
+Vault Agent logs show AppRole authentication errors. Services wait on secrets indefinitely.
 
 **Prereq:** SSH to affected host.
 

@@ -145,33 +145,6 @@ prepare_output_ownership() {
     chown -R root:root "${OUTPUT_DIR}/state"
 }
 
-write_abhaile_entrypoint() {
-    local name="$1"
-    local module="$2"
-    local target="${REPO_DIR}/.venv/bin/${name}"
-    local tmp
-    tmp=$(mktemp "${target}.tmp.XXXXXX")
-
-    cat >"$tmp" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-export PYTHONPATH="${REPO_DIR}/src\${PYTHONPATH:+:\$PYTHONPATH}"
-exec "${REPO_DIR}/.venv/bin/python" -c 'import sys; from ${module} import main; sys.exit(main())' "\$@"
-EOF
-    chmod 0755 "$tmp"
-    chown "${ABHAILE_USER}:${ABHAILE_GROUP}" "$tmp"
-    mv "$tmp" "$target"
-}
-
-install_abhaile_entrypoints() {
-    log "Installing Abhaile entrypoints"
-    write_abhaile_entrypoint "abhaile-render" "abhaile.cli.render"
-    write_abhaile_entrypoint "abhaile-apply" "abhaile.cli.apply"
-    write_abhaile_entrypoint "abhaile-diff" "abhaile.cli.diff"
-    write_abhaile_entrypoint "abhaile-inventory" "abhaile.cli.inventory"
-    write_abhaile_entrypoint "abhaile-health" "abhaile.cli.health"
-}
-
 write_vault_agent_secret_file() {
     local path="$1"
     local value="$2"
@@ -464,7 +437,11 @@ stage_repo_and_env() {
             -r "${REPO_DIR}/requirements.txt"
     fi
 
-    install_abhaile_entrypoints
+    log "Synchronizing Abhaile CLI entrypoints"
+    ABHAILE_REPO_DIR="$REPO_DIR" \
+        ABHAILE_OWNER="$ABHAILE_USER" \
+        ABHAILE_GROUP="$ABHAILE_GROUP" \
+        "${REPO_DIR}/scripts/install-abhaile-entrypoints"
 
     # Ensure CLI entrypoints are on PATH
     export PATH="${REPO_DIR}/.venv/bin:${PATH}"

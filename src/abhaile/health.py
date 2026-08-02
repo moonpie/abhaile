@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import socket
 import subprocess
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -31,6 +30,7 @@ def run_health_audit(
     output_root: Path,
     repo_root: Path,
     timeout_seconds: int = 5,
+    cluster: bool = False,
 ) -> list[HealthResult]:
     """Run bounded post-apply health checks for the local host."""
     actual_host = host or socket.gethostname().split(".", 1)[0]
@@ -42,7 +42,13 @@ def run_health_audit(
 
     results: list[HealthResult] = []
     results.extend(_check_required_addresses(actual_host, services, config_root, network))
-    results.extend(_check_coredns(network, timeout_seconds=timeout_seconds))
+    results.extend(
+        _check_coredns(
+            network,
+            timeout_seconds=timeout_seconds,
+            include_cluster_consistency=cluster,
+        )
+    )
     results.extend(_check_system_units(manifest, timeout_seconds=timeout_seconds))
     results.extend(_check_rootless_vault_agent(services, timeout_seconds=timeout_seconds))
     results.extend(_check_failed_units(timeout_seconds=timeout_seconds))
@@ -201,7 +207,12 @@ def _dig(server: str, qname: str, qtype: str, *, timeout_seconds: int) -> str:
     return "\n".join(line.strip() for line in result.stdout.splitlines() if line.strip())
 
 
-def _check_coredns(network: dict[str, Any], *, timeout_seconds: int) -> list[HealthResult]:
+def _check_coredns(
+    network: dict[str, Any],
+    *,
+    timeout_seconds: int,
+    include_cluster_consistency: bool,
+) -> list[HealthResult]:
     """Check CoreDNS public resolution and authoritative zone answers."""
     results: list[HealthResult] = []
     endpoints = _coredns_endpoints(network)
@@ -220,6 +231,9 @@ def _check_coredns(network: dict[str, Any], *, timeout_seconds: int) -> list[Hea
             ns = _dig(endpoint, zone, "NS", timeout_seconds=timeout_seconds)
             results.append(HealthResult(f"dns-soa:{endpoint}:{zone}", bool(soa), soa))
             results.append(HealthResult(f"dns-ns:{endpoint}:{zone}", bool(ns), ns))
+
+    if not include_cluster_consistency:
+        return results
 
     for zone in zones:
         soa_by_endpoint = {
@@ -356,7 +370,7 @@ def _check_failed_units(*, timeout_seconds: int) -> list[HealthResult]:
 
 
 def _check_secrets_ready(services: list[str]) -> list[HealthResult]:
-    """Check that the Vault Agent readiness sentinel is present for this boot."""
+    """Check that the Vault Agent readiness sentinel exists and readiness gate is active."""
     if "vault-agent" not in services:
         return []
     sentinel = _SECRETS_READY_SENTINEL
@@ -366,14 +380,22 @@ def _check_secrets_ready(services: list[str]) -> list[HealthResult]:
         stat = sentinel.stat()
         if stat.st_size == 0:
             return [HealthResult("secrets-ready-sentinel", False, "empty")]
-        boot_epoch = time.time() - float(_PROC_UPTIME.read_text().split()[0])
-    except (OSError, ValueError) as exc:
+    except OSError as exc:
         return [HealthResult("secrets-ready-sentinel", False, str(exc))]
+
+    try:
+        result = _command(
+            ["systemctl", "is-active", "--quiet", "abhaile-secrets-ready.service"],
+            timeout_seconds=3,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [HealthResult("secrets-ready-sentinel", False, str(exc))]
+
     return [
         HealthResult(
             "secrets-ready-sentinel",
-            stat.st_mtime >= boot_epoch,
-            f"mtime={stat.st_mtime:.0f} boot={boot_epoch:.0f}",
+            result.returncode == 0,
+            result.stderr.strip() or result.stdout.strip(),
         )
     ]
 

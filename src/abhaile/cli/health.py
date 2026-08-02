@@ -18,6 +18,11 @@ def parse_health_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", help="Output root override")
     parser.add_argument("--host", help="Expected host name override")
     parser.add_argument("--timeout", type=int, default=5, help="Per-check timeout in seconds")
+    parser.add_argument(
+        "--cluster",
+        action="store_true",
+        help="Include cluster-consistency checks (cross-node DNS SOA consistency)",
+    )
     parser.add_argument("--json", action="store_true", help="Output JSON results")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     return parser.parse_args(argv)
@@ -37,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         output_root=output_root,
         repo_root=repo_root,
         timeout_seconds=args.timeout,
+        cluster=args.cluster,
     )
     failed = [result for result in results if not result.success]
     if args.json:

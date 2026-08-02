@@ -715,6 +715,160 @@ class TestApplyCli:
         assert payload["owner_execution"][0]["kind"] == "networkd.owner"
         assert payload["owner_execution"][0]["owner_ref"] == "iface:vlan20"
 
+    def test_apply_networkd_dropin_safe_removal_runs_without_prune(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Prune-safe managed networkd drop-in removals should apply by default."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+
+        stale_target = (
+            tmp_path
+            / "target"
+            / "etc"
+            / "systemd"
+            / "network"
+            / "21-ipvlan-l2.network.d"
+            / "200-old.conf"
+        )
+        stale_target.parent.mkdir(parents=True, exist_ok=True)
+        stale_content = "[Route]\nDestination=172.20.30.10/32\n"
+        stale_target.write_text(stale_content)
+
+        _write_manifest(desired, "phobos", [])
+        _write_manifest(
+            applied,
+            "phobos",
+            [
+                {
+                    "render_path": "system/etc/systemd/network/21-ipvlan-l2.network.d/200-old.conf",
+                    "target_path": stale_target.as_posix(),
+                    "kind": "networkd.dropin",
+                    "owner_ref": "iface:ipvlan-l2",
+                    "sha256": _sha_of(stale_content),
+                    "size": len(stale_content),
+                }
+            ],
+        )
+
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.NetworkdExecutor.delete_interface",
+            lambda *_args, **_kwargs: ExecutionResult(
+                action_id="ip-link-delete:noop",
+                action_type="delete",
+                success=True,
+                return_code=0,
+            ),
+        )
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.NetworkdExecutor.reload_networkd",
+            lambda *_args, **_kwargs: ExecutionResult(
+                action_id="networkctl-reload",
+                action_type="reload",
+                success=True,
+                return_code=0,
+            ),
+        )
+
+        rc = main_apply(
+            [
+                "--desired-manifest",
+                desired.as_posix(),
+                "--applied-manifest",
+                applied.as_posix(),
+                "--json",
+            ]
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert payload["removals"] == 1
+        assert not stale_target.exists()
+
+    def test_apply_networkd_directory_writes_enforce_mode_hints(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Networkd directory writes should dispatch directory enforcement with apply hints."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+
+        target_dir = tmp_path / "target" / "etc" / "systemd" / "network" / "21-vlan.network.d"
+        _write_manifest(
+            desired,
+            "phobos",
+            [
+                {
+                    "render_path": "system/etc/systemd/network/21-vlan.network.d",
+                    "target_path": target_dir.as_posix(),
+                    "kind": "networkd.dropin",
+                    "owner_ref": "iface:vlan",
+                    "is_directory": True,
+                    "sha256": _sha_of(""),
+                    "size": 0,
+                    "apply_hints": {
+                        "owner": "root",
+                        "group": "root",
+                        "mode": "0755",
+                    },
+                }
+            ],
+        )
+        _write_manifest(applied, "phobos", [])
+
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
+        directory_calls: list[tuple[str, object]] = []
+
+        def _fake_apply_directory_change(
+            target_path: str,
+            hints: object,
+        ) -> dict[str, object]:
+            directory_calls.append((target_path, hints))
+            return {
+                "target_path": target_path,
+                "actions": [{"action": "ensure-directory", "success": True, "return_code": 0}],
+            }
+
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.NetworkdExecutor.apply_directory_change",
+            _fake_apply_directory_change,
+        )
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.NetworkdExecutor.apply_owner_change",
+            lambda owner_ref, interface, strict_reconfigure, kinds, **kwargs: {
+                "owner_ref": owner_ref,
+                "interface": interface,
+                "kinds": kinds,
+                "actions": [
+                    {"action": "reload", "success": True, "return_code": 0},
+                    {"action": "reconfigure", "success": True, "return_code": 0},
+                ],
+            },
+        )
+
+        rc = main_apply(
+            [
+                "--desired-manifest",
+                desired.as_posix(),
+                "--applied-manifest",
+                applied.as_posix(),
+                "--json",
+            ]
+        )
+
+        assert rc == 0
+        assert len(directory_calls) == 1
+        assert directory_calls[0][0] == target_dir.as_posix()
+        assert isinstance(directory_calls[0][1], dict)
+        assert directory_calls[0][1]["mode"] == "0755"
+        _ = capsys.readouterr().out
+
     def test_apply_networkd_netdev_remove_uses_ordered_delete_and_single_reload(
         self,
         tmp_path: Path,

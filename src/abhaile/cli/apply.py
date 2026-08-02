@@ -34,6 +34,22 @@ from abhaile.utils.errors import ApplyError, PipelineError
 LOG = logging.getLogger(__name__)
 
 
+def _is_managed_networkd_dropin_removal(removal: dict[str, object]) -> bool:
+    """Return True for managed networkd drop-in file removals eligible for safe auto-prune."""
+    kind = removal.get("kind")
+    target_path = removal.get("target_path")
+    if kind != "networkd.dropin" or not isinstance(target_path, str):
+        return False
+    path = Path(target_path)
+    parent_name = path.parent.name
+    return parent_name.endswith(".network.d") and path.suffix == ".conf"
+
+
+def _default_safe_removals(removals_safe: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Select prune-safe removals that should be applied without explicit prune flags."""
+    return [removal for removal in removals_safe if _is_managed_networkd_dropin_removal(removal)]
+
+
 def _local_hostname() -> str:
     """Return short local hostname for safety checks."""
     return socket.gethostname().split(".")[0]
@@ -184,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         _copy_artifact_for_apply(action, rendered_dir)
         write_count += 1
 
-    removals_to_apply: list[dict[str, object]] = []
+    removals_to_apply: list[dict[str, object]] = _default_safe_removals(removals_safe)
     if args.force_prune:
         check_destructive_gate(
             gate_name="prune-drifted",
@@ -194,6 +210,13 @@ def main(argv: list[str] | None = None) -> int:
         removals_to_apply = [*removals_safe, *removals_drifted]
     elif args.prune:
         removals_to_apply = [*removals_safe]
+
+    unique_removals: dict[str, dict[str, object]] = {}
+    for removal in removals_to_apply:
+        target_path = removal.get("target_path") if isinstance(removal, dict) else None
+        if isinstance(target_path, str):
+            unique_removals[target_path] = removal
+    removals_to_apply = [unique_removals[path] for path in sorted(unique_removals)]
 
     for removal in removals_to_apply:
         target_path = removal.get("target_path") if isinstance(removal, dict) else None

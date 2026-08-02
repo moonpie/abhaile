@@ -19,6 +19,30 @@ from abhaile.renderers.config import (
 )
 
 
+def _annotate_networkd_entries_with_apply_hints(
+    entries: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach directory apply hints for managed *.network.d entries."""
+    annotated: list[dict[str, Any]] = []
+    for entry in entries:
+        destination = entry.get("destination") if isinstance(entry, dict) else None
+        if (
+            isinstance(destination, str)
+            and "source" not in entry
+            and destination.rstrip("/").endswith(".network.d")
+        ):
+            merged = dict(entry)
+            merged["_abhaile_apply_hints"] = {
+                "owner": "root",
+                "group": "root",
+                "mode": "0755",
+            }
+            annotated.append(merged)
+            continue
+        annotated.append(entry)
+    return annotated
+
+
 def render_networkd_config(
     host: str,
     host_config: dict[str, Any],
@@ -53,7 +77,7 @@ def render_networkd_config(
     )
 
     render_config_entries(
-        networkd_common,
+        _annotate_networkd_entries_with_apply_hints(networkd_common),
         config_root / "hosts",
         config_root / "hosts",
         output_dir,
@@ -72,7 +96,7 @@ def render_networkd_config(
     )
 
     render_config_entries(
-        networkd_host,
+        _annotate_networkd_entries_with_apply_hints(networkd_host),
         config_root / "hosts",
         config_root / "hosts",
         output_dir,

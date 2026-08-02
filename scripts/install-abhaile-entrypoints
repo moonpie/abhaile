@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+# Synchronize managed Abhaile CLI entrypoint wrappers in the repository venv.
+set -euo pipefail
+
+readonly ABHAILE_REPO_DIR="${ABHAILE_REPO_DIR:-/opt/abhaile}"
+readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${ABHAILE_REPO_DIR}/.venv/bin}"
+readonly ABHAILE_PYTHON="${ABHAILE_PYTHON:-${ABHAILE_VENV_BIN}/python}"
+readonly ABHAILE_SRC="${ABHAILE_SRC:-${ABHAILE_REPO_DIR}/src}"
+readonly ABHAILE_OWNER="${ABHAILE_OWNER:-abhaile}"
+readonly ABHAILE_GROUP="${ABHAILE_GROUP:-abhaile}"
+readonly MANAGED_MARKER="# managed-by: abhaile-entrypoints-v1"
+readonly MANIFEST_PATH="${ABHAILE_VENV_BIN}/.abhaile-managed-entrypoints"
+
+readonly ENTRYPOINT_NAMES=(
+    "abhaile-render"
+    "abhaile-apply"
+    "abhaile-diff"
+    "abhaile-inventory"
+    "abhaile-health"
+)
+readonly ENTRYPOINT_MODULES=(
+    "abhaile.cli.render"
+    "abhaile.cli.apply"
+    "abhaile.cli.diff"
+    "abhaile.cli.inventory"
+    "abhaile.cli.health"
+)
+
+log() { printf '[install-abhaile-entrypoints] %s\n' "$*"; }
+die() { log "FATAL: $*"; exit 1; }
+
+contains_name() {
+    local needle="$1"
+    shift
+    local item
+    for item in "$@"; do
+        if [[ "$item" == "$needle" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+stat_owner_group() {
+    local path="$1"
+    stat -c '%U:%G' "$path"
+}
+
+enforce_owner_group() {
+    local path="$1"
+    if [[ "$(id -u)" -eq 0 ]]; then
+        chown "${ABHAILE_OWNER}:${ABHAILE_GROUP}" "$path"
+        return 0
+    fi
+
+    local current
+    current="$(stat_owner_group "$path")"
+    if [[ "$current" != "${ABHAILE_OWNER}:${ABHAILE_GROUP}" ]]; then
+        die "${path} is owned by ${current}; need ${ABHAILE_OWNER}:${ABHAILE_GROUP}. Run as root to repair ownership."
+    fi
+}
+
+validate_layout() {
+    [[ -d "$ABHAILE_VENV_BIN" ]] || die "Missing venv bin directory: ${ABHAILE_VENV_BIN}"
+    [[ -x "$ABHAILE_PYTHON" ]] || die "Missing virtualenv python executable: ${ABHAILE_PYTHON}"
+    [[ -d "$ABHAILE_SRC" ]] || die "Missing source root: ${ABHAILE_SRC}"
+}
+
+validate_module_file() {
+    local module="$1"
+    [[ "$module" == abhaile.cli.* ]] || die "Unsupported module mapping: ${module}"
+
+    local leaf="${module#abhaile.cli.}"
+    local module_path="${ABHAILE_SRC}/abhaile/cli/${leaf}.py"
+    [[ -f "$module_path" ]] || die "Required module file missing: ${module_path}"
+}
+
+write_wrapper_tmp() {
+    local tmp_path="$1" module="$2"
+    cat >"$tmp_path" <<EOF
+#!/usr/bin/env bash
+${MANAGED_MARKER}
+set -euo pipefail
+export PYTHONPATH="${ABHAILE_SRC}\${PYTHONPATH:+:\$PYTHONPATH}"
+exec "${ABHAILE_PYTHON}" -c 'import sys; from ${module} import main; sys.exit(main())' "\$@"
+EOF
+}
+
+install_one_wrapper() {
+    local name="$1" module="$2"
+    local target="${ABHAILE_VENV_BIN}/${name}"
+    local tmp
+    tmp="$(mktemp "${target}.tmp.XXXXXX")"
+
+    write_wrapper_tmp "$tmp" "$module"
+    chmod 0755 "$tmp"
+    enforce_owner_group "$tmp"
+
+    if [[ -f "$target" ]] && cmp -s "$tmp" "$target"; then
+        rm -f "$tmp"
+        chmod 0755 "$target"
+        enforce_owner_group "$target"
+        return 0
+    fi
+
+    mv "$tmp" "$target"
+    chmod 0755 "$target"
+    enforce_owner_group "$target"
+}
+
+remove_obsolete_wrappers() {
+    [[ -f "$MANIFEST_PATH" ]] || return 0
+
+    local old_name old_target
+    while IFS= read -r old_name; do
+        [[ -n "$old_name" ]] || continue
+        if contains_name "$old_name" "${ENTRYPOINT_NAMES[@]}"; then
+            continue
+        fi
+
+        old_target="${ABHAILE_VENV_BIN}/${old_name}"
+        if [[ ! -f "$old_target" ]]; then
+            continue
+        fi
+
+        if grep -Fqx "$MANAGED_MARKER" "$old_target"; then
+            rm -f "$old_target"
+        fi
+    done <"$MANIFEST_PATH"
+}
+
+write_manifest() {
+    local tmp
+    tmp="$(mktemp "${MANIFEST_PATH}.tmp.XXXXXX")"
+    printf '%s\n' "${ENTRYPOINT_NAMES[@]}" >"$tmp"
+    chmod 0644 "$tmp"
+    enforce_owner_group "$tmp"
+    mv "$tmp" "$MANIFEST_PATH"
+    chmod 0644 "$MANIFEST_PATH"
+    enforce_owner_group "$MANIFEST_PATH"
+}
+
+main() {
+    validate_layout
+
+    local i name module
+    for i in "${!ENTRYPOINT_NAMES[@]}"; do
+        name="${ENTRYPOINT_NAMES[$i]}"
+        module="${ENTRYPOINT_MODULES[$i]}"
+        validate_module_file "$module"
+        install_one_wrapper "$name" "$module"
+    done
+
+    remove_obsolete_wrappers
+    write_manifest
+    log "entrypoints synchronized"
+}
+
+main "$@"

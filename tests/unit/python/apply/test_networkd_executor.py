@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import grp
+import pwd
+import stat
 from typing import Any
 
 import pytest
@@ -137,3 +140,25 @@ class TestNetworkdExecutor:
         mock_delete.assert_called_once_with("ipvlan-l2")
         mock_reload.assert_called_once()
         mock_reconfigure.assert_not_called()
+
+    def test_apply_directory_change_enforces_hints(self, tmp_path: Any) -> None:
+        """networkd directory enforcement should create and normalize ownership/mode."""
+        owner = pwd.getpwuid(target_uid := tmp_path.stat().st_uid).pw_name
+        group = grp.getgrgid(target_gid := tmp_path.stat().st_gid).gr_name
+        target = tmp_path / "21-ipvlan-l2.network.d"
+
+        result = NetworkdExecutor.apply_directory_change(
+            target.as_posix(),
+            {
+                "owner": owner,
+                "group": group,
+                "mode": "0755",
+            },
+        )
+
+        assert target.exists()
+        assert target.is_dir()
+        assert stat.S_IMODE(target.stat().st_mode) == 0o755
+        assert target.stat().st_uid == target_uid
+        assert target.stat().st_gid == target_gid
+        assert result["mode"] == "0755"

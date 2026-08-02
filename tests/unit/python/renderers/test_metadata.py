@@ -15,6 +15,18 @@ def test_classify_networkd_dropin() -> None:
     assert owner_ref == "iface:br0"
 
 
+def test_classify_networkd_dropin_directory() -> None:
+    """Networkd drop-in directories should map to iface-scoped dropin kind."""
+    kind, owner_ref = classify_config_artifact(
+        "/etc/systemd/network/21-ipvlan-l2.network.d/",
+        default_owner_ref="host:phobos",
+        is_directory=True,
+    )
+
+    assert kind == "networkd.dropin"
+    assert owner_ref == "iface:ipvlan-l2"
+
+
 def test_classify_networkd_network() -> None:
     """Networkd .network files should map to iface-scoped network kind."""
     kind, owner_ref = classify_config_artifact(

@@ -97,6 +97,7 @@ class TestRenderNetworkdConfig:
         """Directories are created with no source entry."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output"
+        collector = ArtifactCollector()
 
         host_config = {
             "composition": {"config": [{"destination": "/etc/systemd/network/20-vlan.network.d/"}]}
@@ -109,10 +110,20 @@ class TestRenderNetworkdConfig:
             {},
             config_root,
             output_dir,
+            collector=collector,
+            rendered_root=output_dir,
         )
 
         output_dir_path = output_dir / "etc/systemd/network/20-vlan.network.d"
         assert output_dir_path.is_dir()
+        artifacts = collector.get_all_artifacts()
+        assert len(artifacts) == 1
+        assert artifacts[0].kind == "networkd.dropin"
+        assert artifacts[0].apply_hints == {
+            "owner": "root",
+            "group": "root",
+            "mode": "0755",
+        }
 
     def test_filters_networkd_entries_only(self, tmp_path: Path, write_file: Any) -> None:
         """Only entries with /etc/systemd/network/ destination are processed."""

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
-import time
 from pathlib import Path
 from typing import Any
 
@@ -53,13 +51,44 @@ class TestHealthHelpers:
             },
         }
 
-        results = health._check_coredns(network, timeout_seconds=1)
+        results = health._check_coredns(
+            network,
+            timeout_seconds=1,
+            include_cluster_consistency=True,
+        )
 
         consistency = [
             result for result in results if result.name == "dns-soa-consistent:abhaile.home.arpa."
         ]
         assert consistency
         assert consistency[0].success is False
+
+    def test_coredns_local_mode_skips_cluster_consistency(self, monkeypatch: Any) -> None:
+        """Local health mode should not emit cluster-level SOA consistency checks."""
+
+        monkeypatch.setattr(health, "_dig", lambda *_args, **_kwargs: "ok")
+        network = {
+            "services": {
+                "coredns-a": {"address": "172.20.20.235/32"},
+                "coredns-b": {"address": "172.20.20.236/32"},
+            },
+            "dns": {
+                "zones": [
+                    {
+                        "name": "abhaile.home.arpa.",
+                        "provider": {"type": "internal"},
+                    }
+                ]
+            },
+        }
+
+        results = health._check_coredns(
+            network,
+            timeout_seconds=1,
+            include_cluster_consistency=False,
+        )
+
+        assert all(not result.name.startswith("dns-soa-consistent:") for result in results)
 
     def test_rootless_failed_units_excludes_only_podman_service(self, monkeypatch: Any) -> None:
         def fake_command(
@@ -199,13 +228,11 @@ class TestHealthHelpers:
             health.HealthResult("rootless-failed-units", False, "machinectl unavailable"),
         ]
 
-    def test_secrets_ready_sentinel_missing_empty_current_and_stale(
+    def test_secrets_ready_sentinel_missing_empty_and_service_gate(
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:
         sentinel = tmp_path / ".ready"
-        uptime = tmp_path / "uptime"
         monkeypatch.setattr(health, "_SECRETS_READY_SENTINEL", sentinel)
-        monkeypatch.setattr(health, "_PROC_UPTIME", uptime)
 
         assert health._check_secrets_ready(["vault-agent"]) == [
             health.HealthResult("secrets-ready-sentinel", False, "missing")
@@ -217,21 +244,21 @@ class TestHealthHelpers:
         ]
 
         sentinel.write_text("ready\n", encoding="utf-8")
-        now = time.time()
-        uptime.write_text("10.0 0.0\n", encoding="utf-8")
-        monkeypatch.setattr(health.time, "time", lambda: now)
-        stale_mtime = now - 20
-        current_mtime = now - 5
+        monkeypatch.setattr(
+            health,
+            "_command",
+            lambda *_args, **_kwargs: _completed("", returncode=0),
+        )
+        healthy = health._check_secrets_ready(["vault-agent"])
+        assert healthy[0].success is True
 
-        sentinel.touch()
-        sentinel.chmod(0o600)
-        os.utime(sentinel, (stale_mtime, stale_mtime))
-        stale = health._check_secrets_ready(["vault-agent"])
-        assert stale[0].success is False
-
-        os.utime(sentinel, (current_mtime, current_mtime))
-        current = health._check_secrets_ready(["vault-agent"])
-        assert current[0].success is True
+        monkeypatch.setattr(
+            health,
+            "_command",
+            lambda *_args, **_kwargs: _completed("inactive", returncode=3),
+        )
+        unhealthy = health._check_secrets_ready(["vault-agent"])
+        assert unhealthy[0].success is False
 
     def test_run_health_audit_reads_config_and_combines_checks(
         self, tmp_path: Path, monkeypatch: Any

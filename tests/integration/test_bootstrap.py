@@ -140,10 +140,9 @@ class TestBootstrapPreflight:
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert "run_as_abhaile" in script
         assert "Python dependencies already installed" in script
-        assert "write_abhaile_entrypoint" in script
-        assert "abhaile.cli.render" in script
-        assert "abhaile.cli.apply" in script
-        assert 'export PYTHONPATH="${REPO_DIR}/src' in script
+        assert "scripts/install-abhaile-entrypoints" in script
+        assert "Synchronizing Abhaile CLI entrypoints" in script
+        assert "write_abhaile_entrypoint" not in script
         assert 'run_as_abhaile "${REPO_DIR}/.venv/bin/abhaile-render"' in script
         assert '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"' in script
 

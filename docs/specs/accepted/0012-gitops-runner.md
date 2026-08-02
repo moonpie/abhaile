@@ -77,6 +77,8 @@ Pipeline steps executed in order:
 1. **Checkout** — update working tree to fetched HEAD (fast-forward only).
 1. **Render** — invoke `.venv/bin/abhaile-render --host $(hostname -s) --output $ABHAILE_OUTPUT`.
 1. **Apply** — invoke `sudo .venv/bin/abhaile-apply --output $ABHAILE_OUTPUT` (live mode, not dry-run).
+1. **Local health gate** — invoke `sudo .venv/bin/abhaile-health --output $ABHAILE_OUTPUT` and fail closed on local-host health regressions.
+1. **Optional cluster audit** — when `ABHAILE_CLUSTER_HEALTH=1`, invoke `sudo .venv/bin/abhaile-health --output $ABHAILE_OUTPUT --cluster` as a report-only cluster consistency audit.
 1. **Record** — on success, write the applied commit SHA to runner state.
 1. **Release lock**.
 
@@ -161,6 +163,11 @@ Failures that trigger rollback:
 
 - `abhaile-render` exits non-zero at the new commit.
 - `abhaile-apply` exits non-zero at the new commit.
+- local `abhaile-health --output ...` exits non-zero at the new commit.
+
+Failures that are recorded but do NOT trigger rollback:
+
+- optional `abhaile-health --output ... --cluster` exits non-zero.
 
 Failures that do NOT trigger rollback (immediate hard failure):
 
@@ -232,6 +239,27 @@ Design choices:
 
 The runner is safe to invoke directly (`scripts/abhaile-runner`) without the
 timer for operator-initiated reconciliation or debugging.
+
+#### Health Scope
+
+The default runner health gate is intentionally local-host scoped. It checks the
+rendered/applied host for:
+
+- required local IP addresses
+- local systemd/rootless unit state
+- Vault readiness gate state
+- failed units and unhealthy containers
+- per-endpoint DNS answers
+
+Cross-node consistency checks, such as verifying that both CoreDNS endpoints
+serve identical SOA answers during staged rollout, are excluded from the local
+gate to avoid rolling back a healthy host just because the cluster is briefly in
+mixed state. Those checks are available through the optional cluster audit path.
+
+`ABHAILE_CLUSTER_HEALTH=1` enables a second, non-fatal invocation of
+`abhaile-health --cluster` after the local gate passes. This is intended for
+operators who want journald-visible cluster consistency results without changing
+rollback behavior.
 
 ### Runner State and Locking
 

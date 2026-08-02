@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import grp
+import os
+import pwd
 import shutil
 from pathlib import Path
 from typing import Any
@@ -196,4 +199,62 @@ class NetworkdExecutor:
             "interface": interface,
             "kinds": sorted(set(kinds or [])),
             "actions": actions,
+        }
+
+    @staticmethod
+    def apply_directory_change(
+        target_path: str,
+        apply_hints: dict[str, object] | None,
+    ) -> dict[str, Any]:
+        """Ensure a networkd drop-in directory exists with expected owner/group/mode."""
+        hints = apply_hints if isinstance(apply_hints, dict) else {}
+        owner = hints.get("owner", "root")
+        group = hints.get("group", "root")
+        mode = hints.get("mode", "0755")
+
+        if not isinstance(owner, str) or not owner:
+            raise ApplyError(f"Invalid owner apply hint for networkd directory: {target_path}")
+        if not isinstance(group, str) or not group:
+            raise ApplyError(f"Invalid group apply hint for networkd directory: {target_path}")
+        if not isinstance(mode, str) or not mode:
+            raise ApplyError(f"Invalid mode apply hint for networkd directory: {target_path}")
+
+        try:
+            mode_value = int(mode, 8)
+        except ValueError as exc:
+            raise ApplyError(
+                f"Invalid directory mode apply hint ({mode}) for {target_path}"
+            ) from exc
+
+        target = Path(target_path)
+        target.mkdir(parents=True, exist_ok=True)
+
+        try:
+            uid = pwd.getpwnam(owner).pw_uid
+            gid = grp.getgrnam(group).gr_gid
+        except KeyError as exc:
+            raise ApplyError(
+                f"Unable to resolve networkd directory owner/group for {target_path}: {owner}:{group}"
+            ) from exc
+
+        try:
+            os.chown(target, uid, gid)
+            target.chmod(mode_value)
+        except OSError as exc:
+            raise ApplyError(
+                f"Failed to enforce networkd directory ownership/mode for {target_path}: {exc}"
+            ) from exc
+
+        return {
+            "target_path": target_path,
+            "owner": owner,
+            "group": group,
+            "mode": mode,
+            "actions": [
+                {
+                    "action": "ensure-directory",
+                    "success": True,
+                    "return_code": 0,
+                }
+            ],
         }

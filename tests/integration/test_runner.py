@@ -94,6 +94,13 @@ def _make_runner_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _write_entrypoint_installer(repo: Path, body: str) -> Path:
+    """Write a test entrypoint installer script into the repository."""
+    path = repo / "scripts" / "install-abhaile-entrypoints"
+    _make_runner_executable(path, body)
+    return path
+
+
 def _prepare_successful_runner(repo: Path) -> dict[str, str]:
     """Prepare fake runner dependencies and a local remote."""
     hostname = subprocess.run(
@@ -122,6 +129,22 @@ def _prepare_successful_runner(repo: Path) -> dict[str, str]:
         venv_bin / "abhaile-health",
         "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
     )
+    _write_entrypoint_installer(
+        repo,
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            "mkdir -p .venv/bin\n"
+            "for cmd in abhaile-render abhaile-apply abhaile-diff abhaile-inventory abhaile-health; do\n"
+            "  :\n"
+            "done\n"
+        ),
+    )
+    (repo / ".gitignore").write_text(".venv/\n")
+    _git(repo, "add", "scripts/install-abhaile-entrypoints", ".gitignore")
+    _git(repo, "commit", "-m", "test entrypoint installer")
+    _git(repo, "push", "-q", "origin", "main")
+
     fake_bin = repo.parent / "fake-bin"
     _make_runner_executable(
         fake_bin / "sudo",
@@ -153,9 +176,16 @@ class TestRunnerExitCodes:
         assert 'readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"' in script
         assert 'readonly ABHAILE_APPLY="${ABHAILE_VENV_BIN}/abhaile-apply"' in script
         assert 'readonly ABHAILE_HEALTH="${ABHAILE_VENV_BIN}/abhaile-health"' in script
+        assert 'readonly ABHAILE_CLUSTER_HEALTH="${ABHAILE_CLUSTER_HEALTH:-0}"' in script
+        assert (
+            'readonly ABHAILE_ENTRYPOINT_INSTALLER="${ABHAILE_ENTRYPOINT_INSTALLER:-${PWD}/scripts/install-abhaile-entrypoints}"'
+            in script
+        )
         assert '"$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT"' in script
         assert 'sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT"' in script
         assert 'sudo "$ABHAILE_HEALTH" --output "$ABHAILE_OUTPUT"' in script
+        assert 'sudo "$ABHAILE_HEALTH" --output "$ABHAILE_OUTPUT" --cluster' in script
+        assert 'record_current_phase "entrypoints"' in script
 
     def test_runner_uses_gitops_deploy_key(self) -> None:
         """Runner selects the non-default Git deploy key for fetches."""
@@ -303,6 +333,208 @@ class TestRunnerExitCodes:
         assert "outcome=success" in summary_text
         assert f"target_sha={target_sha}" in summary_text
         assert not current.exists()
+
+    def test_runner_syncs_entrypoints_before_render(self, runner_repo: Path) -> None:
+        """Runner synchronizes entrypoints before invoking render/apply/health."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "trace.log"
+        env["ENTRYPOINT_TRACE"] = str(trace_file)
+        env["ABHAILE_TRACE"] = str(trace_file)
+
+        _write_entrypoint_installer(
+            runner_repo,
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'echo entrypoints >> "${ENTRYPOINT_TRACE}"\n'
+                "cat > .venv/bin/abhaile-health <<'EOF'\n"
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'echo health >> "${ABHAILE_TRACE}"\n'
+                "exit 0\n"
+                "EOF\n"
+                "chmod 0755 .venv/bin/abhaile-health\n"
+            ),
+        )
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-render",
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'echo render >> "${ABHAILE_TRACE}"\n'
+                'mkdir -p "$4/rendered"\n'
+            ),
+        )
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-apply",
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'echo apply >> "${ABHAILE_TRACE}"\n'
+                "exit 0\n"
+            ),
+        )
+        health_path = Path(env["ABHAILE_VENV_BIN"]) / "abhaile-health"
+        if health_path.exists():
+            health_path.unlink()
+
+        (runner_repo / "new.txt").write_text("new\n")
+        _commit_and_push(runner_repo, "new target")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        lines = trace_file.read_text().strip().splitlines()
+        assert lines[:4] == ["entrypoints", "render", "apply", "health"]
+
+    def test_runner_optional_cluster_health_runs_after_local_health(
+        self, runner_repo: Path
+    ) -> None:
+        """Runner should invoke cluster health after local health when enabled."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "cluster-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        env["ABHAILE_CLUSTER_HEALTH"] = "1"
+
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-health",
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'if [[ "${*}" == *"--cluster"* ]]; then\n'
+                '  echo health-cluster >> "${ABHAILE_TRACE}"\n'
+                "else\n"
+                '  echo health-local >> "${ABHAILE_TRACE}"\n'
+                "fi\n"
+                "exit 0\n"
+            ),
+        )
+
+        (runner_repo / "new.txt").write_text("new\n")
+        _commit_and_push(runner_repo, "cluster health target")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert trace_file.read_text().strip().splitlines()[-2:] == [
+            "health-local",
+            "health-cluster",
+        ]
+
+    def test_runner_cluster_health_failure_is_non_fatal(self, runner_repo: Path) -> None:
+        """Cluster audit failures should not trigger rollback after local health succeeds."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "cluster-failure-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        env["ABHAILE_CLUSTER_HEALTH"] = "1"
+
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-health",
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'if [[ "${*}" == *"--cluster"* ]]; then\n'
+                '  echo health-cluster-fail >> "${ABHAILE_TRACE}"\n'
+                "  exit 9\n"
+                "fi\n"
+                'echo health-local >> "${ABHAILE_TRACE}"\n'
+                "exit 0\n"
+            ),
+        )
+
+        (runner_repo / "new.txt").write_text("new\n")
+        target_sha = _commit_and_push(runner_repo, "cluster health non fatal target")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+        summary = runner_repo.parent / "output" / "runner" / "last-run-summary"
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "non-fatal audit failed" in result.stdout
+        assert _git(runner_repo, "rev-parse", "HEAD") == target_sha
+        assert trace_file.read_text().strip().splitlines()[-2:] == [
+            "health-local",
+            "health-cluster-fail",
+        ]
+        assert "outcome=success" in summary.read_text()
+
+    def test_runner_syncs_entrypoints_during_rollback(self, runner_repo: Path) -> None:
+        """Runner synchronizes entrypoints after rollback checkout before replaying pipeline."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "rollback-trace.log"
+        env["ENTRYPOINT_TRACE"] = str(trace_file)
+        env["ABHAILE_TRACE"] = str(trace_file)
+
+        _write_entrypoint_installer(
+            runner_repo,
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'echo entrypoints:$(git rev-parse --short HEAD) >> "${ENTRYPOINT_TRACE}"\n'
+                "exit 0\n"
+            ),
+        )
+        _git(runner_repo, "add", "scripts/install-abhaile-entrypoints")
+        _git(runner_repo, "commit", "-m", "trace entrypoint sync")
+        _git(runner_repo, "push", "-q", "origin", "main")
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-render",
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'current="$(git rev-parse HEAD)"\n'
+                'if [[ "$current" == "${FAIL_RENDER_SHA:-}" ]]; then\n'
+                "  exit 42\n"
+                "fi\n"
+                'mkdir -p "$4/rendered"\n'
+                "exit 0\n"
+            ),
+        )
+
+        first = _run_runner(runner_repo, env)
+        assert first.returncode == 0, first.stdout + first.stderr
+        trace_file.write_text("")
+
+        (runner_repo / "bad.txt").write_text("bad\n")
+        target_sha = _commit_and_push(runner_repo, "failing target")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+        env["FAIL_RENDER_SHA"] = target_sha
+
+        second = _run_runner(runner_repo, env)
+
+        assert second.returncode == 0, second.stdout + second.stderr
+        lines = trace_file.read_text().strip().splitlines()
+        assert len(lines) >= 2
+        assert lines[0].startswith("entrypoints:")
+        assert lines[1].startswith("entrypoints:")
+        assert lines[0] != lines[1]
+
+    def test_entrypoint_sync_failure_is_pipeline_failure(self, runner_repo: Path) -> None:
+        """Runner reports entrypoint install failures as pipeline failures."""
+        env = _prepare_successful_runner(runner_repo)
+        _write_entrypoint_installer(
+            runner_repo,
+            "#!/usr/bin/env bash\nset -euo pipefail\necho boom >&2\nexit 23\n",
+        )
+        (runner_repo / "new.txt").write_text("new\n")
+        _commit_and_push(runner_repo, "new target")
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        result = _run_runner(runner_repo, env)
+
+        summary = runner_repo.parent / "output" / "runner" / "last-run-summary"
+        assert result.returncode == 1
+        assert "entrypoints" in result.stdout
+        summary_text = summary.read_text()
+        assert "phase=entrypoints" in summary_text
+        assert "outcome=failure" in summary_text
 
     def test_failed_commit_retry_is_suppressed(self, runner_repo: Path) -> None:
         """Runner records a failed target and suppresses identical automatic retries."""
