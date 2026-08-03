@@ -39,6 +39,7 @@ def run_health_audit(
     network = _read_yaml(config_root / "network.yaml")
     manifest = _read_json(output_root / "rendered" / "manifest.json")
     services = _mapped_services(mapping, actual_host)
+    rootless_users = _rootless_users_for_services(config_root, services)
 
     results: list[HealthResult] = []
     results.extend(_check_required_addresses(actual_host, services, config_root, network))
@@ -50,8 +51,19 @@ def run_health_audit(
         )
     )
     results.extend(_check_system_units(manifest, timeout_seconds=timeout_seconds))
-    results.extend(_check_rootless_vault_agent(services, timeout_seconds=timeout_seconds))
-    results.extend(_check_failed_units(timeout_seconds=timeout_seconds))
+    results.extend(
+        _check_rootless_vault_agent(
+            services,
+            config_root=config_root,
+            timeout_seconds=timeout_seconds,
+        )
+    )
+    results.extend(
+        _check_failed_units(
+            timeout_seconds=timeout_seconds,
+            rootless_users=rootless_users,
+        )
+    )
     results.extend(_check_secrets_ready(services))
     results.extend(_check_podman_health(timeout_seconds=timeout_seconds))
     return results
@@ -112,6 +124,34 @@ def _service_yaml(config_root: Path, service: str) -> dict[str, Any]:
     if not path.exists():
         return {}
     return _read_yaml(path)
+
+
+def _service_rootless_user(config_root: Path, service: str) -> str | None:
+    """Return the podman user when a service is configured for rootless execution."""
+    service_data = _service_yaml(config_root, service)
+    podman = service_data.get("podman")
+    if not isinstance(podman, dict):
+        return None
+
+    user = podman.get("user")
+    if not isinstance(user, str) or not user:
+        return None
+
+    rootless_value = podman.get("rootless")
+    if isinstance(rootless_value, bool):
+        return user if rootless_value else None
+
+    return user if user != "root" else None
+
+
+def _rootless_users_for_services(config_root: Path, services: list[str]) -> list[str]:
+    """Return unique rootless runtime users for mapped services."""
+    users = {
+        user
+        for service in services
+        if (user := _service_rootless_user(config_root, service)) is not None
+    }
+    return sorted(users)
 
 
 def _strip_cidr(address: str) -> str:
@@ -240,11 +280,13 @@ def _check_coredns(
             endpoint: _dig(endpoint, zone, "SOA", timeout_seconds=timeout_seconds)
             for endpoint in endpoints
         }
-        unique = {answer for answer in soa_by_endpoint.values() if answer}
+        non_empty_answers = [answer for answer in soa_by_endpoint.values() if answer]
+        all_endpoints_answered = len(non_empty_answers) == len(endpoints)
+        consistent_answers = len(set(non_empty_answers)) == 1 if non_empty_answers else False
         results.append(
             HealthResult(
                 f"dns-soa-consistent:{zone}",
-                len(unique) == 1 and len(soa_by_endpoint) == len(endpoints),
+                all_endpoints_answered and consistent_answers,
                 json.dumps(soa_by_endpoint, sort_keys=True),
             )
         )
@@ -299,18 +341,24 @@ def _check_system_units(
 def _check_rootless_vault_agent(
     services: list[str],
     *,
+    config_root: Path,
     timeout_seconds: int,
 ) -> list[HealthResult]:
     """Check the rootless Vault Agent user unit when mapped to the host."""
     if "vault-agent" not in services:
         return []
+
+    run_as_user = _service_rootless_user(config_root, "vault-agent")
+    if run_as_user is None:
+        return []
+
     try:
         result = _command(
             [
                 "systemctl",
                 "--user",
                 "-M",
-                "abhaile@",
+                f"{run_as_user}@",
                 "is-active",
                 "--quiet",
                 "vault-agent.service",
@@ -328,7 +376,7 @@ def _check_rootless_vault_agent(
     ]
 
 
-def _check_failed_units(*, timeout_seconds: int) -> list[HealthResult]:
+def _check_failed_units(*, timeout_seconds: int, rootless_users: list[str]) -> list[HealthResult]:
     """Check system and rootless failed units without hiding unrelated failures."""
     results: list[HealthResult] = []
     try:
@@ -346,26 +394,37 @@ def _check_failed_units(*, timeout_seconds: int) -> list[HealthResult]:
                 system_failed.stdout.strip() or system_failed.stderr.strip(),
             )
         )
-    try:
-        user_failed = _command(
-            ["systemctl", "--user", "-M", "abhaile@", "--failed", "--plain", "--no-legend"],
-            timeout_seconds=timeout_seconds,
+    for rootless_user in sorted(set(rootless_users)):
+        result_name = f"rootless-failed-units:{rootless_user}"
+        try:
+            user_failed = _command(
+                [
+                    "systemctl",
+                    "--user",
+                    "-M",
+                    f"{rootless_user}@",
+                    "--failed",
+                    "--plain",
+                    "--no-legend",
+                ],
+                timeout_seconds=timeout_seconds,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            results.append(HealthResult(result_name, False, str(exc)))
+            continue
+
+        failed_lines = [
+            line
+            for line in user_failed.stdout.splitlines()
+            if line.strip() and not line.split(None, 1)[0] == "podman.service"
+        ]
+        results.append(
+            HealthResult(
+                result_name,
+                user_failed.returncode == 0 and not failed_lines,
+                "\n".join(failed_lines) or user_failed.stderr.strip(),
+            )
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        results.append(HealthResult("rootless-failed-units", False, str(exc)))
-        return results
-    failed_lines = [
-        line
-        for line in user_failed.stdout.splitlines()
-        if line.strip() and not line.split(None, 1)[0] == "podman.service"
-    ]
-    results.append(
-        HealthResult(
-            "rootless-failed-units",
-            user_failed.returncode == 0 and not failed_lines,
-            "\n".join(failed_lines) or user_failed.stderr.strip(),
-        )
-    )
     return results
 
 

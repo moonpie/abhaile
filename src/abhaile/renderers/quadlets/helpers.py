@@ -114,7 +114,7 @@ def _resolve_quadlet_source_file(service: str, services_root: Path, filename: st
     from abhaile.utils.composition import walk_service_includes
 
     ordered_services = walk_service_includes(service, services_root.parent)
-    for service_name in reversed(ordered_services):
+    for service_name in ordered_services:
         candidate = services_root / service_name / "quadlets" / filename
         if candidate.exists():
             return candidate

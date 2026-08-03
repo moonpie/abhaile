@@ -32,6 +32,18 @@ _SERVICE_KINDS = KIND_FAMILIES["service"]
 _SYSTEMD_VERIFY_KINDS = {"systemd.unit", "systemd.dropin"}
 
 
+def _ensure_owner_bucket(
+    owner_changes: dict[str, dict[str, object]],
+    owner_ref: str,
+    *,
+    factory: dict[str, object],
+) -> dict[str, object]:
+    """Return mutable owner state, creating it with the provided shape."""
+    if owner_ref not in owner_changes:
+        owner_changes[owner_ref] = dict(factory)
+    return owner_changes[owner_ref]
+
+
 def _entry_user_context(entry: dict[str, object]) -> tuple[bool, str | None]:
     """Derive rootless execution context from apply hints."""
     apply_hints = entry.get("apply_hints")
@@ -498,18 +510,20 @@ def _run_vault_owner_actions(
         apply_hints: object,
     ) -> None:
         """Record a vault-owned file change under one owner action."""
-        if owner_ref not in owner_changes:
-            owner_changes[owner_ref] = {
+        owner_state = _ensure_owner_bucket(
+            owner_changes,
+            owner_ref,
+            factory={
                 "run_as_user": VaultExecutor.DEFAULT_USER,
                 "entries": [],
-            }
+            },
+        )
 
         entry = {
             "kind": kind,
             "owner_ref": owner_ref,
             "apply_hints": apply_hints,
         }
-        owner_state = owner_changes[owner_ref]
         current_user = owner_state.get("run_as_user")
         if (
             isinstance(current_user, str)
@@ -605,15 +619,16 @@ def _run_networkd_owner_actions(
         apply_hints: object,
     ) -> None:
         """Record a networkd-owned change for batched convergence."""
-        if owner_ref not in owner_changes:
-            owner_changes[owner_ref] = {
+        state = _ensure_owner_bucket(
+            owner_changes,
+            owner_ref,
+            factory={
                 "phases": set(),
                 "kinds": set(),
                 "entries": [],
                 "directory_writes": [],
-            }
-
-        state = owner_changes[owner_ref]
+            },
+        )
         phases = state.get("phases")
         if isinstance(phases, set):
             phases.add(phase)
@@ -813,14 +828,16 @@ def _run_quadlet_owner_actions(
         apply_hints: object,
     ) -> None:
         """Record a quadlet-owned change while preserving raw apply hints."""
-        if owner_ref not in owner_changes:
-            owner_changes[owner_ref] = {
+        state = _ensure_owner_bucket(
+            owner_changes,
+            owner_ref,
+            factory={
                 "phases": set(),
                 "kinds": set(),
                 "entries": [],
                 "raw_entries": [],
-            }
-        state = owner_changes[owner_ref]
+            },
+        )
         phases = state.get("phases")
         if isinstance(phases, set):
             phases.add(phase)

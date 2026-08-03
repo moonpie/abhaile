@@ -7,7 +7,6 @@ import os
 import grp
 import pwd
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -112,10 +111,6 @@ class TestPlanManifestDrift:
             ],
         )
 
-        monkeypatch.setattr(
-            "abhaile.plan.diff.resolve_directory_metadata",
-            lambda *args, **kwargs: SimpleNamespace(owner="abhaile", group="abhaile", mode="0750"),
-        )
         monkeypatch.setattr(
             "abhaile.plan.diff._live_directory_state",
             lambda path: {

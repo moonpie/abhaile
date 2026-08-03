@@ -63,6 +63,49 @@ class TestHealthHelpers:
         assert consistency
         assert consistency[0].success is False
 
+    def test_coredns_cluster_consistency_requires_all_endpoints_to_answer(
+        self, monkeypatch: Any
+    ) -> None:
+        answers = {
+            ("172.20.20.235", "abhaile.home.arpa.", "SOA"): "ns1 hostmaster 100",
+            ("172.20.20.236", "abhaile.home.arpa.", "SOA"): "",
+            ("172.20.20.235", "abhaile.home.arpa.", "NS"): "ns1\nns2",
+            ("172.20.20.236", "abhaile.home.arpa.", "NS"): "ns1\nns2",
+            ("172.20.20.235", "example.com.", "A"): "93.184.216.34",
+            ("172.20.20.236", "example.com.", "A"): "93.184.216.34",
+        }
+
+        def fake_dig(server: str, qname: str, qtype: str, *, timeout_seconds: int) -> str:
+            return answers.get((server, qname, qtype), "")
+
+        monkeypatch.setattr(health, "_dig", fake_dig)
+        network = {
+            "services": {
+                "coredns-a": {"address": "172.20.20.235/32"},
+                "coredns-b": {"address": "172.20.20.236/32"},
+            },
+            "dns": {
+                "zones": [
+                    {
+                        "name": "abhaile.home.arpa.",
+                        "provider": {"type": "internal"},
+                    }
+                ]
+            },
+        }
+
+        results = health._check_coredns(
+            network,
+            timeout_seconds=1,
+            include_cluster_consistency=True,
+        )
+
+        consistency = [
+            result for result in results if result.name == "dns-soa-consistent:abhaile.home.arpa."
+        ]
+        assert consistency
+        assert consistency[0].success is False
+
     def test_coredns_local_mode_skips_cluster_consistency(self, monkeypatch: Any) -> None:
         """Local health mode should not emit cluster-level SOA consistency checks."""
 
@@ -103,9 +146,11 @@ class TestHealthHelpers:
 
         monkeypatch.setattr(health, "_command", fake_command)
 
-        results = health._check_failed_units(timeout_seconds=1)
+        results = health._check_failed_units(timeout_seconds=1, rootless_users=["abhaile"])
 
-        rootless = [result for result in results if result.name == "rootless-failed-units"][0]
+        rootless = [result for result in results if result.name == "rootless-failed-units:abhaile"][
+            0
+        ]
         assert rootless.success is False
         assert "vault-agent.service" in rootless.detail
         assert "podman.service" not in rootless.detail
@@ -185,9 +230,18 @@ class TestHealthHelpers:
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected command")),
         )
 
-        assert health._check_rootless_vault_agent(["coredns-a"], timeout_seconds=1) == []
+        assert (
+            health._check_rootless_vault_agent(
+                ["coredns-a"],
+                config_root=Path("/tmp"),
+                timeout_seconds=1,
+            )
+            == []
+        )
 
-    def test_rootless_vault_agent_failure_is_reported(self, monkeypatch: Any) -> None:
+    def test_rootless_vault_agent_failure_is_reported(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
         def fake_command(
             argv: list[str],
             *,
@@ -197,8 +251,13 @@ class TestHealthHelpers:
             return _completed("inactive", returncode=3)
 
         monkeypatch.setattr(health, "_command", fake_command)
+        monkeypatch.setattr(health, "_service_rootless_user", lambda *_args, **_kwargs: "abhaile")
 
-        results = health._check_rootless_vault_agent(["vault-agent"], timeout_seconds=1)
+        results = health._check_rootless_vault_agent(
+            ["vault-agent"],
+            config_root=tmp_path,
+            timeout_seconds=1,
+        )
 
         assert results == [
             health.HealthResult("rootless-unit-active:vault-agent.service", False, "inactive")
@@ -221,11 +280,11 @@ class TestHealthHelpers:
 
         monkeypatch.setattr(health, "_command", fake_command)
 
-        results = health._check_failed_units(timeout_seconds=1)
+        results = health._check_failed_units(timeout_seconds=1, rootless_users=["abhaile"])
 
         assert results == [
             health.HealthResult("system-failed-units", False, "systemctl missing"),
-            health.HealthResult("rootless-failed-units", False, "machinectl unavailable"),
+            health.HealthResult("rootless-failed-units:abhaile", False, "machinectl unavailable"),
         ]
 
     def test_secrets_ready_sentinel_missing_empty_and_service_gate(
@@ -306,5 +365,16 @@ class TestHealthHelpers:
             "address:172.20.20.20/32",
             "address:172.20.20.235/32",
             "system-failed-units",
-            "rootless-failed-units",
         }
+
+    def test_rootless_user_resolution_from_service_config(self, tmp_path: Path) -> None:
+        config_root = tmp_path / "config"
+        service_dir = config_root / "services" / "vault-agent"
+        service_dir.mkdir(parents=True)
+        (service_dir / "service.yaml").write_text(
+            "name: vault-agent\n" "podman:\n" "  user: vaultuser\n" "  rootless: true\n",
+            encoding="utf-8",
+        )
+
+        assert health._service_rootless_user(config_root, "vault-agent") == "vaultuser"
+        assert health._rootless_users_for_services(config_root, ["vault-agent"]) == ["vaultuser"]
