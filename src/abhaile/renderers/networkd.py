@@ -8,6 +8,7 @@ from typing import Any
 
 from jinja2 import TemplateError, TemplateNotFound, UndefinedError
 
+from abhaile.models.directory import directory_metadata_to_hints, resolve_directory_metadata
 from abhaile.utils.errors import RenderError
 from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.config import read_yaml
@@ -32,11 +33,9 @@ def _annotate_networkd_entries_with_apply_hints(
             and destination.rstrip("/").endswith(".network.d")
         ):
             merged = dict(entry)
-            merged["_abhaile_apply_hints"] = {
-                "owner": "root",
-                "group": "root",
-                "mode": "0755",
-            }
+            merged["_abhaile_apply_hints"] = directory_metadata_to_hints(
+                resolve_directory_metadata("networkd.dropin")
+            )
             annotated.append(merged)
             continue
         annotated.append(entry)

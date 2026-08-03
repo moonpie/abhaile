@@ -11,6 +11,7 @@ from abhaile.renderers.config import (
     render_config_entries,
     resolve_config_entry_variables,
 )
+from abhaile.models.directory import directory_metadata_to_hints, resolve_directory_metadata
 from abhaile.renderers.metadata import classify_service_artifact, classify_systemd_artifact
 from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.composition import walk_service_includes
@@ -137,8 +138,9 @@ def _collect_service_composition_entries(
     return entries
 
 
-def _service_config_apply_hints(service: str, service_data: dict[str, Any]) -> dict[str, Any]:
+def _service_config_apply_hints(_service: str, service_data: dict[str, Any]) -> dict[str, Any]:
     """Build apply hints for service-owned config artifacts."""
+    _ = _service
     hints: dict[str, Any] = {}
 
     apply_block = service_data.get("apply")
@@ -205,10 +207,6 @@ def _service_directory_apply_hints(service_data: dict[str, Any]) -> dict[str, An
         if isinstance(podman_user, str) and podman_user:
             owner = podman_user
 
-    group = owner if owner != "root" else "root"
-
-    return {
-        "owner": owner,
-        "group": group,
-        "mode": "0750",
-    }
+    return directory_metadata_to_hints(
+        resolve_directory_metadata("service.directory", {"owner": owner})
+    )

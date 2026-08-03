@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import grp
+import pwd
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -42,8 +46,237 @@ def _sha_of(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
+def _directory_manifest_entry(
+    target_path: Path,
+    *,
+    render_path: str,
+    owner_ref: str,
+    owner: str,
+    group: str,
+    mode: str,
+    kind: str = "service.directory",
+) -> dict[str, object]:
+    return {
+        "render_path": render_path,
+        "target_path": target_path.as_posix(),
+        "kind": kind,
+        "owner_ref": owner_ref,
+        "sha256": _sha_of(""),
+        "size": 0,
+        "is_directory": True,
+        "apply_hints": {
+            "owner": owner,
+            "group": group,
+            "mode": mode,
+        },
+    }
+
+
 class TestPlanManifestDrift:
     """Tests for plan_manifest_drift()."""
+
+    def test_directory_entry_is_converged_when_metadata_matches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Matching directory metadata should not schedule a write."""
+        target = tmp_path / "target" / "srv" / "vault" / "agent" / "out"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+
+        _write_manifest(
+            desired_manifest,
+            "deimos",
+            [
+                _directory_manifest_entry(
+                    target,
+                    render_path="services/vault/srv/vault/agent/out",
+                    owner_ref="service:vault",
+                    owner="abhaile",
+                    group="abhaile",
+                    mode="0750",
+                )
+            ],
+        )
+        _write_manifest(
+            applied_manifest,
+            "deimos",
+            [
+                _directory_manifest_entry(
+                    target,
+                    render_path="services/vault/srv/vault/agent/out",
+                    owner_ref="service:vault",
+                    owner="abhaile",
+                    group="abhaile",
+                    mode="0750",
+                )
+            ],
+        )
+
+        monkeypatch.setattr(
+            "abhaile.plan.diff.resolve_directory_metadata",
+            lambda *args, **kwargs: SimpleNamespace(owner="abhaile", group="abhaile", mode="0750"),
+        )
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {
+                "state": "directory",
+                "live_metadata": {"owner": "abhaile", "group": "abhaile", "mode": "0750"},
+            },
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 0
+        assert plan["summary"]["changed"] == 0
+        assert plan["sync"]["writes"] == []
+
+    def test_directory_entry_missing_reports_missing_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing directory targets should schedule a write with missing reason."""
+        target = tmp_path / "target" / "srv" / "vault" / "agent" / "run"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/vault/srv/vault/agent/run",
+            owner_ref="service:vault",
+            owner="abhaile",
+            group="abhaile",
+            mode="0750",
+        )
+        _write_manifest(desired_manifest, "deimos", [entry])
+        _write_manifest(applied_manifest, "deimos", [entry])
+
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {"state": "missing"},
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 1
+        assert plan["sync"]["writes"][0]["reason"] == "missing"
+        assert plan["sync"]["writes"][0]["desired_metadata"] == {
+            "owner": "abhaile",
+            "group": "abhaile",
+            "mode": "0750",
+        }
+
+    @pytest.mark.parametrize("field", ["owner", "group", "mode"])
+    def test_directory_entry_metadata_drift_reports_change(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        field: str,
+    ) -> None:
+        """Wrong directory metadata should be reported as metadata drift."""
+        target = tmp_path / "target" / "srv" / "vault" / "agent" / "templates"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/vault/srv/vault/agent/templates",
+            owner_ref="service:vault",
+            owner="abhaile",
+            group="abhaile",
+            mode="0750",
+        )
+        _write_manifest(desired_manifest, "deimos", [entry])
+        _write_manifest(applied_manifest, "deimos", [entry])
+
+        live_metadata = {"owner": "abhaile", "group": "abhaile", "mode": "0750"}
+        live_metadata[field] = "root" if field != "mode" else "0777"
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {"state": "directory", "live_metadata": live_metadata},
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 1
+        assert plan["sync"]["writes"][0]["reason"] == "metadata-drift"
+        assert plan["sync"]["writes"][0]["desired_metadata"] == {
+            "owner": "abhaile",
+            "group": "abhaile",
+            "mode": "0750",
+        }
+        assert plan["sync"]["writes"][0]["live_metadata"] == live_metadata
+
+    @pytest.mark.parametrize("entry_type", ["file", "symlink"])
+    def test_directory_entry_type_conflict_reports_change(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        entry_type: str,
+    ) -> None:
+        """Non-directory live targets should be reported as type conflicts."""
+        target = tmp_path / "target" / "etc" / "systemd" / "network" / "21-ipvlan-l2.network.d"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+
+        entry = _directory_manifest_entry(
+            target,
+            render_path="hosts/phobos/etc/systemd/network/21-ipvlan-l2.network.d",
+            owner_ref="host:phobos",
+            owner="root",
+            group="root",
+            mode="0755",
+            kind="networkd.dropin",
+        )
+        _write_manifest(desired_manifest, "phobos", [entry])
+        _write_manifest(applied_manifest, "phobos", [entry])
+
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {
+                "state": "type-conflict",
+                "live_metadata": {
+                    "owner": "root",
+                    "group": "root",
+                    "mode": "0644",
+                    "type": entry_type,
+                },
+            },
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 1
+        assert plan["sync"]["writes"][0]["reason"] == "type-conflict"
+        assert plan["sync"]["writes"][0]["live_metadata"]["type"] == entry_type
+
+    def test_directory_contents_do_not_affect_convergence(self, tmp_path: Path) -> None:
+        """Nested files inside a managed directory should not trigger drift."""
+        target = tmp_path / "target" / "srv" / "vault" / "agent" / "templates"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "runtime.txt").write_text("runtime content\n")
+        target.chmod(0o750)
+
+        uid = os.getuid()
+        gid = os.getgid()
+        owner = pwd.getpwuid(uid).pw_name
+        group = grp.getgrgid(gid).gr_name
+
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/vault/srv/vault/agent/templates",
+            owner_ref="service:vault",
+            owner=owner,
+            group=group,
+            mode="0750",
+        )
+        _write_manifest(desired_manifest, "deimos", [entry])
+        _write_manifest(applied_manifest, "deimos", [entry])
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 0
+        assert plan["summary"]["changed"] == 0
 
     def test_missing_applied_manifest_treated_as_empty(self, tmp_path: Path) -> None:
         """Missing applied manifest should result in added+write actions."""

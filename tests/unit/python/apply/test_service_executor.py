@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -220,3 +221,24 @@ class TestServiceConfigExecutor:
                 target.as_posix(),
                 {"owner": "root", "group": "root", "mode": "not-octal"},
             )
+
+    def test_apply_directory_change_uses_shared_resolver(self, mocker: Any, tmp_path: Path) -> None:
+        """Service directory enforcement should respect the shared metadata resolver."""
+        mock_uid = mocker.Mock(pw_uid=1001)
+        mock_gid = mocker.Mock(gr_gid=1001)
+        mocker.patch("abhaile.apply.service.pwd.getpwnam", return_value=mock_uid)
+        mocker.patch("abhaile.apply.service.grp.getgrnam", return_value=mock_gid)
+        mock_chown = mocker.patch("abhaile.apply.service.os.chown")
+        mocker.patch(
+            "abhaile.apply.service.resolve_directory_metadata",
+            return_value=SimpleNamespace(owner="abhaile", group="abhaile", mode="0711"),
+        )
+
+        target = tmp_path / "srv" / "example" / "config"
+        summary = ServiceConfigExecutor.apply_directory_change(target.as_posix(), None)
+
+        assert summary["owner"] == "abhaile"
+        assert summary["group"] == "abhaile"
+        assert summary["mode"] == "0711"
+        mock_chown.assert_called_once_with(target, 1001, 1001)
+        assert target.stat().st_mode & 0o777 == 0o711

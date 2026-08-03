@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from abhaile.apply.actions import ExecutionResult, run_command
+from abhaile.models.directory import resolve_directory_metadata
 from abhaile.utils.errors import ApplyError
 
 
@@ -208,9 +209,16 @@ class NetworkdExecutor:
     ) -> dict[str, Any]:
         """Ensure a networkd drop-in directory exists with expected owner/group/mode."""
         hints = apply_hints if isinstance(apply_hints, dict) else {}
-        owner = hints.get("owner", "root")
-        group = hints.get("group", "root")
-        mode = hints.get("mode", "0755")
+        try:
+            metadata = resolve_directory_metadata("networkd.dropin", hints)
+        except ValueError as exc:
+            raise ApplyError(
+                f"Invalid networkd directory metadata apply hint for {target_path}: {exc}"
+            ) from exc
+
+        owner = metadata.owner
+        group = metadata.group
+        mode = metadata.mode
 
         if not isinstance(owner, str) or not owner:
             raise ApplyError(f"Invalid owner apply hint for networkd directory: {target_path}")

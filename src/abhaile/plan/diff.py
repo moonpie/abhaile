@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import grp
+import pwd
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypedDict
 
+from abhaile.models.directory import resolve_directory_metadata
 from abhaile.utils.hashing import sha256_file
 from abhaile.utils.errors import DiffError
 
@@ -54,6 +58,7 @@ class PlanResult(TypedDict):
 
 
 NON_REGULAR_LIVE_FILE = "__NON_REGULAR__"
+NON_DIRECTORY_LIVE_FILE = "__NON_DIRECTORY__"
 
 
 @dataclass(frozen=True)
@@ -182,6 +187,157 @@ def _live_file_sha256(target_path: str) -> str | None:
         return sha256_file(path)
     except OSError as exc:
         raise DiffError(f"Failed to hash live file: {target_path} ({exc})") from exc
+
+
+def _resolve_uid(uid: int) -> str:
+    """Resolve a uid to a user name, falling back to the numeric id."""
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return str(uid)
+
+
+def _resolve_gid(gid: int) -> str:
+    """Resolve a gid to a group name, falling back to the numeric id."""
+    try:
+        return grp.getgrgid(gid).gr_name
+    except KeyError:
+        return str(gid)
+
+
+def _live_directory_state(target_path: str) -> dict[str, Any]:
+    """Inspect live directory state without recursing into contents."""
+    path = Path(target_path)
+    try:
+        st = path.lstat()
+    except FileNotFoundError:
+        return {"state": "missing"}
+    except OSError as exc:
+        raise DiffError(f"Failed to inspect live directory: {target_path} ({exc})") from exc
+
+    live_metadata: dict[str, Any] = {
+        "owner": _resolve_uid(st.st_uid),
+        "group": _resolve_gid(st.st_gid),
+        "mode": f"{stat.S_IMODE(st.st_mode):04o}",
+    }
+
+    if stat.S_ISDIR(st.st_mode):
+        return {"state": "directory", "live_metadata": live_metadata}
+
+    if stat.S_ISLNK(st.st_mode):
+        live_metadata["type"] = "symlink"
+    elif stat.S_ISREG(st.st_mode):
+        live_metadata["type"] = "file"
+    else:
+        live_metadata["type"] = "other"
+
+    return {"state": "type-conflict", "live_metadata": live_metadata}
+
+
+def _desired_directory_metadata(desired_entry: dict[str, Any]) -> dict[str, str]:
+    """Resolve desired directory metadata from the manifest entry."""
+    metadata = resolve_directory_metadata(
+        desired_entry["kind"],
+        desired_entry.get("apply_hints"),
+    )
+    return {
+        "owner": metadata.owner,
+        "group": metadata.group,
+        "mode": metadata.mode,
+    }
+
+
+def _directory_write_action(
+    desired_entry: dict[str, Any],
+    live_state: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Return write and changed entries for a desired directory artifact."""
+    desired_metadata = _desired_directory_metadata(desired_entry)
+    state = live_state.get("state")
+
+    if state == "missing":
+        write = {
+            "target_path": desired_entry["target_path"],
+            "render_path": desired_entry["render_path"],
+            "kind": desired_entry["kind"],
+            "owner_ref": desired_entry["owner_ref"],
+            "apply_hints": desired_entry.get("apply_hints"),
+            "is_directory": True,
+            "desired_sha256": desired_entry["sha256"],
+            "live_sha256": None,
+            "reason": "missing",
+            "desired_metadata": desired_metadata,
+            "live_metadata": None,
+        }
+        change = {
+            "target_path": desired_entry["target_path"],
+            "render_path": desired_entry["render_path"],
+            "kind": desired_entry["kind"],
+            "owner_ref": desired_entry["owner_ref"],
+            "reason": "missing",
+            "is_directory": True,
+            "desired_metadata": desired_metadata,
+            "live_metadata": None,
+        }
+        return write, change
+
+    live_metadata = live_state.get("live_metadata")
+    if not isinstance(live_metadata, dict):
+        raise DiffError(f"Invalid live directory metadata: {desired_entry['target_path']}")
+
+    if state != "directory":
+        change = {
+            "target_path": desired_entry["target_path"],
+            "render_path": desired_entry["render_path"],
+            "kind": desired_entry["kind"],
+            "owner_ref": desired_entry["owner_ref"],
+            "reason": "type-conflict",
+            "is_directory": True,
+            "desired_metadata": desired_metadata,
+            "live_metadata": live_metadata,
+        }
+        write = {
+            "target_path": desired_entry["target_path"],
+            "render_path": desired_entry["render_path"],
+            "kind": desired_entry["kind"],
+            "owner_ref": desired_entry["owner_ref"],
+            "apply_hints": desired_entry.get("apply_hints"),
+            "is_directory": True,
+            "desired_sha256": desired_entry["sha256"],
+            "live_sha256": NON_DIRECTORY_LIVE_FILE,
+            "reason": "type-conflict",
+            "desired_metadata": desired_metadata,
+            "live_metadata": live_metadata,
+        }
+        return write, change
+
+    if live_metadata != desired_metadata:
+        change = {
+            "target_path": desired_entry["target_path"],
+            "render_path": desired_entry["render_path"],
+            "kind": desired_entry["kind"],
+            "owner_ref": desired_entry["owner_ref"],
+            "reason": "metadata-drift",
+            "is_directory": True,
+            "desired_metadata": desired_metadata,
+            "live_metadata": live_metadata,
+        }
+        write = {
+            "target_path": desired_entry["target_path"],
+            "render_path": desired_entry["render_path"],
+            "kind": desired_entry["kind"],
+            "owner_ref": desired_entry["owner_ref"],
+            "apply_hints": desired_entry.get("apply_hints"),
+            "is_directory": True,
+            "desired_sha256": desired_entry["sha256"],
+            "live_sha256": NON_DIRECTORY_LIVE_FILE,
+            "reason": "metadata-drift",
+            "desired_metadata": desired_metadata,
+            "live_metadata": live_metadata,
+        }
+        return write, change
+
+    return None, None
 
 
 def _index_entries(entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -526,24 +682,8 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
 
     added_targets = sorted(desired_targets - applied_targets)
     removed_targets = sorted(applied_targets - desired_targets)
-    common_targets = sorted(desired_targets & applied_targets)
-
-    changed_targets = [
-        target
-        for target in common_targets
-        if desired_by_target[target]["sha256"] != applied_by_target[target]["sha256"]
-    ]
-
     added = [desired_by_target[target] for target in added_targets]
-    changed = [
-        {
-            "target_path": target,
-            "render_path": desired_by_target[target]["render_path"],
-            "desired_sha256": desired_by_target[target]["sha256"],
-            "applied_sha256": applied_by_target[target]["sha256"],
-        }
-        for target in changed_targets
-    ]
+    changed: list[dict[str, Any]] = []
     removed: list[dict[str, Any]] = []
     removals_safe: list[dict[str, Any]] = []
     removals_drifted: list[dict[str, Any]] = []
@@ -576,6 +716,17 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
     writes: list[dict[str, Any]] = []
     for target in sorted(desired_targets):
         desired_entry = desired_by_target[target]
+        if desired_entry.get("is_directory") is True:
+            write, change = _directory_write_action(
+                desired_entry,
+                _live_directory_state(target),
+            )
+            if write is not None:
+                writes.append(write)
+            if change is not None and target in applied_by_target:
+                changed.append(change)
+            continue
+
         live_sha = _live_file_sha256(target)
         if live_sha == desired_entry["sha256"]:
             continue

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from abhaile.apply.actions import run_command, run_systemctl_command
+from abhaile.models.directory import resolve_directory_metadata
 from abhaile.utils.errors import ApplyError
 
 
@@ -114,16 +115,16 @@ class ServiceConfigExecutor:
     ) -> dict[str, Any]:
         """Ensure a service.directory target exists with expected owner/group/mode."""
         hints = apply_hints if isinstance(apply_hints, dict) else {}
-        owner = hints.get("owner", "root")
-        group = hints.get("group", "root")
-        mode = hints.get("mode", "0750")
+        try:
+            metadata = resolve_directory_metadata("service.directory", hints)
+        except ValueError as exc:
+            raise ApplyError(
+                f"Invalid service directory metadata apply hint for {target_path}: {exc}"
+            ) from exc
 
-        if not isinstance(owner, str) or not owner:
-            raise ApplyError(f"Invalid owner apply hint for service directory: {target_path}")
-        if not isinstance(group, str) or not group:
-            raise ApplyError(f"Invalid group apply hint for service directory: {target_path}")
-        if not isinstance(mode, str) or not mode:
-            raise ApplyError(f"Invalid mode apply hint for service directory: {target_path}")
+        owner = metadata.owner
+        group = metadata.group
+        mode = metadata.mode
 
         try:
             mode_value = int(mode, 8)
