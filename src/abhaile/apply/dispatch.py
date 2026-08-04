@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,10 @@ from abhaile.apply.service import ServiceConfigExecutor
 from abhaile.apply.systemd import SystemdExecutor
 from abhaile.apply.users import UserManagementExecutor
 from abhaile.apply.vault import VaultExecutor
+from abhaile.apply.validation_scope import (
+    canonical_validation_target_path,
+    validation_context_for_entry,
+)
 from abhaile.models.kinds import KIND_FAMILIES
 from abhaile.plan.diff import PlanResult
 from abhaile.utils.errors import ApplyError
@@ -71,11 +78,204 @@ def _resolve_parent_unit_name(target_path: str, owner_ref: str) -> str:
     raise ApplyError(f"Unable to determine parent unit for dropin target: {target_path}")
 
 
+def _stage_validation_entry(
+    rendered_dir: Path,
+    temp_root: Path,
+    *,
+    kind: str,
+    render_path: str,
+    target_path: str,
+    context: tuple[bool, str | None],
+) -> None:
+    """Copy one desired artifact into isolated validation root."""
+    source = resolve_rendered_source(rendered_dir, render_path)
+    canonical_target = canonical_validation_target_path(
+        kind=kind,
+        target_path=target_path,
+        context=context,
+    )
+    staged = temp_root / canonical_target.lstrip("/")
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, staged)
+
+
+def _systemd_verify_actions(writes: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Select write actions that need isolated systemd verification."""
+    verify_actions: list[dict[str, object]] = []
+    for action in writes:
+        kind = action.get("kind")
+        render_path = action.get("render_path")
+        target_path = action.get("target_path")
+        if kind not in _SYSTEMD_VERIFY_KINDS:
+            continue
+        if (
+            not isinstance(kind, str)
+            or not isinstance(render_path, str)
+            or not isinstance(target_path, str)
+        ):
+            raise ApplyError("Validation action missing render_path/target_path")
+        verify_actions.append(action)
+    return verify_actions
+
+
+def _stage_validation_contexts(
+    rendered_dir: Path,
+    temp_root: Path,
+    staging_entries: list[dict[str, object]],
+) -> dict[tuple[bool, str | None], Path]:
+    """Build isolated desired-state roots grouped by systemd execution context."""
+    context_roots: dict[tuple[bool, str | None], Path] = {}
+    for entry in staging_entries:
+        kind = entry.get("kind")
+        render_path = entry.get("render_path")
+        target_path = entry.get("target_path")
+        if (
+            not isinstance(kind, str)
+            or not isinstance(render_path, str)
+            or not isinstance(target_path, str)
+        ):
+            continue
+        context = validation_context_for_entry(
+            kind=kind,
+            target_path=target_path,
+            apply_hints=entry.get("apply_hints"),
+        )
+        if context is None:
+            continue
+        context_root = context_roots.setdefault(
+            context,
+            temp_root
+            / ("rootless-" + (context[1] or "unknown") if context[0] else "rootful-system"),
+        )
+        _stage_validation_entry(
+            rendered_dir,
+            context_root,
+            kind=kind,
+            render_path=render_path,
+            target_path=target_path,
+            context=context,
+        )
+    return context_roots
+
+
+def _systemd_verify_invocation(
+    *,
+    kind: str,
+    target_path: str,
+    owner_ref: object,
+    context: tuple[bool, str | None],
+    context_root: Path,
+) -> tuple[list[str], dict[str, str] | None]:
+    """Build argv/env for one isolated systemd-analyze verify call."""
+    verify_target = canonical_validation_target_path(
+        kind=kind,
+        target_path=target_path,
+        context=context,
+    )
+    if kind == "systemd.dropin":
+        if not isinstance(owner_ref, str):
+            raise ApplyError("Validation action missing owner_ref for dropin")
+        parent_name = _resolve_parent_unit_name(verify_target, owner_ref)
+        verify_target = (
+            f"/home/{context[1]}/.config/systemd/user/{parent_name}"
+            if context[0]
+            else f"/etc/systemd/system/{parent_name}"
+        )
+
+    argv = ["systemd-analyze"]
+    if context[0]:
+        argv.append("--user")
+    argv.extend(["verify", f"--root={context_root.as_posix()}", verify_target])
+
+    if not context[0] or not context[1]:
+        return argv, None
+
+    home = f"/home/{context[1]}"
+    return argv, {**os.environ, "HOME": home, "XDG_CONFIG_HOME": f"{home}/.config"}
+
+
+def _run_systemd_verify_actions(
+    verify_actions: list[dict[str, object]],
+    context_roots: dict[tuple[bool, str | None], Path],
+) -> dict[str, dict[str, object]]:
+    """Execute isolated systemd verification actions and fold results by target."""
+    results: dict[str, dict[str, object]] = {}
+    for action in verify_actions:
+        kind = action.get("kind")
+        target_path = action.get("target_path")
+        if not isinstance(kind, str) or not isinstance(target_path, str):
+            raise ApplyError("Validation action missing target_path")
+        context = validation_context_for_entry(
+            kind=kind,
+            target_path=target_path,
+            apply_hints=action.get("apply_hints"),
+        )
+        if context is None:
+            raise ApplyError(f"Unsupported systemd validation target path: {target_path}")
+
+        context_root = context_roots.get(context)
+        if context_root is None:
+            raise ApplyError(f"Missing isolated validation context for target path: {target_path}")
+
+        argv, env = _systemd_verify_invocation(
+            kind=kind,
+            target_path=target_path,
+            owner_ref=action.get("owner_ref"),
+            context=context,
+            context_root=context_root,
+        )
+        if env is None:
+            validation = run_validation(
+                argv,
+                action_id=f"validate:{target_path}",
+                is_blocker=True,
+            )
+        else:
+            validation = run_validation(
+                argv,
+                action_id=f"validate:{target_path}",
+                is_blocker=True,
+                env=env,
+            )
+        results[target_path] = {
+            "target_path": target_path,
+            "kind": kind,
+            "success": validation.success,
+            "return_code": validation.return_code,
+        }
+    return results
+
+
+def _run_isolated_systemd_validations(
+    rendered_dir: Path,
+    writes: list[dict[str, object]],
+    *,
+    desired_entries: list[dict[str, object]] | None = None,
+) -> dict[str, dict[str, object]]:
+    """Run `systemd-analyze verify` in isolated desired-state roots."""
+    verify_actions = _systemd_verify_actions(writes)
+    if not verify_actions:
+        return {}
+
+    staging_entries = desired_entries if isinstance(desired_entries, list) else writes
+    with tempfile.TemporaryDirectory(prefix="abhaile-validate-systemd-") as td:
+        context_roots = _stage_validation_contexts(rendered_dir, Path(td), staging_entries)
+        return _run_systemd_verify_actions(verify_actions, context_roots)
+
+
 def _run_dry_run_validations(
-    rendered_dir: Path, writes: list[dict[str, object]]
+    rendered_dir: Path,
+    writes: list[dict[str, object]],
+    *,
+    desired_entries: list[dict[str, object]] | None = None,
 ) -> list[dict[str, object]]:
     """Execute read-only validations for changed systemd-family artifacts."""
     results: list[dict[str, object]] = []
+    systemd_results = _run_isolated_systemd_validations(
+        rendered_dir,
+        writes,
+        desired_entries=desired_entries,
+    )
 
     for action in writes:
         kind = action.get("kind")
@@ -185,20 +385,10 @@ def _run_dry_run_validations(
             raise ApplyError("Validation action missing render_path/target_path")
 
         if kind in _SYSTEMD_VERIFY_KINDS:
-            source = resolve_rendered_source(rendered_dir, render_path)
-            validation = run_validation(
-                ["systemd-analyze", "verify", source.as_posix()],
-                action_id=f"validate:{target_path}",
-                is_blocker=True,
-            )
-            results.append(
-                {
-                    "target_path": target_path,
-                    "kind": kind,
-                    "success": validation.success,
-                    "return_code": validation.return_code,
-                }
-            )
+            payload_opt = systemd_results.get(target_path)
+            if payload_opt is None:
+                raise ApplyError(f"Missing isolated validation result for {target_path}")
+            results.append(payload_opt)
 
     return results
 
@@ -338,6 +528,7 @@ def _run_coredns_owner_actions(
     removals_to_apply: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     """Run phase 7.4 CoreDNS actions for changed entries."""
+    build_inputs_changed = CorednsExecutor.build_inputs_changed(writes)
     config_changed = False
     zone_writes: list[dict[str, object]] = []
     zone_removals: list[dict[str, object]] = []
@@ -374,6 +565,7 @@ def _run_coredns_owner_actions(
             config_changed=config_changed,
             zone_writes=zone_writes,
             zone_removals=zone_removals,
+            build_inputs_changed=build_inputs_changed,
         )
         owner_results.append(
             {
@@ -600,106 +792,86 @@ def _run_vault_owner_actions(
     return owner_results
 
 
-def _run_networkd_owner_actions(
+def _record_networkd_change(
+    owner_changes: dict[str, dict[str, object]],
+    *,
+    phase: str,
+    kind: str,
+    owner_ref: str,
+    target_path: str,
+    is_directory: bool,
+    apply_hints: object,
+) -> None:
+    """Record a networkd-owned change for batched convergence."""
+    state = _ensure_owner_bucket(
+        owner_changes,
+        owner_ref,
+        factory={"phases": set(), "kinds": set(), "entries": [], "directory_writes": []},
+    )
+    phases = state.get("phases")
+    if isinstance(phases, set):
+        phases.add(phase)
+    kinds = state.get("kinds")
+    if isinstance(kinds, set):
+        kinds.add(kind)
+    entries = state.get("entries")
+    if isinstance(entries, list):
+        entries.append({"phase": phase, "kind": kind, "target_path": target_path})
+    if phase == "write" and is_directory:
+        directory_writes = state.get("directory_writes")
+        if isinstance(directory_writes, list):
+            directory_writes.append({"target_path": target_path, "apply_hints": apply_hints})
+
+
+def _collect_networkd_owner_changes(
     writes: list[dict[str, object]],
     removals_to_apply: list[dict[str, object]],
-    *,
-    netdev_delete_order: list[str] | None = None,
-) -> list[dict[str, object]]:
-    """Run phase 7.7 systemd-networkd actions for changed entries."""
+) -> dict[str, dict[str, object]]:
+    """Classify networkd writes/removals into owner convergence buckets."""
     owner_changes: dict[str, dict[str, object]] = {}
-
-    def _record_change(
-        *,
-        phase: str,
-        kind: str,
-        owner_ref: str,
-        target_path: str,
-        is_directory: bool,
-        apply_hints: object,
-    ) -> None:
-        """Record a networkd-owned change for batched convergence."""
-        state = _ensure_owner_bucket(
-            owner_changes,
-            owner_ref,
-            factory={
-                "phases": set(),
-                "kinds": set(),
-                "entries": [],
-                "directory_writes": [],
-            },
-        )
-        phases = state.get("phases")
-        if isinstance(phases, set):
-            phases.add(phase)
-        kinds = state.get("kinds")
-        if isinstance(kinds, set):
-            kinds.add(kind)
-        entries = state.get("entries")
-        if isinstance(entries, list):
-            entries.append(
-                {
-                    "phase": phase,
-                    "kind": kind,
-                    "target_path": target_path,
-                }
+    for phase, actions in (("write", writes), ("remove", removals_to_apply)):
+        for action in actions:
+            kind = action.get("kind") if isinstance(action, dict) else None
+            owner_ref = action.get("owner_ref") if isinstance(action, dict) else None
+            target_path = action.get("target_path") if isinstance(action, dict) else None
+            if not isinstance(kind, str) or kind not in _NETWORKD_KINDS:
+                continue
+            if not isinstance(owner_ref, str) or not isinstance(target_path, str):
+                raise ApplyError(f"Networkd {phase} action missing owner_ref/target_path")
+            _record_networkd_change(
+                owner_changes,
+                phase=phase,
+                kind=kind,
+                owner_ref=owner_ref,
+                target_path=target_path,
+                is_directory=bool(action.get("is_directory")),
+                apply_hints=action.get("apply_hints"),
             )
-        if phase == "write" and is_directory:
-            directory_writes = state.get("directory_writes")
-            if isinstance(directory_writes, list):
-                directory_writes.append(
-                    {
-                        "target_path": target_path,
-                        "apply_hints": apply_hints,
-                    }
-                )
+    return owner_changes
 
-    for action in writes:
-        kind = action.get("kind")
-        owner_ref = action.get("owner_ref")
-        target_path = action.get("target_path")
-        if not isinstance(kind, str) or kind not in _NETWORKD_KINDS:
-            continue
-        if not isinstance(owner_ref, str) or not isinstance(target_path, str):
-            raise ApplyError("Networkd write action missing owner_ref/target_path")
-        _record_change(
-            phase="write",
-            kind=kind,
-            owner_ref=owner_ref,
-            target_path=target_path,
-            is_directory=bool(action.get("is_directory")),
-            apply_hints=action.get("apply_hints"),
-        )
 
-    for removal in removals_to_apply:
-        kind = removal.get("kind") if isinstance(removal, dict) else None
-        owner_ref = removal.get("owner_ref") if isinstance(removal, dict) else None
-        target_path = removal.get("target_path") if isinstance(removal, dict) else None
-        if not isinstance(kind, str) or kind not in _NETWORKD_KINDS:
-            continue
-        if not isinstance(owner_ref, str) or not isinstance(target_path, str):
-            raise ApplyError("Networkd removal action missing owner_ref/target_path")
-        _record_change(
-            phase="remove",
-            kind=kind,
-            owner_ref=owner_ref,
-            target_path=target_path,
-            is_directory=bool(removal.get("is_directory")),
-            apply_hints=removal.get("apply_hints"),
-        )
-
-    remove_only_netdev_owners: set[str] = set()
+def _networkd_remove_only_netdev_owners(
+    owner_changes: dict[str, dict[str, object]],
+) -> set[str]:
+    """Return owners that only remove a networkd.netdev artifact."""
+    owners: set[str] = set()
     for owner_ref, state in owner_changes.items():
         phases = state.get("phases")
         kinds = state.get("kinds")
-        if not isinstance(phases, set) or not isinstance(kinds, set):
-            continue
-        if phases == {"remove"} and kinds == {"networkd.netdev"}:
-            remove_only_netdev_owners.add(owner_ref)
+        if isinstance(phases, set) and isinstance(kinds, set):
+            if phases == {"remove"} and kinds == {"networkd.netdev"}:
+                owners.add(owner_ref)
+    return owners
 
-    ordered_owner_refs: list[str] = []
+
+def _ordered_networkd_owner_refs(
+    owner_changes: dict[str, dict[str, object]],
+    remove_only_netdev_owners: set[str],
+    netdev_delete_order: list[str] | None,
+) -> list[str]:
+    """Order owner convergence, honoring explicit netdev delete order first."""
+    ordered: list[str] = []
     seen: set[str] = set()
-
     if isinstance(netdev_delete_order, list):
         for owner_ref in netdev_delete_order:
             if (
@@ -708,45 +880,77 @@ def _run_networkd_owner_actions(
                 and owner_ref in remove_only_netdev_owners
                 and owner_ref not in seen
             ):
-                ordered_owner_refs.append(owner_ref)
+                ordered.append(owner_ref)
                 seen.add(owner_ref)
-
     for owner_ref in sorted(owner_changes.keys()):
-        if owner_ref in seen:
-            continue
-        ordered_owner_refs.append(owner_ref)
-        seen.add(owner_ref)
+        if owner_ref not in seen:
+            ordered.append(owner_ref)
+    return ordered
 
+
+def _apply_networkd_directory_writes(directory_writes: object) -> None:
+    """Apply networkd directory creation/mode hints before owner convergence."""
+    if not isinstance(directory_writes, list):
+        return
+    for directory in directory_writes:
+        target_path = directory.get("target_path") if isinstance(directory, dict) else None
+        if not isinstance(target_path, str):
+            raise ApplyError("Networkd directory write action missing target_path")
+        hints = directory.get("apply_hints") if isinstance(directory, dict) else None
+        NetworkdExecutor.apply_directory_change(
+            target_path,
+            hints if isinstance(hints, dict) else None,
+        )
+
+
+def _networkd_owner_result(
+    owner_ref: str,
+    summary: dict[str, object],
+    entries: list[dict[str, object]],
+) -> dict[str, object]:
+    """Shape one networkd owner result entry."""
+    return {
+        "phase": "converge",
+        "kind": "networkd.owner",
+        "owner_ref": owner_ref,
+        "summary": summary,
+        "entries": entries,
+    }
+
+
+def _run_networkd_owner_actions(
+    writes: list[dict[str, object]],
+    removals_to_apply: list[dict[str, object]],
+    *,
+    netdev_delete_order: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """Run phase 7.7 systemd-networkd actions for changed entries."""
+    owner_changes = _collect_networkd_owner_changes(writes, removals_to_apply)
+    remove_only_netdev_owners = _networkd_remove_only_netdev_owners(owner_changes)
+    ordered_owner_refs = _ordered_networkd_owner_refs(
+        owner_changes, remove_only_netdev_owners, netdev_delete_order
+    )
     owner_results: list[dict[str, object]] = []
+    remove_only_summaries: list[tuple[str, dict[str, object], list[dict[str, object]]]] = []
 
-    remove_only_owner_summaries: list[tuple[str, dict[str, object], list[dict[str, object]]]] = []
     for owner_ref in ordered_owner_refs:
         state = owner_changes[owner_ref]
         entries = state.get("entries")
         if not isinstance(entries, list) or not entries:
             continue
-        directory_writes = state.get("directory_writes")
-        if isinstance(directory_writes, list):
-            for directory in directory_writes:
-                target_path = directory.get("target_path")
-                if not isinstance(target_path, str):
-                    raise ApplyError("Networkd directory write action missing target_path")
-                hints = directory.get("apply_hints")
-                NetworkdExecutor.apply_directory_change(
-                    target_path,
-                    hints if isinstance(hints, dict) else None,
-                )
+        typed_entries = [entry for entry in entries if isinstance(entry, dict)]
+        if not typed_entries:
+            continue
+        _apply_networkd_directory_writes(state.get("directory_writes"))
 
-        sample_target = entries[0].get("target_path")
+        sample_target = typed_entries[0].get("target_path")
         if not isinstance(sample_target, str):
             raise ApplyError("Networkd owner entry missing target_path")
-
         interface = NetworkdExecutor.interface_from_owner_or_target(owner_ref, sample_target)
         phases = state.get("phases")
-        strict_reconfigure = not (isinstance(phases, set) and phases == {"remove"})
         kinds = state.get("kinds")
-        delete_interface_first = owner_ref in remove_only_netdev_owners
-        if delete_interface_first:
+
+        if owner_ref in remove_only_netdev_owners:
             delete_result = NetworkdExecutor.delete_interface(interface)
             summary: dict[str, object] = {
                 "owner_ref": owner_ref,
@@ -760,31 +964,24 @@ def _run_networkd_owner_actions(
                     }
                 ],
             }
-            remove_only_owner_summaries.append((owner_ref, summary, entries))
+            remove_only_summaries.append((owner_ref, summary, typed_entries))
             continue
 
-        summary = NetworkdExecutor.apply_owner_change(
-            owner_ref,
-            interface=interface,
-            strict_reconfigure=strict_reconfigure,
-            kinds=list(kinds) if isinstance(kinds, set) else None,
-            delete_interface_first=False,
-            run_reconfigure=True,
+        summary = dict(
+            NetworkdExecutor.apply_owner_change(
+                owner_ref,
+                interface=interface,
+                strict_reconfigure=not (isinstance(phases, set) and phases == {"remove"}),
+                kinds=list(kinds) if isinstance(kinds, set) else None,
+                delete_interface_first=False,
+                run_reconfigure=True,
+            )
         )
-        owner_results.append(
-            {
-                "phase": "converge",
-                "kind": "networkd.owner",
-                "owner_ref": owner_ref,
-                "summary": summary,
-                "entries": entries,
-            }
-        )
+        owner_results.append(_networkd_owner_result(owner_ref, summary, typed_entries))
 
-    if remove_only_owner_summaries:
+    if remove_only_summaries:
         reload_result = NetworkdExecutor.reload_networkd()
-        first_summary = remove_only_owner_summaries[0][1]
-        first_actions = first_summary.get("actions")
+        first_actions = remove_only_summaries[0][1].get("actions")
         if isinstance(first_actions, list):
             first_actions.append(
                 {
@@ -793,20 +990,202 @@ def _run_networkd_owner_actions(
                     "return_code": reload_result.return_code,
                 }
             )
-
-        for owner_ref, summary, entries in remove_only_owner_summaries:
-            owner_results.append(
-                {
-                    "phase": "converge",
-                    "kind": "networkd.owner",
-                    "owner_ref": owner_ref,
-                    "summary": summary,
-                    "entries": entries,
-                }
-            )
+        for owner_ref, summary, entries in remove_only_summaries:
+            owner_results.append(_networkd_owner_result(owner_ref, summary, entries))
 
     LOG.debug("dispatch.networkd results=%d", len(owner_results))
     return owner_results
+
+
+def _record_quadlet_change(
+    owner_changes: dict[str, dict[str, object]],
+    *,
+    phase: str,
+    kind: str,
+    owner_ref: str,
+    target_path: str,
+    apply_hints: object,
+) -> None:
+    """Record a quadlet-owned change while preserving raw apply hints."""
+    state = _ensure_owner_bucket(
+        owner_changes,
+        owner_ref,
+        factory={"phases": set(), "kinds": set(), "entries": [], "raw_entries": []},
+    )
+    phases = state.get("phases")
+    if isinstance(phases, set):
+        phases.add(phase)
+    kinds = state.get("kinds")
+    if isinstance(kinds, set):
+        kinds.add(kind)
+    entries = state.get("entries")
+    if isinstance(entries, list):
+        entries.append({"phase": phase, "kind": kind, "target_path": target_path})
+    raw_entries = state.get("raw_entries")
+    if isinstance(raw_entries, list):
+        raw_entries.append(
+            {
+                "kind": kind,
+                "owner_ref": owner_ref,
+                "target_path": target_path,
+                "apply_hints": apply_hints,
+            }
+        )
+
+
+def _collect_quadlet_owner_changes(
+    writes: list[dict[str, object]],
+    removals_to_apply: list[dict[str, object]],
+    excluded_owner_refs: set[str] | None,
+) -> dict[str, dict[str, object]]:
+    """Classify quadlet writes/removals into owner convergence buckets."""
+    owner_changes: dict[str, dict[str, object]] = {}
+    for phase, actions in (("write", writes), ("remove", removals_to_apply)):
+        for action in actions:
+            kind = action.get("kind") if isinstance(action, dict) else None
+            owner_ref = action.get("owner_ref") if isinstance(action, dict) else None
+            target_path = action.get("target_path") if isinstance(action, dict) else None
+            if not isinstance(kind, str) or kind not in _QUADLET_KINDS:
+                continue
+            if not isinstance(owner_ref, str) or not isinstance(target_path, str):
+                raise ApplyError(f"Quadlet {phase} action missing owner_ref/target_path")
+            if isinstance(excluded_owner_refs, set) and owner_ref in excluded_owner_refs:
+                continue
+            _record_quadlet_change(
+                owner_changes,
+                phase=phase,
+                kind=kind,
+                owner_ref=owner_ref,
+                target_path=target_path,
+                apply_hints=action.get("apply_hints"),
+            )
+    return owner_changes
+
+
+def _quadlet_user_context_for_owner(
+    owner_ref: str,
+    owner_changes: dict[str, dict[str, object]],
+    owner_apply_hints: dict[str, dict[str, object]] | None,
+) -> tuple[bool, str | None]:
+    """Resolve rootless execution context for an owner or dependent owner."""
+    state = owner_changes.get(owner_ref)
+    if isinstance(state, dict):
+        raw_entries = state.get("raw_entries")
+        if isinstance(raw_entries, list) and raw_entries:
+            return QuadletExecutor.user_context_from_entries(raw_entries)
+
+    if owner_apply_hints is not None:
+        hints = owner_apply_hints.get(owner_ref)
+        if isinstance(hints, dict):
+            rootless = bool(hints.get("rootless"))
+            user = hints.get("podman_user")
+            return (rootless, user if isinstance(user, str) and user else None)
+    return (False, None)
+
+
+def _quadlet_restart_mode_for_owner(
+    owner_ref: str,
+    raw_entries: list[object],
+    owner_apply_hints: dict[str, dict[str, object]] | None,
+) -> str:
+    """Resolve a quadlet owner's restart mode from owner or entry hints."""
+    if owner_apply_hints is not None:
+        hints = owner_apply_hints.get(owner_ref)
+        if isinstance(hints, dict):
+            restart_mode = hints.get("restart_mode")
+            if isinstance(restart_mode, str) and restart_mode:
+                return restart_mode
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        hints = raw_entry.get("apply_hints")
+        if isinstance(hints, dict):
+            restart_mode = hints.get("restart_mode")
+            if isinstance(restart_mode, str) and restart_mode:
+                return restart_mode
+    return "try-restart"
+
+
+def _run_quadlet_daemon_reloads(
+    owner_changes: dict[str, dict[str, object]],
+) -> list[dict[str, object]]:
+    """Run one daemon-reload per quadlet execution context."""
+    contexts: dict[tuple[bool, str | None], list[str]] = {}
+    for owner_ref in sorted(owner_changes.keys()):
+        raw_entries = owner_changes[owner_ref].get("raw_entries")
+        if isinstance(raw_entries, list):
+            context = QuadletExecutor.user_context_from_entries(raw_entries)
+            contexts.setdefault(context, []).append(owner_ref)
+
+    results: list[dict[str, object]] = []
+    for context, owner_refs in sorted(contexts.items(), key=lambda item: str(item[0])):
+        rootless, run_as_user = context
+        reload_result = QuadletExecutor.daemon_reload(rootless=rootless, run_as_user=run_as_user)
+        results.append(
+            {
+                "phase": "reload",
+                "kind": "quadlet.daemon-reload",
+                "owner_ref": "quadlet:rootless" if rootless else "quadlet:system",
+                "summary": {
+                    "rootless": rootless,
+                    "run_as_user": run_as_user,
+                    "owners": owner_refs,
+                    "actions": [
+                        {
+                            "action": "daemon-reload",
+                            "success": reload_result.success,
+                            "return_code": reload_result.return_code,
+                        }
+                    ],
+                },
+            }
+        )
+    return results
+
+
+def _quadlet_convergence_steps(
+    convergence_plans: dict[str, list[dict[str, str]]] | None,
+    owner_ref: str,
+    *,
+    stop_steps: bool,
+) -> list[dict[str, str]]:
+    """Select pre-stop or post-owner convergence steps for one quadlet owner."""
+    if convergence_plans is None:
+        return []
+    steps = convergence_plans.get(owner_ref, [])
+    if not isinstance(steps, list):
+        return []
+    if stop_steps:
+        return [step for step in steps if step.get("action") == "stop"]
+    return [step for step in steps if step.get("action") != "stop"]
+
+
+def _run_quadlet_convergence_steps(
+    steps: list[dict[str, str]],
+    owner_changes: dict[str, dict[str, object]],
+    owner_apply_hints: dict[str, dict[str, object]] | None,
+) -> list[dict[str, object]]:
+    """Execute dependent quadlet convergence steps."""
+    actions: list[dict[str, object]] = []
+    for step in steps:
+        dependent_owner_ref = step.get("owner_ref")
+        step_action = step.get("action")
+        if not isinstance(dependent_owner_ref, str) or not isinstance(step_action, str):
+            raise ApplyError("Invalid quadlet convergence step")
+        rootless, run_as_user = _quadlet_user_context_for_owner(
+            dependent_owner_ref,
+            owner_changes,
+            owner_apply_hints,
+        )
+        actions.append(
+            QuadletExecutor.apply_convergence_action(
+                dependent_owner_ref,
+                action=step_action,
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+        )
+    return actions
 
 
 def _run_quadlet_owner_actions(
@@ -815,208 +1194,25 @@ def _run_quadlet_owner_actions(
     *,
     convergence_plans: dict[str, list[dict[str, str]]] | None = None,
     owner_apply_hints: dict[str, dict[str, object]] | None = None,
+    excluded_owner_refs: set[str] | None = None,
 ) -> list[dict[str, object]]:
     """Run phase 7.8 quadlet actions for changed entries."""
-    owner_changes: dict[str, dict[str, object]] = {}
+    owner_changes = _collect_quadlet_owner_changes(writes, removals_to_apply, excluded_owner_refs)
+    owner_results = _run_quadlet_daemon_reloads(owner_changes)
 
-    def _record_change(
-        *,
-        phase: str,
-        kind: str,
-        owner_ref: str,
-        target_path: str,
-        apply_hints: object,
-    ) -> None:
-        """Record a quadlet-owned change while preserving raw apply hints."""
-        state = _ensure_owner_bucket(
+    for owner_ref in sorted(owner_changes.keys()):
+        state = owner_changes[owner_ref]
+        raw_entries = state.get("raw_entries")
+        if not isinstance(raw_entries, list):
+            continue
+
+        convergence_actions = _run_quadlet_convergence_steps(
+            _quadlet_convergence_steps(convergence_plans, owner_ref, stop_steps=True),
             owner_changes,
-            owner_ref,
-            factory={
-                "phases": set(),
-                "kinds": set(),
-                "entries": [],
-                "raw_entries": [],
-            },
+            owner_apply_hints,
         )
-        phases = state.get("phases")
-        if isinstance(phases, set):
-            phases.add(phase)
-        kinds = state.get("kinds")
-        if isinstance(kinds, set):
-            kinds.add(kind)
-        entries = state.get("entries")
-        if isinstance(entries, list):
-            entries.append(
-                {
-                    "phase": phase,
-                    "kind": kind,
-                    "target_path": target_path,
-                }
-            )
-        raw_entries = state.get("raw_entries")
-        if isinstance(raw_entries, list):
-            raw_entries.append(
-                {
-                    "kind": kind,
-                    "owner_ref": owner_ref,
-                    "target_path": target_path,
-                    "apply_hints": apply_hints,
-                }
-            )
-
-    for action in writes:
-        kind = action.get("kind")
-        owner_ref = action.get("owner_ref")
-        target_path = action.get("target_path")
-        if not isinstance(kind, str) or kind not in _QUADLET_KINDS:
-            continue
-        if not isinstance(owner_ref, str) or not isinstance(target_path, str):
-            raise ApplyError("Quadlet write action missing owner_ref/target_path")
-        _record_change(
-            phase="write",
-            kind=kind,
-            owner_ref=owner_ref,
-            target_path=target_path,
-            apply_hints=action.get("apply_hints"),
-        )
-
-    for removal in removals_to_apply:
-        kind = removal.get("kind") if isinstance(removal, dict) else None
-        owner_ref = removal.get("owner_ref") if isinstance(removal, dict) else None
-        target_path = removal.get("target_path") if isinstance(removal, dict) else None
-        if not isinstance(kind, str) or kind not in _QUADLET_KINDS:
-            continue
-        if not isinstance(owner_ref, str) or not isinstance(target_path, str):
-            raise ApplyError("Quadlet removal action missing owner_ref/target_path")
-        _record_change(
-            phase="remove",
-            kind=kind,
-            owner_ref=owner_ref,
-            target_path=target_path,
-            apply_hints=removal.get("apply_hints"),
-        )
-
-    owner_results: list[dict[str, object]] = []
-
-    def _user_context_for_owner(owner_ref: str) -> tuple[bool, str | None]:
-        """Resolve rootless execution context for an owner or dependent owner."""
-        state = owner_changes.get(owner_ref)
-        if isinstance(state, dict):
-            raw_entries = state.get("raw_entries")
-            if isinstance(raw_entries, list) and raw_entries:
-                return QuadletExecutor.user_context_from_entries(raw_entries)
-
-        if owner_apply_hints is not None:
-            hints = owner_apply_hints.get(owner_ref)
-            if isinstance(hints, dict):
-                rootless = bool(hints.get("rootless"))
-                run_as_user_obj = hints.get("podman_user")
-                owner_run_as_user = (
-                    run_as_user_obj
-                    if isinstance(run_as_user_obj, str) and run_as_user_obj
-                    else None
-                )
-                return (rootless, owner_run_as_user)
-
-        return (False, None)
-
-    def _restart_mode_for_owner(owner_ref: str, raw_entries: list[object]) -> str:
-        """Resolve a quadlet owner's restart mode from owner or entry hints."""
-        if owner_apply_hints is not None:
-            hints = owner_apply_hints.get(owner_ref)
-            if isinstance(hints, dict):
-                restart_mode = hints.get("restart_mode")
-                if isinstance(restart_mode, str) and restart_mode:
-                    return restart_mode
-
-        for raw_entry in raw_entries:
-            if not isinstance(raw_entry, dict):
-                continue
-            hints = raw_entry.get("apply_hints")
-            if not isinstance(hints, dict):
-                continue
-            restart_mode = hints.get("restart_mode")
-            if isinstance(restart_mode, str) and restart_mode:
-                return restart_mode
-
-        return "try-restart"
-
-    reload_contexts: dict[tuple[bool, str | None], dict[str, object]] = {}
-    for owner_ref in sorted(owner_changes.keys()):
-        state = owner_changes[owner_ref]
-        raw_entries = state.get("raw_entries")
-        if not isinstance(raw_entries, list):
-            continue
-        context = QuadletExecutor.user_context_from_entries(raw_entries)
-        reload_contexts.setdefault(
-            context,
-            {
-                "owner_refs": [],
-                "result": None,
-            },
-        )
-        owner_refs = reload_contexts[context].get("owner_refs")
-        if isinstance(owner_refs, list):
-            owner_refs.append(owner_ref)
-
-    batch_reload_results: dict[tuple[bool, str | None], dict[str, object]] = {}
-    for context, payload in sorted(reload_contexts.items(), key=lambda item: str(item[0])):
-        rootless, run_as_user = context
-        reload_result = QuadletExecutor.daemon_reload(
-            rootless=rootless,
-            run_as_user=run_as_user,
-        )
-        batch_reload_results[context] = {
-            "phase": "reload",
-            "kind": "quadlet.daemon-reload",
-            "owner_ref": "quadlet:rootless" if rootless else "quadlet:system",
-            "summary": {
-                "rootless": rootless,
-                "run_as_user": run_as_user,
-                "owners": payload.get("owner_refs", []),
-                "actions": [
-                    {
-                        "action": "daemon-reload",
-                        "success": reload_result.success,
-                        "return_code": reload_result.return_code,
-                    }
-                ],
-            },
-        }
-
-    owner_results.extend(batch_reload_results.values())
-
-    for owner_ref in sorted(owner_changes.keys()):
-        state = owner_changes[owner_ref]
-        raw_entries = state.get("raw_entries")
-        if not isinstance(raw_entries, list):
-            continue
 
         rootless, owner_run_as_user = QuadletExecutor.user_context_from_entries(raw_entries)
-        convergence_actions: list[dict[str, object]] = []
-        if convergence_plans is not None:
-            steps = convergence_plans.get(owner_ref, [])
-            if isinstance(steps, list) and steps:
-                pre_steps = [step for step in steps if step.get("action") == "stop"]
-                post_steps = [step for step in steps if step.get("action") != "stop"]
-
-                for step in pre_steps:
-                    dependent_owner_ref = step.get("owner_ref")
-                    step_action = step.get("action")
-                    if not isinstance(dependent_owner_ref, str) or not isinstance(step_action, str):
-                        raise ApplyError("Invalid quadlet convergence step")
-                    dep_rootless, dependent_run_as_user = _user_context_for_owner(
-                        dependent_owner_ref
-                    )
-                    convergence_actions.append(
-                        QuadletExecutor.apply_convergence_action(
-                            dependent_owner_ref,
-                            action=step_action,
-                            rootless=dep_rootless,
-                            run_as_user=dependent_run_as_user,
-                        )
-                    )
-
         kinds = state.get("kinds")
         phases = state.get("phases")
         summary = QuadletExecutor.apply_owner_change(
@@ -1025,34 +1221,25 @@ def _run_quadlet_owner_actions(
             changed_phases=phases if isinstance(phases, set) else set(),
             rootless=rootless,
             run_as_user=owner_run_as_user,
-            restart_mode=_restart_mode_for_owner(owner_ref, raw_entries),
+            restart_mode=_quadlet_restart_mode_for_owner(
+                owner_ref,
+                raw_entries,
+                owner_apply_hints,
+            ),
             daemon_reloaded=True,
             verify_unit=True,
         )
 
-        if convergence_plans is not None:
-            steps = convergence_plans.get(owner_ref, [])
-            if isinstance(steps, list) and steps:
-                post_steps = [step for step in steps if step.get("action") != "stop"]
-                for step in post_steps:
-                    dependent_owner_ref = step.get("owner_ref")
-                    step_action = step.get("action")
-                    if not isinstance(dependent_owner_ref, str) or not isinstance(step_action, str):
-                        raise ApplyError("Invalid quadlet convergence step")
-                    dep_rootless, dependent_run_as_user = _user_context_for_owner(
-                        dependent_owner_ref
-                    )
-                    convergence_actions.append(
-                        QuadletExecutor.apply_convergence_action(
-                            dependent_owner_ref,
-                            action=step_action,
-                            rootless=dep_rootless,
-                            run_as_user=dependent_run_as_user,
-                        )
-                    )
-
+        convergence_actions.extend(
+            _run_quadlet_convergence_steps(
+                _quadlet_convergence_steps(convergence_plans, owner_ref, stop_steps=False),
+                owner_changes,
+                owner_apply_hints,
+            )
+        )
         if convergence_actions:
             summary["convergence_actions"] = convergence_actions
+
         owner_results.append(
             {
                 "phase": "converge",

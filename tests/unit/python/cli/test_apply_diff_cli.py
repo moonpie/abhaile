@@ -474,7 +474,7 @@ class TestApplyCli:
         monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
         monkeypatch.setattr(
             "abhaile.apply.dispatch.CorednsExecutor.apply_transaction",
-            lambda config_changed, zone_writes, zone_removals: {
+            lambda config_changed, zone_writes, zone_removals, build_inputs_changed=False: {
                 "kind": "coredns.transaction",
                 "zones": ["abhaile.home.arpa"],
                 "actions": [{"action": "validate-zone", "success": True, "return_code": 0}],

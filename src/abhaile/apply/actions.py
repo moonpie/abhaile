@@ -124,6 +124,8 @@ def run_command(
     action_type: str = "command",
     run_as_user: str | None = None,
     check: bool = True,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> ExecutionResult:
     """Execute a command and return structured result.
 
@@ -145,6 +147,8 @@ def run_command(
             check=False,
             capture_output=True,
             text=True,
+            env=env,
+            cwd=cwd,
         )
     except OSError as exc:
         raise ApplyError(f"Failed to execute command ({action_id}): {exc}") from exc
@@ -175,6 +179,8 @@ def run_validation(
     *,
     action_id: str,
     is_blocker: bool = True,
+    env: dict[str, str] | None = None,
+    cwd: Path | None = None,
 ) -> ExecutionResult:
     """Run a validation command and return result.
 
@@ -185,6 +191,8 @@ def run_validation(
         action_id=action_id,
         action_type="validation",
         check=is_blocker,
+        env=env,
+        cwd=cwd,
     )
 
 

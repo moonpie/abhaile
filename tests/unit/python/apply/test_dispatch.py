@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
+from abhaile.apply.coredns import CorednsExecutor
 from abhaile.apply.dispatch import (
     _entry_user_context,
     _resolve_parent_unit_name,
@@ -17,6 +18,11 @@ from abhaile.apply.dispatch import (
     _run_quadlet_owner_actions,
     _run_systemd_owner_actions,
     _run_vault_owner_actions,
+)
+from abhaile.apply.validation_scope import (
+    canonical_validation_target_path,
+    rootless_user_from_target_path,
+    validation_context_for_entry,
 )
 from abhaile.utils.errors import ApplyError
 
@@ -96,6 +102,191 @@ class TestDryRunValidations:
         assert results == []
         assert calls == []
 
+    def test_systemd_verify_uses_isolated_root_not_render_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = (
+            tmp_path / "system" / "etc" / "systemd" / "system" / "coredns-omada-install.service"
+        )
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            "[Unit]\nAfter=coredns-omada-build.service\nRequires=coredns-omada-build.service\n",
+            encoding="utf-8",
+        )
+
+        build_source = (
+            tmp_path / "system" / "etc" / "containers" / "systemd" / "coredns-omada.build"
+        )
+        build_source.parent.mkdir(parents=True, exist_ok=True)
+        build_source.write_text("[Build]\nImageTag=example\n", encoding="utf-8")
+
+        calls: list[list[str]] = []
+
+        class _ValidationResult:
+            success = True
+            return_code = 0
+
+        def _fake_validation(argv: list[str], **_: object) -> _ValidationResult:
+            calls.append(argv)
+            return _ValidationResult()
+
+        monkeypatch.setattr("abhaile.apply.dispatch.run_validation", _fake_validation)
+
+        results = _run_dry_run_validations(
+            tmp_path,
+            [
+                {
+                    "kind": "systemd.unit",
+                    "render_path": "system/etc/systemd/system/coredns-omada-install.service",
+                    "target_path": "/etc/systemd/system/coredns-omada-install.service",
+                    "owner_ref": "unit:coredns-omada-install.service",
+                }
+            ],
+            desired_entries=[
+                {
+                    "kind": "systemd.unit",
+                    "render_path": "system/etc/systemd/system/coredns-omada-install.service",
+                    "target_path": "/etc/systemd/system/coredns-omada-install.service",
+                    "owner_ref": "unit:coredns-omada-install.service",
+                },
+                {
+                    "kind": "quadlet.build",
+                    "render_path": "system/etc/containers/systemd/coredns-omada.build",
+                    "target_path": "/etc/containers/systemd/coredns-omada.build",
+                    "owner_ref": "unit:coredns-omada-build.service",
+                },
+            ],
+        )
+
+        assert len(results) == 1
+        assert calls and calls[0][0] == "systemd-analyze"
+        assert any(part.startswith("--root=") for part in calls[0])
+        assert "system/etc/systemd/system/coredns-omada-install.service" not in calls[0]
+
+    def test_systemd_verify_uses_user_context_for_rootless_units(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = (
+            tmp_path
+            / "services"
+            / "example"
+            / "home"
+            / "abhaile"
+            / ".config"
+            / "systemd"
+            / "user"
+            / "example.service"
+        )
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("[Unit]\nDescription=Example\n", encoding="utf-8")
+
+        calls: list[list[str]] = []
+
+        class _ValidationResult:
+            success = True
+            return_code = 0
+
+        def _fake_validation(argv: list[str], **_: object) -> _ValidationResult:
+            calls.append(argv)
+            return _ValidationResult()
+
+        monkeypatch.setattr("abhaile.apply.dispatch.run_validation", _fake_validation)
+
+        _run_dry_run_validations(
+            tmp_path,
+            [
+                {
+                    "kind": "systemd.unit",
+                    "render_path": (
+                        "services/example/home/abhaile/.config/systemd/user/example.service"
+                    ),
+                    "target_path": "/home/abhaile/.config/systemd/user/example.service",
+                    "owner_ref": "unit:example.service",
+                }
+            ],
+        )
+
+        assert calls and calls[0][0] == "systemd-analyze"
+        assert "--user" in calls[0]
+
+
+class TestValidationPathHelpers:
+    """Tests for isolated validation path/context helpers."""
+
+    def test_rootless_user_detected_for_user_quadlet_path(self) -> None:
+        path = "/home/abhaile/.config/containers/systemd/example.container"
+        assert rootless_user_from_target_path(path) == "abhaile"
+
+    def test_rootless_user_detected_for_user_systemd_path(self) -> None:
+        path = "/home/abhaile/.config/systemd/user/example.service"
+        assert rootless_user_from_target_path(path) == "abhaile"
+
+    def test_tail_after_marker_returns_none_when_missing(self) -> None:
+        assert (
+            canonical_validation_target_path(
+                kind="systemd.unit",
+                target_path="/etc/systemd/system/example.service",
+                context=(False, None),
+            )
+            == "/etc/systemd/system/example.service"
+        )
+
+    def test_validation_context_rootful_systemd(self) -> None:
+        context = validation_context_for_entry(
+            kind="systemd.unit",
+            target_path="/tmp/stage/etc/systemd/system/demo.service",
+            apply_hints=None,
+        )
+        assert context == (False, None)
+
+    def test_validation_context_rootless_via_hints(self) -> None:
+        context = validation_context_for_entry(
+            kind="quadlet.container",
+            target_path="/opt/render/demo.container",
+            apply_hints={"rootless": True, "podman_user": "abhaile"},
+        )
+        assert context == (True, "abhaile")
+
+    def test_canonical_validation_path_rootful_systemd(self) -> None:
+        path = canonical_validation_target_path(
+            kind="systemd.unit",
+            target_path="/tmp/stage/etc/systemd/system/coredns.service",
+            context=(False, None),
+        )
+        assert path == "/etc/systemd/system/coredns.service"
+
+    def test_canonical_validation_path_rootless_quadlet(self) -> None:
+        path = canonical_validation_target_path(
+            kind="quadlet.build",
+            target_path="/tmp/home/abhaile/.config/containers/systemd/coredns-omada.build",
+            context=(True, "abhaile"),
+        )
+        assert path == "/home/abhaile/.config/containers/systemd/coredns-omada.build"
+
+    def test_canonical_validation_path_requires_user_for_rootless(self) -> None:
+        with pytest.raises(ApplyError, match="Missing rootless user"):
+            canonical_validation_target_path(
+                kind="systemd.unit",
+                target_path="/home/abhaile/.config/systemd/user/example.service",
+                context=(True, None),
+            )
+
+    def test_coredns_build_inputs_detected(self) -> None:
+        writes: list[dict[str, object]] = [
+            {
+                "target_path": "/srv/build/coredns-omada/Containerfile",
+            }
+        ]
+        assert CorednsExecutor.build_inputs_changed(writes) is True
+
+    def test_coredns_build_inputs_not_detected_for_other_targets(self) -> None:
+        writes: list[dict[str, object]] = [
+            {
+                "target_path": "/etc/coredns/Corefile",
+            }
+        ]
+        assert CorednsExecutor.build_inputs_changed(writes) is False
+
 
 class TestSystemdOwnerActionsRemovals:
     """Tests for systemd removal branch in _run_systemd_owner_actions."""
@@ -161,6 +352,7 @@ class TestCorednsOwnerActionsRemovals:
             config_changed=False,
             zone_writes=[],
             zone_removals=removals,
+            build_inputs_changed=False,
         )
 
     @patch("abhaile.apply.dispatch.CorednsExecutor.apply_transaction")
@@ -186,6 +378,7 @@ class TestCorednsOwnerActionsRemovals:
             config_changed=True,
             zone_writes=[],
             zone_removals=[],
+            build_inputs_changed=False,
         )
 
     @patch("abhaile.apply.dispatch.CorednsExecutor.apply_transaction")
@@ -216,6 +409,7 @@ class TestCorednsOwnerActionsRemovals:
             config_changed=False,
             zone_writes=writes,
             zone_removals=[],
+            build_inputs_changed=False,
         )
 
     @patch("abhaile.apply.dispatch.CorednsExecutor.apply_transaction")
@@ -248,6 +442,7 @@ class TestCorednsOwnerActionsRemovals:
             config_changed=True,
             zone_writes=[writes[1]],
             zone_removals=[],
+            build_inputs_changed=False,
         )
 
 
