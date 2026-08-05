@@ -710,6 +710,67 @@ class TestApplyCli:
             }
         ]
 
+    def test_restore_quadlet_runtime_continues_after_owner_failure(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rollback runtime restore should attempt every affected owner best-effort."""
+        calls: list[str] = []
+
+        def fake_apply_owner_change(
+            owner_ref: str,
+            *,
+            kinds: list[str],
+            changed_phases: set[str],
+            rootless: bool,
+            run_as_user: str | None,
+            **_kwargs: object,
+        ) -> dict[str, object]:
+            del kinds, changed_phases, rootless, run_as_user
+            calls.append(owner_ref)
+            if owner_ref == "unit:authelia-redis.service":
+                raise ApplyError("redis restart failed")
+            return {"owner_ref": owner_ref, "actions": [{"action": "restart", "success": True}]}
+
+        monkeypatch.setattr(
+            apply_cli.QuadletExecutor,
+            "apply_owner_change",
+            fake_apply_owner_change,
+        )
+        sync = apply_cli._ApplyFileSync(
+            writes=[
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "apply_hints": {"rootless": False},
+                },
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:authelia-redis.service",
+                    "apply_hints": {"rootless": False},
+                },
+            ],
+            removals_to_apply=[],
+            write_count=2,
+            remove_count=0,
+            rollback_records=[],
+        )
+
+        results = apply_cli._restore_quadlet_runtime(sync)
+
+        assert calls == ["unit:authelia-redis.service", "unit:blocky.service"]
+        assert results[0]["owner_ref"] == "unit:authelia-redis.service"
+        assert results[0]["actions"] == [
+            {
+                "action": "restore-runtime",
+                "success": False,
+                "error": "redis restart failed",
+            }
+        ]
+        assert results[1] == {
+            "owner_ref": "unit:blocky.service",
+            "actions": [{"action": "restart", "success": True}],
+        }
+
     def test_apply_writes_target_and_updates_state(
         self,
         tmp_path: Path,

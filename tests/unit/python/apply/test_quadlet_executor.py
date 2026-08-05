@@ -264,10 +264,11 @@ class TestQuadletExecutor:
                 return_code=0,
             ),
         )
-        mock_systemctl = mocker.patch(
-            "abhaile.apply.quadlet.run_systemctl_command",
+        mock_stop = mocker.patch.object(
+            QuadletExecutor,
+            "stop_obsolete_image_unit",
             return_value=ExecutionResult(
-                action_id="systemctl",
+                action_id="systemctl stop blocky-image.service",
                 action_type="systemctl",
                 success=True,
                 return_code=0,
@@ -308,10 +309,10 @@ class TestQuadletExecutor:
             "reset-failed",
             "verify-unloaded",
         ]
-        mock_systemctl.assert_called_once_with(
-            "stop",
+        assert summary["actions"][0]["idempotent_noop"] is False
+        mock_stop.assert_called_once_with(
             "blocky-image.service",
-            user=False,
+            rootless=False,
             run_as_user=None,
         )
         mock_reload.assert_called_once_with(rootless=False, run_as_user=None)
@@ -325,6 +326,57 @@ class TestQuadletExecutor:
             rootless=False,
             run_as_user=None,
         )
+
+    def test_stop_obsolete_image_unit_accepts_not_loaded_result(self, mocker: Any) -> None:
+        """Obsolete image unit stop should be idempotent when systemd already unloaded it."""
+        mock_run = mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="systemctl stop blocky-image.service",
+                action_type="systemctl",
+                success=False,
+                return_code=5,
+                stderr="Unit blocky-image.service not loaded.",
+                error_message="Unit blocky-image.service not loaded.",
+            ),
+        )
+
+        result = QuadletExecutor.stop_obsolete_image_unit(
+            "blocky-image.service",
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert result.success is True
+        assert result.return_code == 5
+        mock_run.assert_called_once_with(
+            ["systemctl", "stop", "blocky-image.service"],
+            action_id="systemctl stop blocky-image.service",
+            action_type="systemctl",
+            run_as_user=None,
+            check=False,
+        )
+
+    def test_stop_obsolete_image_unit_raises_for_real_stop_failure(self, mocker: Any) -> None:
+        """Unexpected stop failures should still block obsolete image unit migration."""
+        mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="systemctl stop blocky-image.service",
+                action_type="systemctl",
+                success=False,
+                return_code=1,
+                stderr="permission denied",
+                error_message="permission denied",
+            ),
+        )
+
+        with pytest.raises(ApplyError, match="permission denied"):
+            QuadletExecutor.stop_obsolete_image_unit(
+                "blocky-image.service",
+                rootless=False,
+                run_as_user=None,
+            )
 
     def test_apply_convergence_action_runs_systemctl(self, mocker: Any) -> None:
         """Planner-emitted convergence actions should dispatch to systemctl."""
@@ -553,7 +605,7 @@ class TestQuadletExecutor:
         mocker.patch(
             "abhaile.apply.quadlet.run_command",
             return_value=ExecutionResult(
-                action_id="verify-obsolete-unit-unloaded:blocky-image.service",
+                action_id="show-load-state:blocky-image.service",
                 action_type="validation",
                 success=True,
                 return_code=0,
@@ -573,7 +625,7 @@ class TestQuadletExecutor:
         mock_run = mocker.patch(
             "abhaile.apply.quadlet.run_command",
             return_value=ExecutionResult(
-                action_id="verify-obsolete-unit-unloaded:vault-agent-image.service",
+                action_id="show-load-state:vault-agent-image.service",
                 action_type="validation",
                 success=True,
                 return_code=0,
@@ -599,11 +651,98 @@ class TestQuadletExecutor:
                 "--property=LoadState",
                 "--value",
             ],
-            action_id="verify-obsolete-unit-unloaded:vault-agent-image.service",
+            action_id="show-load-state:vault-agent-image.service",
             action_type="validation",
             run_as_user=None,
             check=False,
         )
+
+    def test_reset_failed_unit_accepts_already_unloaded_unit(self, mocker: Any) -> None:
+        """reset-failed may fail after removal if the generated unit is already unloaded."""
+        mock_reset = mocker.patch(
+            "abhaile.apply.quadlet.run_systemctl_command",
+            return_value=ExecutionResult(
+                action_id="systemctl reset-failed blocky-image.service",
+                action_type="systemctl",
+                success=False,
+                return_code=1,
+                stderr="Unit blocky-image.service not loaded.",
+            ),
+        )
+        mock_load_state = mocker.patch.object(
+            QuadletExecutor,
+            "get_unit_load_state",
+            side_effect=pytest.fail,
+        )
+
+        result = QuadletExecutor.reset_failed_unit(
+            "blocky-image.service",
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert result.success is True
+        assert result.return_code == 1
+        mock_reset.assert_called_once_with(
+            "reset-failed",
+            "blocky-image.service",
+            user=False,
+            run_as_user=None,
+            check=False,
+        )
+        mock_load_state.assert_not_called()
+
+    def test_reset_failed_unit_accepts_unloaded_load_state(self, mocker: Any) -> None:
+        """reset-failed failure is converged if systemd no longer has a loaded unit."""
+        mocker.patch(
+            "abhaile.apply.quadlet.run_systemctl_command",
+            return_value=ExecutionResult(
+                action_id="systemctl reset-failed blocky-image.service",
+                action_type="systemctl",
+                success=False,
+                return_code=1,
+                stderr="systemd transient failure",
+            ),
+        )
+        mock_load_state = mocker.patch.object(
+            QuadletExecutor,
+            "get_unit_load_state",
+            return_value="not-found",
+        )
+
+        result = QuadletExecutor.reset_failed_unit(
+            "blocky-image.service",
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert result.success is True
+        mock_load_state.assert_called_once_with(
+            "blocky-image.service",
+            rootless=False,
+            run_as_user=None,
+        )
+
+    def test_reset_failed_unit_raises_when_loaded_unit_reset_fails(self, mocker: Any) -> None:
+        """A reset-failed error remains fatal while the obsolete unit is still loaded."""
+        mocker.patch(
+            "abhaile.apply.quadlet.run_systemctl_command",
+            return_value=ExecutionResult(
+                action_id="systemctl reset-failed blocky-image.service",
+                action_type="systemctl",
+                success=False,
+                return_code=1,
+                stderr="systemd refused reset",
+            ),
+        )
+        mocker.patch.object(QuadletExecutor, "get_unit_load_state", return_value="loaded")
+
+        with pytest.raises(ApplyError, match="Failed to reset failed state"):
+            QuadletExecutor.reset_failed_unit(
+                "blocky-image.service",
+                rootless=False,
+                run_as_user=None,
+            )
 
     def test_remove_podman_object_treats_absent_object_as_converged(self, mocker: Any) -> None:
         """Missing generated Podman objects should not make removals fail."""

@@ -284,12 +284,114 @@ class QuadletExecutor:
         rootless: bool,
         run_as_user: str | None,
     ) -> ExecutionResult:
-        """Reset failed state for one obsolete generated unit."""
-        return run_systemctl_command(
+        """Reset failed state for one obsolete generated unit if systemd still knows it."""
+        result = run_systemctl_command(
             "reset-failed",
             unit_name,
             user=rootless,
             run_as_user=run_as_user if rootless else None,
+            check=False,
+        )
+        if result.success:
+            return result
+        not_loaded = "not loaded" in f"{result.error_message}\n{result.stderr}".lower()
+        if not_loaded:
+            return ExecutionResult(
+                action_id=result.action_id,
+                action_type=result.action_type,
+                success=True,
+                return_code=result.return_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                error_message=result.error_message,
+            )
+
+        load_state = QuadletExecutor.get_unit_load_state(
+            unit_name,
+            rootless=rootless,
+            run_as_user=run_as_user,
+        )
+        if load_state != "loaded":
+            return ExecutionResult(
+                action_id=result.action_id,
+                action_type=result.action_type,
+                success=True,
+                return_code=result.return_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+
+        raise ApplyError(
+            f"Failed to reset failed state for loaded unit {unit_name}: "
+            f"{result.stderr.strip() or result.stdout.strip() or 'unknown systemd error'}"
+        )
+
+    @staticmethod
+    def get_unit_load_state(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> str:
+        """Return systemd LoadState for a unit in the target manager."""
+        argv = ["systemctl"]
+        if rootless:
+            argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
+        argv.extend(["show", unit_name, "--property=LoadState", "--value"])
+        result = run_command(
+            argv,
+            action_id=f"show-load-state:{unit_name}",
+            action_type="validation",
+            run_as_user=run_as_user if rootless else None,
+            check=False,
+        )
+        load_state = result.stdout.strip()
+        if result.success or load_state:
+            return load_state or "unknown"
+        raise ApplyError(
+            f"Failed to query LoadState for {unit_name}: "
+            f"{result.stderr.strip() or result.stdout.strip() or 'unknown systemd error'}"
+        )
+
+    @staticmethod
+    def stop_obsolete_image_unit(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> ExecutionResult:
+        """Stop an obsolete generated image unit, accepting an already-unloaded unit."""
+        argv = ["systemctl"]
+        command_user = run_as_user
+        if rootless:
+            argv.append("--user")
+            if command_user:
+                argv.extend(["-M", f"{command_user}@"])
+                command_user = None
+        argv.extend(["stop", unit_name])
+        result = run_command(
+            argv,
+            action_id=f"systemctl stop {unit_name}",
+            action_type="systemctl",
+            run_as_user=command_user if rootless else None,
+            check=False,
+        )
+        not_loaded = "not loaded" in f"{result.error_message}\n{result.stderr}".lower()
+        if result.success or not_loaded:
+            return ExecutionResult(
+                action_id=result.action_id,
+                action_type=result.action_type,
+                success=True,
+                return_code=result.return_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+        raise ApplyError(
+            f"Command failed ({result.action_id}): "
+            f"exit={result.return_code} error={result.error_message}"
         )
 
     @staticmethod
@@ -300,29 +402,19 @@ class QuadletExecutor:
         run_as_user: str | None,
     ) -> ExecutionResult:
         """Verify an obsolete generated unit is no longer loaded."""
-        argv = ["systemctl"]
-        if rootless:
-            argv.append("--user")
-            if run_as_user:
-                argv.extend(["-M", f"{run_as_user}@"])
-                run_as_user = None
-        argv.extend(["show", unit_name, "--property=LoadState", "--value"])
-        result = run_command(
-            argv,
-            action_id=f"verify-obsolete-unit-unloaded:{unit_name}",
-            action_type="validation",
-            run_as_user=run_as_user if rootless else None,
-            check=False,
+        load_state = QuadletExecutor.get_unit_load_state(
+            unit_name,
+            rootless=rootless,
+            run_as_user=run_as_user,
         )
-        if result.stdout.strip() == "loaded":
+        if load_state == "loaded":
             raise ApplyError(f"Obsolete generated image unit remains loaded: {unit_name}")
         return ExecutionResult(
-            action_id=result.action_id,
-            action_type=result.action_type,
+            action_id=f"verify-obsolete-unit-unloaded:{unit_name}",
+            action_type="validation",
             success=True,
-            return_code=result.return_code,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            return_code=0,
+            stdout=f"{load_state}\n",
         )
 
     @staticmethod
@@ -442,11 +534,10 @@ class QuadletExecutor:
             )
 
         if obsolete_image_remove:
-            stop = run_systemctl_command(
-                "stop",
+            stop = QuadletExecutor.stop_obsolete_image_unit(
                 unit_name,
-                user=rootless,
-                run_as_user=run_as_user if rootless else None,
+                rootless=rootless,
+                run_as_user=run_as_user,
             )
             actions.append(
                 {
@@ -454,6 +545,7 @@ class QuadletExecutor:
                     "unit": unit_name,
                     "success": stop.success,
                     "return_code": stop.return_code,
+                    "idempotent_noop": stop.return_code != 0,
                 }
             )
 

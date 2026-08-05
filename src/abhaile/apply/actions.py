@@ -232,6 +232,7 @@ def run_systemctl_command(
     *,
     user: bool = False,
     run_as_user: str | None = None,
+    check: bool = True,
 ) -> ExecutionResult:
     """Execute systemctl command for a unit (e.g., 'caddy.service')."""
     argv = ["systemctl"]
@@ -246,6 +247,7 @@ def run_systemctl_command(
         action_id=f"systemctl {action} {unit_name}",
         action_type="systemctl",
         run_as_user=run_as_user,
+        check=check,
     )
 
 

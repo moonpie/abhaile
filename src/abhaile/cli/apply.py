@@ -328,8 +328,9 @@ def _snapshot_target(path: Path) -> _RollbackRecord:
         raise ApplyError(f"Failed to snapshot target for rollback: {path} ({exc})") from exc
 
 
-def _restore_file_sync(rollback_records: list[_RollbackRecord]) -> None:
+def _restore_file_sync(rollback_records: list[_RollbackRecord]) -> list[dict[str, object]]:
     """Restore staged files from rollback records in reverse mutation order."""
+    errors: list[dict[str, object]] = []
     for record in reversed(rollback_records):
         try:
             if not record.existed:
@@ -343,9 +344,15 @@ def _restore_file_sync(rollback_records: list[_RollbackRecord]) -> None:
             if record.mode is not None:
                 record.target_path.chmod(record.mode)
         except OSError as exc:
-            raise ApplyError(
-                f"Failed to restore target after apply failure: {record.target_path} ({exc})"
-            ) from exc
+            errors.append(
+                {
+                    "action": "restore-file",
+                    "target_path": record.target_path.as_posix(),
+                    "success": False,
+                    "error": str(exc),
+                }
+            )
+    return errors
 
 
 def _restore_quadlet_runtime(sync: _ApplyFileSync) -> list[dict[str, object]]:
@@ -371,15 +378,32 @@ def _restore_quadlet_runtime(sync: _ApplyFileSync) -> list[dict[str, object]]:
     restored: list[dict[str, object]] = []
     for owner_ref in sorted(owner_kinds):
         rootless, run_as_user = owner_contexts[owner_ref]
-        restored.append(
-            QuadletExecutor.apply_owner_change(
-                owner_ref,
-                kinds=sorted(owner_kinds[owner_ref]),
-                changed_phases={"write"},
-                rootless=rootless,
-                run_as_user=run_as_user,
+        try:
+            restored.append(
+                QuadletExecutor.apply_owner_change(
+                    owner_ref,
+                    kinds=sorted(owner_kinds[owner_ref]),
+                    changed_phases={"write"},
+                    rootless=rootless,
+                    run_as_user=run_as_user,
+                )
             )
-        )
+        except ApplyError as exc:
+            restored.append(
+                {
+                    "owner_ref": owner_ref,
+                    "kinds": sorted(owner_kinds[owner_ref]),
+                    "rootless": rootless,
+                    "run_as_user": run_as_user if rootless else None,
+                    "actions": [
+                        {
+                            "action": "restore-runtime",
+                            "success": False,
+                            "error": str(exc),
+                        }
+                    ],
+                }
+            )
     return restored
 
 
@@ -768,12 +792,25 @@ def main(argv: list[str] | None = None) -> int:
         owner_execution = _run_apply_owner_actions(plan, sync)
         health_verifications = _run_apply_health_verifications(plan, sync)
     except ApplyError as exc:
-        _restore_file_sync(sync.rollback_records)
-        _restore_quadlet_runtime(sync)
+        file_restore_errors = _restore_file_sync(sync.rollback_records)
+        runtime_restore_results = _restore_quadlet_runtime(sync)
+        restore_errors: list[object] = [*file_restore_errors]
+        for result in runtime_restore_results:
+            actions = result.get("actions")
+            if isinstance(actions, list) and any(
+                isinstance(action, dict) and action.get("success") is False for action in actions
+            ):
+                restore_errors.append(result)
+        rollback_suffix = (
+            f" rollback_errors={json.dumps(restore_errors, sort_keys=True)}"
+            if restore_errors
+            else ""
+        )
         raise ApplyError(
             "deployment failed before state update; previous artifacts restored "
             "applied_state_unchanged=true "
             f"reason={exc}"
+            f"{rollback_suffix}"
         ) from exc
     LOG.info("apply.owners.complete")
     LOG.info("apply.state_update dir=%s", paths.state_dir)
