@@ -178,6 +178,10 @@ class TestApplyIntegration:
                 "actions": [{"action": "restart", "success": True, "return_code": 0}],
             },
         )
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.verify_unit_active",
+            lambda *args, **kwargs: SimpleNamespace(success=True, return_code=0),
+        )
 
         rc = main_apply(
             [

@@ -135,8 +135,11 @@ def run_command(
         raise ApplyError("Command argv is empty")
 
     actual_argv = argv
+    actual_env = env
+    actual_cwd = cwd
     if run_as_user:
         actual_argv = ["sudo", "-u", run_as_user, "--", *argv]
+        actual_env, actual_cwd = _rootless_command_context(run_as_user, env, cwd)
 
     LOG.debug("exec cmd=%s action_id=%s", " ".join(actual_argv), action_id)
 
@@ -147,8 +150,8 @@ def run_command(
             check=False,
             capture_output=True,
             text=True,
-            env=env,
-            cwd=cwd,
+            env=actual_env,
+            cwd=actual_cwd,
         )
     except OSError as exc:
         raise ApplyError(f"Failed to execute command ({action_id}): {exc}") from exc
@@ -172,6 +175,33 @@ def run_command(
         stderr=result.stderr,
         error_message=error_msg,
     )
+
+
+def _rootless_command_context(
+    run_as_user: str,
+    env: dict[str, str] | None,
+    cwd: Path | None,
+) -> tuple[dict[str, str], Path]:
+    """Build cwd and environment for commands executed as a target service user."""
+    try:
+        user_info = pwd.getpwnam(run_as_user)
+    except KeyError as exc:
+        raise ApplyError(f"User not found: {run_as_user}") from exc
+
+    user_home = Path(user_info.pw_dir)
+    merged_env = dict(os.environ)
+    if env is not None:
+        merged_env.update(env)
+    merged_env.update(
+        {
+            "HOME": user_info.pw_dir,
+            "USER": run_as_user,
+            "LOGNAME": run_as_user,
+            "SHELL": user_info.pw_shell or "/bin/sh",
+            "XDG_RUNTIME_DIR": f"/run/user/{user_info.pw_uid}",
+        }
+    )
+    return (merged_env, cwd if cwd is not None else user_home)
 
 
 def run_validation(

@@ -163,6 +163,53 @@ class TestRunCommand:
         assert result.action_id == "my-action"
         assert result.action_type == "command"
 
+    def test_run_command_rootless_sets_target_user_context(self, mocker: Any) -> None:
+        """Rootless commands should receive the target user's cwd and runtime environment."""
+        user_info = type(
+            "Pwd",
+            (),
+            {
+                "pw_uid": 1001,
+                "pw_dir": "/home/abhaile",
+                "pw_shell": "/bin/bash",
+            },
+        )()
+        mocker.patch("abhaile.apply.actions.pwd.getpwnam", return_value=user_info)
+        mock_run = mocker.patch("abhaile.apply.actions.subprocess.run")
+        mock_run.return_value = type(
+            "Completed",
+            (),
+            {"returncode": 0, "stdout": "", "stderr": ""},
+        )()
+
+        result = run_command(
+            ["podman", "image", "exists", "docker.io/hashicorp/vault:1.21.4"],
+            action_id="podman-image-exists",
+            run_as_user="abhaile",
+            env={"CUSTOM": "yes"},
+        )
+
+        assert result.success is True
+        mock_run.assert_called_once()
+        assert mock_run.call_args.args[0] == [
+            "sudo",
+            "-u",
+            "abhaile",
+            "--",
+            "podman",
+            "image",
+            "exists",
+            "docker.io/hashicorp/vault:1.21.4",
+        ]
+        assert mock_run.call_args.kwargs["cwd"] == Path("/home/abhaile")
+        env = mock_run.call_args.kwargs["env"]
+        assert env["HOME"] == "/home/abhaile"
+        assert env["USER"] == "abhaile"
+        assert env["LOGNAME"] == "abhaile"
+        assert env["SHELL"] == "/bin/bash"
+        assert env["XDG_RUNTIME_DIR"] == "/run/user/1001"
+        assert env["CUSTOM"] == "yes"
+
 
 class TestRunValidation:
     """Tests for run_validation."""

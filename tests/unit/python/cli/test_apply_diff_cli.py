@@ -457,6 +457,116 @@ class TestApplyCli:
         ]
         assert "v0.27.0" in applied.read_text(encoding="utf-8")
 
+    def test_apply_health_failure_blocks_state_update_and_restores_files(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Active-state verification should pass before the applied manifest is updated."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+        source = tmp_path / "rendered" / "system" / "etc" / "systemd" / "system"
+        source.mkdir(parents=True, exist_ok=True)
+        desired_content = "[Unit]\nDescription=Changed Caddy\n"
+        previous_content = "[Unit]\nDescription=Caddy\n"
+        (source / "caddy.service").write_text(desired_content, encoding="utf-8")
+        target = tmp_path / "target" / "etc" / "systemd" / "system" / "caddy.service"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(previous_content, encoding="utf-8")
+
+        desired_entry = {
+            "render_path": "system/etc/systemd/system/caddy.service",
+            "target_path": target.as_posix(),
+            "kind": "systemd.unit",
+            "owner_ref": "unit:caddy.service",
+            "sha256": _sha_of(desired_content),
+            "size": len(desired_content),
+            "apply_hints": {"activation_mode": "start"},
+        }
+        applied_entry = {
+            **desired_entry,
+            "sha256": _sha_of(previous_content),
+            "size": len(previous_content),
+        }
+        _write_manifest(desired, "deimos", [desired_entry])
+        _write_manifest(applied, "deimos", [applied_entry])
+
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+        monkeypatch.setattr(
+            "abhaile.apply.dispatch.SystemdExecutor.apply_unit_write",
+            lambda *args, **kwargs: {
+                "unit_name": "caddy.service",
+                "kind": "systemd.unit",
+                "actions": [{"action": "start", "success": True, "return_code": 0}],
+            },
+        )
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.verify_unit_active",
+            lambda *args, **kwargs: (_ for _ in ()).throw(ApplyError("unit inactive")),
+        )
+
+        with pytest.raises(ApplyError, match="applied_state_unchanged=true"):
+            main_apply(
+                [
+                    "--desired-manifest",
+                    desired.as_posix(),
+                    "--applied-manifest",
+                    applied.as_posix(),
+                ]
+            )
+
+        assert target.read_text(encoding="utf-8") == previous_content
+        assert "Changed Caddy" not in applied.read_text(encoding="utf-8")
+
+    def test_planned_health_verifications_include_readiness_gate(
+        self,
+    ) -> None:
+        """Affected Quadlet owners should verify supported readiness dependencies."""
+        sync = apply_cli._ApplyFileSync(
+            writes=[
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "apply_hints": {"rootless": False},
+                }
+            ],
+            removals_to_apply=[],
+            write_count=1,
+            remove_count=0,
+            rollback_records=[],
+        )
+        plan = cast(
+            PlanResult,
+            {
+                "desired_manifest": {
+                    "owners": {
+                        "unit:blocky.service": {
+                            "apply_hints": {"rootless": False},
+                            "requires": ["unit:abhaile-secrets-ready.service"],
+                        }
+                    }
+                },
+                "build_transactions": [],
+            },
+        )
+
+        checks = apply_cli._planned_health_verifications(plan, sync)
+
+        assert checks == [
+            {
+                "unit": "blocky.service",
+                "rootless": False,
+                "run_as_user": None,
+                "reason": "quadlet-runtime",
+            },
+            {
+                "unit": "abhaile-secrets-ready.service",
+                "rootless": False,
+                "run_as_user": None,
+                "reason": "readiness-gate",
+            },
+        ]
+
     def test_restore_file_sync_restores_changed_file_and_removes_created_file(
         self, tmp_path: Path
     ) -> None:
@@ -1619,6 +1729,15 @@ class TestApplyCli:
                 {"success": True, "return_code": 0},
             )(),
         )
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.verify_unit_active",
+            lambda *args, **kwargs: ExecutionResult(
+                action_id="verify-unit-active:blocky.service",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
+        )
 
         rc = main_apply(["--desired-manifest", desired.as_posix(), "--json"])
 
@@ -2254,6 +2373,15 @@ class TestApplyCli:
         monkeypatch.setattr(
             "abhaile.apply.dispatch.ServiceConfigExecutor.apply_owner_change",
             _fake_service_owner_change,
+        )
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.verify_unit_active",
+            lambda *args, **kwargs: ExecutionResult(
+                action_id="verify-unit-active:chrony.service",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
         )
 
         rc = main_apply(

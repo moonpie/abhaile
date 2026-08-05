@@ -383,6 +383,191 @@ def _restore_quadlet_runtime(sync: _ApplyFileSync) -> list[dict[str, object]]:
     return restored
 
 
+def _rootless_context_from_hints(
+    apply_hints: object,
+    owner_hints: dict[str, object] | None = None,
+) -> tuple[bool, str | None]:
+    """Resolve rootless unit context from entry hints with owner hints as fallback."""
+    hints = apply_hints if isinstance(apply_hints, dict) else {}
+    owner_hints = owner_hints or {}
+    rootless = bool(hints.get("rootless", owner_hints.get("rootless", False)))
+    podman_user_obj = hints.get("podman_user", owner_hints.get("podman_user"))
+    podman_user = podman_user_obj if isinstance(podman_user_obj, str) and podman_user_obj else None
+    return (rootless, podman_user)
+
+
+def _append_unique_verification(
+    checks: list[dict[str, object]],
+    seen: set[tuple[str, bool, str | None]],
+    *,
+    unit: str,
+    rootless: bool,
+    run_as_user: str | None,
+    reason: str,
+) -> None:
+    """Append one unit active check if it has not already been scheduled."""
+    key = (unit, rootless, run_as_user if rootless else None)
+    if key in seen:
+        return
+    seen.add(key)
+    checks.append(
+        {
+            "unit": unit,
+            "rootless": rootless,
+            "run_as_user": run_as_user if rootless else None,
+            "reason": reason,
+        }
+    )
+
+
+def _append_owner_readiness_checks(
+    checks: list[dict[str, object]],
+    seen: set[tuple[str, bool, str | None]],
+    *,
+    owner_payload: object,
+) -> None:
+    """Schedule supported readiness gates required by an affected owner."""
+    if not isinstance(owner_payload, dict):
+        return
+    requires = owner_payload.get("requires")
+    if not isinstance(requires, list):
+        return
+    for dependency in requires:
+        if dependency != "unit:abhaile-secrets-ready.service":
+            continue
+        _append_unique_verification(
+            checks,
+            seen,
+            unit="abhaile-secrets-ready.service",
+            rootless=False,
+            run_as_user=None,
+            reason="readiness-gate",
+        )
+
+
+def _planned_health_verifications(
+    plan: PlanResult,
+    sync: _ApplyFileSync,
+) -> list[dict[str, object]]:
+    """Return affected active units/readiness gates to verify before state update."""
+    desired_manifest = plan.get("desired_manifest")
+    owners = desired_manifest.get("owners", {}) if isinstance(desired_manifest, dict) else {}
+    owner_hints = _owner_apply_hints_from_plan(plan)
+    checks: list[dict[str, object]] = []
+    seen: set[tuple[str, bool, str | None]] = set()
+
+    for action in sync.writes:
+        if not isinstance(action, dict):
+            continue
+        kind = action.get("kind")
+        owner_ref = action.get("owner_ref")
+        entry_hints = action.get("apply_hints")
+
+        if isinstance(owner_ref, str) and kind in {"quadlet.container", "quadlet.pod"}:
+            hints = owner_hints.get(owner_ref, {})
+            if hints.get("restart_mode") != "manual":
+                rootless, run_as_user = _rootless_context_from_hints(entry_hints, hints)
+                unit = QuadletExecutor.unit_from_owner(owner_ref)
+                _append_unique_verification(
+                    checks,
+                    seen,
+                    unit=unit,
+                    rootless=rootless,
+                    run_as_user=run_as_user,
+                    reason="quadlet-runtime",
+                )
+                if isinstance(owners, dict):
+                    _append_owner_readiness_checks(
+                        checks,
+                        seen,
+                        owner_payload=owners.get(owner_ref),
+                    )
+            continue
+
+        if kind == "service.config" and isinstance(entry_hints, dict):
+            restart_unit = entry_hints.get("restart_unit")
+            if isinstance(restart_unit, str) and restart_unit:
+                rootless, run_as_user = _rootless_context_from_hints(entry_hints)
+                _append_unique_verification(
+                    checks,
+                    seen,
+                    unit=restart_unit,
+                    rootless=rootless,
+                    run_as_user=run_as_user,
+                    reason="service-config",
+                )
+            continue
+
+        if kind == "systemd.unit" and isinstance(owner_ref, str):
+            activation_mode = (
+                entry_hints.get("activation_mode") if isinstance(entry_hints, dict) else None
+            )
+            if activation_mode in {"start", "start-now"}:
+                rootless, run_as_user = _rootless_context_from_hints(entry_hints)
+                unit = QuadletExecutor.unit_from_owner(owner_ref)
+                _append_unique_verification(
+                    checks,
+                    seen,
+                    unit=unit,
+                    rootless=rootless,
+                    run_as_user=run_as_user,
+                    reason="systemd-unit",
+                )
+
+    build_transactions = plan.get("build_transactions", [])
+    if isinstance(build_transactions, list):
+        for build in build_transactions:
+            if not isinstance(build, dict):
+                continue
+            scope = build.get("scope")
+            rootless = scope == "rootless"
+            user_obj = build.get("run_as_user")
+            run_as_user = user_obj if rootless and isinstance(user_obj, str) else None
+            consumers = build.get("consumers", [])
+            if not isinstance(consumers, list):
+                continue
+            for unit in consumers:
+                if isinstance(unit, str) and unit:
+                    _append_unique_verification(
+                        checks,
+                        seen,
+                        unit=unit,
+                        rootless=rootless,
+                        run_as_user=run_as_user,
+                        reason="managed-build-consumer",
+                    )
+    return checks
+
+
+def _run_apply_health_verifications(
+    plan: PlanResult,
+    sync: _ApplyFileSync,
+) -> list[dict[str, object]]:
+    """Verify affected runtime units and readiness gates before applied state is updated."""
+    results: list[dict[str, object]] = []
+    for check in _planned_health_verifications(plan, sync):
+        unit = check["unit"]
+        rootless = bool(check.get("rootless"))
+        run_as_user_obj = check.get("run_as_user")
+        run_as_user = run_as_user_obj if rootless and isinstance(run_as_user_obj, str) else None
+        if not isinstance(unit, str):
+            continue
+        result = QuadletExecutor.verify_unit_active(
+            unit,
+            rootless=rootless,
+            run_as_user=run_as_user,
+        )
+        results.append(
+            {
+                **check,
+                "action": "verify-active",
+                "success": result.success,
+                "return_code": result.return_code,
+            }
+        )
+    return results
+
+
 def _run_image_acquisitions(plan: PlanResult) -> list[dict[str, object]]:
     """Run planned image acquisition actions before file staging."""
     actions = plan.get("image_acquisitions", [])
@@ -515,6 +700,7 @@ def _print_apply_report(
     owner_execution: list[dict[str, object]],
     image_acquisition_results: list[dict[str, object]],
     build_transaction_results: list[dict[str, object]],
+    health_verifications: list[dict[str, object]],
 ) -> None:
     """Print apply report in text or JSON form."""
     if args.json:
@@ -529,6 +715,7 @@ def _print_apply_report(
                     "image_acquisitions": image_acquisition_results,
                     "build_transactions": build_transaction_results,
                     "owner_execution": owner_execution,
+                    "health_verifications": health_verifications,
                 },
                 indent=2,
             )
@@ -579,16 +766,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         build_transaction_results = _run_managed_build_transactions(plan)
         owner_execution = _run_apply_owner_actions(plan, sync)
+        health_verifications = _run_apply_health_verifications(plan, sync)
     except ApplyError as exc:
-        if image_acquisition_results or build_transaction_results or plan.get("build_transactions"):
-            _restore_file_sync(sync.rollback_records)
-            _restore_quadlet_runtime(sync)
-            raise ApplyError(
-                "deployment failed after acquisition/build; previous artifacts restored "
-                "applied_state_unchanged=true "
-                f"reason={exc}"
-            ) from exc
-        raise
+        _restore_file_sync(sync.rollback_records)
+        _restore_quadlet_runtime(sync)
+        raise ApplyError(
+            "deployment failed before state update; previous artifacts restored "
+            "applied_state_unchanged=true "
+            f"reason={exc}"
+        ) from exc
     LOG.info("apply.owners.complete")
     LOG.info("apply.state_update dir=%s", paths.state_dir)
     update_state_manifests(paths.desired_path, paths.state_dir)
@@ -598,6 +784,7 @@ def main(argv: list[str] | None = None) -> int:
         owner_execution,
         image_acquisition_results,
         build_transaction_results,
+        health_verifications,
     )
 
     LOG.info("apply.complete writes=%d removals=%d", sync.write_count, sync.remove_count)

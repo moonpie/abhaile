@@ -326,6 +326,53 @@ class QuadletExecutor:
         )
 
     @staticmethod
+    def unit_is_active(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> bool:
+        """Return True when systemd reports a unit active in the target manager."""
+        argv = ["systemctl"]
+        if rootless:
+            argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
+        argv.extend(["is-active", "--quiet", unit_name])
+        result = run_command(
+            argv,
+            action_id=f"systemctl-is-active:{unit_name}",
+            action_type="validation",
+            run_as_user=run_as_user if rootless else None,
+            check=False,
+        )
+        return result.success
+
+    @staticmethod
+    def verify_unit_active(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> ExecutionResult:
+        """Require a unit to be active in the target systemd manager."""
+        argv = ["systemctl"]
+        if rootless:
+            argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
+        argv.extend(["is-active", "--quiet", unit_name])
+        return run_command(
+            argv,
+            action_id=f"verify-unit-active:{unit_name}",
+            action_type="validation",
+            run_as_user=run_as_user if rootless else None,
+            check=True,
+        )
+
+    @staticmethod
     def apply_convergence_action(
         owner_ref: str,
         *,
@@ -530,16 +577,23 @@ class QuadletExecutor:
                 }
             )
         else:
+            was_active = QuadletExecutor.unit_is_active(
+                unit_name,
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+            action = "restart" if was_active else "start"
             restart = run_systemctl_command(
-                "try-restart",
+                action,
                 unit_name,
                 user=rootless,
                 run_as_user=run_as_user if rootless else None,
             )
             actions.append(
                 {
-                    "action": "try-restart",
+                    "action": action,
                     "unit": unit_name,
+                    "was_active": was_active,
                     "success": restart.success,
                     "return_code": restart.return_code,
                 }

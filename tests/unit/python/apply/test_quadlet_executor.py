@@ -89,8 +89,8 @@ class TestQuadletExecutor:
             run_as_user=None,
         )
 
-    def test_apply_owner_change_try_restart_for_container_kind(self, mocker: Any) -> None:
-        """Container/pod quadlet kinds should run try-restart after daemon-reload."""
+    def test_apply_owner_change_restarts_active_container_kind(self, mocker: Any) -> None:
+        """Active container/pod quadlet kinds should run restart after daemon-reload."""
         mocker.patch.object(
             QuadletExecutor,
             "daemon_reload",
@@ -101,10 +101,11 @@ class TestQuadletExecutor:
                 return_code=0,
             ),
         )
+        mock_active = mocker.patch.object(QuadletExecutor, "unit_is_active", return_value=True)
         mock_systemctl = mocker.patch(
             "abhaile.apply.quadlet.run_systemctl_command",
             return_value=ExecutionResult(
-                action_id="systemctl-try-restart",
+                action_id="systemctl-restart",
                 action_type="systemctl",
                 success=True,
                 return_code=0,
@@ -119,9 +120,60 @@ class TestQuadletExecutor:
             run_as_user=None,
         )
 
-        assert summary["actions"][1]["action"] == "try-restart"
+        assert summary["actions"][1]["action"] == "restart"
+        assert summary["actions"][1]["was_active"] is True
+        mock_active.assert_called_once_with(
+            "blocky.service",
+            rootless=False,
+            run_as_user=None,
+        )
         mock_systemctl.assert_called_once_with(
-            "try-restart",
+            "restart",
+            "blocky.service",
+            user=False,
+            run_as_user=None,
+        )
+
+    def test_apply_owner_change_starts_inactive_container_kind(self, mocker: Any) -> None:
+        """Inactive desired container/pod quadlet kinds should be started after reload."""
+        mocker.patch.object(
+            QuadletExecutor,
+            "daemon_reload",
+            return_value=ExecutionResult(
+                action_id="systemctl-daemon-reload",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+        mock_active = mocker.patch.object(QuadletExecutor, "unit_is_active", return_value=False)
+        mock_systemctl = mocker.patch(
+            "abhaile.apply.quadlet.run_systemctl_command",
+            return_value=ExecutionResult(
+                action_id="systemctl-start",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+
+        summary = QuadletExecutor.apply_owner_change(
+            "unit:blocky.service",
+            kinds=["quadlet.container"],
+            changed_phases={"write"},
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert summary["actions"][1]["action"] == "start"
+        assert summary["actions"][1]["was_active"] is False
+        mock_active.assert_called_once_with(
+            "blocky.service",
+            run_as_user=None,
+            rootless=False,
+        )
+        mock_systemctl.assert_called_once_with(
+            "start",
             "blocky.service",
             user=False,
             run_as_user=None,
