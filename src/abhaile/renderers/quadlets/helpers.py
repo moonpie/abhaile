@@ -28,14 +28,16 @@ def _quadlet_kind_from_filename(filename: str) -> str:
 def _quadlet_unit_name(filename: str) -> str:
     """Return the derived systemd unit name for a quadlet file.
 
-    Containers and pods map ``{stem}.{ext}`` → ``{stem}.service``.
-    Volumes, networks, images, and builds append the extension type as a
-    suffix to distinguish them from container units.
+    Containers map ``{stem}.container`` → ``{stem}.service``. Pods and other
+    quadlet types append the extension type as a suffix to distinguish them
+    from container units.
     """
     stem = Path(filename).stem
     suffix = Path(filename).suffix
-    if suffix in (".container", ".pod"):
+    if suffix == ".container":
         return f"{stem}.service"
+    if suffix == ".pod":
+        return f"{stem}-pod.service"
     ext_word = suffix.lstrip(".")
     return f"{stem}-{ext_word}.service"
 

@@ -643,7 +643,7 @@ composition:
         pod_key = next(k for k in artifacts if k.endswith("authelia-app.pod"))
         pod_art = artifacts[pod_key]
         assert pod_art.kind == "quadlet.pod"
-        assert pod_art.owner_ref == "unit:authelia-app.service"
+        assert pod_art.owner_ref == "unit:authelia-app-pod.service"
         assert pod_art.target_path == "/etc/containers/systemd/authelia-app.pod"
         assert pod_art.apply_hints == {"rootless": False}
 
@@ -658,15 +658,15 @@ composition:
             "pull_policy": "missing",
         }
 
-        assert "unit:authelia-app.service" in owners
+        assert "unit:authelia-app-pod.service" in owners
         assert "unit:authelia-app-app.service" in owners
         assert "unit:authelia-app-app-image.service" not in owners
-        assert owners["unit:authelia-app.service"].apply_hints == {"rootless": False}
-        assert owners["unit:authelia-app.service"].requires == [
+        assert owners["unit:authelia-app-pod.service"].apply_hints == {"rootless": False}
+        assert owners["unit:authelia-app-pod.service"].requires == [
             "unit:services-network.service",
         ]
         assert owners["unit:authelia-app-app.service"].requires == [
-            "unit:authelia-app.service",
+            "unit:authelia-app-pod.service",
         ]
         assert owners["unit:authelia-app-app.service"].apply_hints == {
             "rootless": False,

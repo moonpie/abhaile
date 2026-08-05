@@ -7,8 +7,15 @@ from typing import Any
 
 import pytest
 
+from abhaile.renderers.quadlets.helpers import _quadlet_unit_name
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
+
+
+def test_quadlet_unit_name_matches_podman_generated_units() -> None:
+    """Map container and pod quadlets to the generated systemd unit names."""
+    assert _quadlet_unit_name("blocky.container") == "blocky.service"
+    assert _quadlet_unit_name("authelia-app.pod") == "authelia-app-pod.service"
 
 
 class TestHostPathValidation:
