@@ -14,7 +14,8 @@ from abhaile.apply.actions import (
     check_destructive_gate,
     remove_target_file,
 )
-from abhaile.apply.coredns import CorednsExecutor
+from abhaile.apply.build import ManagedBuildExecutor
+from abhaile.apply.quadlet import QuadletExecutor
 from abhaile.apply.staging import _copy_artifact_for_apply
 from abhaile.apply.dispatch import (
     _collect_owner_escalations,
@@ -47,6 +48,16 @@ class _ApplyPaths:
 
 
 @dataclass(frozen=True)
+class _RollbackRecord:
+    """Previous live file content captured before apply staging."""
+
+    target_path: Path
+    existed: bool
+    content: bytes | None
+    mode: int | None
+
+
+@dataclass(frozen=True)
 class _ApplyFileSync:
     """File synchronization counts and removals selected for owner actions."""
 
@@ -54,6 +65,7 @@ class _ApplyFileSync:
     removals_to_apply: list[dict[str, object]]
     write_count: int
     remove_count: int
+    rollback_records: list[_RollbackRecord]
 
 
 def _is_managed_networkd_dropin_removal(removal: dict[str, object]) -> bool:
@@ -69,7 +81,11 @@ def _is_managed_networkd_dropin_removal(removal: dict[str, object]) -> bool:
 
 def _default_safe_removals(removals_safe: list[dict[str, object]]) -> list[dict[str, object]]:
     """Select prune-safe removals that should be applied without explicit prune flags."""
-    return [removal for removal in removals_safe if _is_managed_networkd_dropin_removal(removal)]
+    return [
+        removal
+        for removal in removals_safe
+        if _is_managed_networkd_dropin_removal(removal) or removal.get("kind") == "quadlet.image"
+    ]
 
 
 def _local_hostname() -> str:
@@ -204,6 +220,8 @@ def _run_dry_run(
                     "validations_run": len(validation_results),
                     "validation_results": validation_results,
                     "owner_escalations": owner_escalations,
+                    "image_acquisitions": plan.get("image_acquisitions", []),
+                    "build_transactions": plan.get("build_transactions", []),
                     "quadlet_convergence_plans": quadlet_convergence_plans,
                 },
                 indent=2,
@@ -271,10 +289,14 @@ def _sync_files_for_apply(
         len(removals_drifted),
     )
 
+    rollback_records: list[_RollbackRecord] = []
     write_count = 0
     for action in writes:
         if not isinstance(action, dict):
             raise ApplyError("Invalid write action")
+        target_path = action.get("target_path")
+        if isinstance(target_path, str):
+            rollback_records.append(_snapshot_target(Path(target_path)))
         _copy_artifact_for_apply(action, paths.rendered_dir)
         write_count += 1
 
@@ -286,11 +308,140 @@ def _sync_files_for_apply(
         target_path = removal.get("target_path") if isinstance(removal, dict) else None
         if not isinstance(target_path, str):
             raise ApplyError("Removal action missing target_path")
-        remove_target_file(Path(target_path))
+        path = Path(target_path)
+        rollback_records.append(_snapshot_target(path))
+        remove_target_file(path)
         remove_count += 1
 
     LOG.info("apply.staging.complete staged=%d removed=%d", write_count, remove_count)
-    return _ApplyFileSync(writes, removals_to_apply, write_count, remove_count)
+    return _ApplyFileSync(writes, removals_to_apply, write_count, remove_count, rollback_records)
+
+
+def _snapshot_target(path: Path) -> _RollbackRecord:
+    """Capture a live target before staging mutates it."""
+    if not path.exists() or path.is_dir():
+        return _RollbackRecord(path, False, None, None)
+    try:
+        stat = path.stat()
+        return _RollbackRecord(path, True, path.read_bytes(), stat.st_mode & 0o7777)
+    except OSError as exc:
+        raise ApplyError(f"Failed to snapshot target for rollback: {path} ({exc})") from exc
+
+
+def _restore_file_sync(rollback_records: list[_RollbackRecord]) -> None:
+    """Restore staged files from rollback records in reverse mutation order."""
+    for record in reversed(rollback_records):
+        try:
+            if not record.existed:
+                if record.target_path.exists() and not record.target_path.is_dir():
+                    record.target_path.unlink()
+                continue
+            if record.content is None:
+                continue
+            record.target_path.parent.mkdir(parents=True, exist_ok=True)
+            record.target_path.write_bytes(record.content)
+            if record.mode is not None:
+                record.target_path.chmod(record.mode)
+        except OSError as exc:
+            raise ApplyError(
+                f"Failed to restore target after apply failure: {record.target_path} ({exc})"
+            ) from exc
+
+
+def _restore_quadlet_runtime(sync: _ApplyFileSync) -> list[dict[str, object]]:
+    """Reload and restart restored Quadlet container or pod units."""
+    owner_kinds: dict[str, set[str]] = {}
+    owner_contexts: dict[str, tuple[bool, str | None]] = {}
+    for action in [*sync.writes, *sync.removals_to_apply]:
+        kind = action.get("kind") if isinstance(action, dict) else None
+        if kind not in {"quadlet.container", "quadlet.pod"}:
+            continue
+        owner_ref = action.get("owner_ref")
+        if not isinstance(owner_ref, str) or not owner_ref:
+            continue
+        hints = action.get("apply_hints")
+        rootless = isinstance(hints, dict) and bool(hints.get("rootless"))
+        podman_user = hints.get("podman_user") if isinstance(hints, dict) else None
+        owner_kinds.setdefault(owner_ref, set()).add(kind)
+        owner_contexts.setdefault(
+            owner_ref,
+            (rootless, podman_user if isinstance(podman_user, str) else None),
+        )
+
+    restored: list[dict[str, object]] = []
+    for owner_ref in sorted(owner_kinds):
+        rootless, run_as_user = owner_contexts[owner_ref]
+        restored.append(
+            QuadletExecutor.apply_owner_change(
+                owner_ref,
+                kinds=sorted(owner_kinds[owner_ref]),
+                changed_phases={"write"},
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+        )
+    return restored
+
+
+def _run_image_acquisitions(plan: PlanResult) -> list[dict[str, object]]:
+    """Run planned image acquisition actions before file staging."""
+    actions = plan.get("image_acquisitions", [])
+    if not isinstance(actions, list):
+        return []
+
+    results: list[dict[str, object]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        desired_image = action.get("desired_image")
+        if not isinstance(desired_image, str) or not desired_image:
+            raise ApplyError("Image acquisition action missing desired_image")
+        scope = action.get("scope")
+        rootless = scope == "rootless"
+        run_as_user_obj = action.get("run_as_user")
+        run_as_user = (
+            run_as_user_obj
+            if rootless and isinstance(run_as_user_obj, str) and run_as_user_obj
+            else None
+        )
+
+        if action.get("old_image") is None and QuadletExecutor.image_exists(
+            desired_image,
+            rootless=rootless,
+            run_as_user=run_as_user,
+        ):
+            inspect = QuadletExecutor.inspect_image(
+                desired_image,
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+            results.append(
+                {
+                    **action,
+                    "result": "already-local",
+                    "live_service_unchanged": True,
+                    **inspect,
+                }
+            )
+            continue
+
+        try:
+            result = QuadletExecutor.pre_pull_image(
+                desired_image,
+                rootless=rootless,
+                run_as_user=run_as_user,
+            )
+        except ApplyError as exc:
+            service = action.get("service", "unknown")
+            current = action.get("old_image") or "<none>"
+            raise ApplyError(
+                "deployment blocked during image acquisition "
+                f"service={service} desired={desired_image} current={current} "
+                "live_service_unchanged=true applied_state_unchanged=true "
+                f"reason={exc}"
+            ) from exc
+        results.append({**action, "result": "pulled", "live_service_unchanged": True, **result})
+    return results
 
 
 def _owner_apply_hints_from_plan(plan: PlanResult) -> dict[str, dict[str, object]]:
@@ -329,15 +480,18 @@ def _run_apply_owner_actions(plan: PlanResult, sync: _ApplyFileSync) -> list[dic
     if not isinstance(quadlet_convergence_plans, dict):
         quadlet_convergence_plans = None
 
-    excluded_quadlet_owners: set[str] | None = None
-    if CorednsExecutor.build_inputs_changed(writes):
-        excluded_quadlet_owners = {"unit:coredns-omada-build.service"}
+    build_transactions = plan.get("build_transactions", [])
+    excluded_quadlet_owners = {
+        action["owner_ref"]
+        for action in build_transactions
+        if isinstance(action, dict) and isinstance(action.get("owner_ref"), str)
+    }
     quadlet_owner_results = _run_quadlet_owner_actions(
         writes,
         removals_to_apply,
         convergence_plans=quadlet_convergence_plans,
         owner_apply_hints=_owner_apply_hints_from_plan(plan),
-        excluded_owner_refs=excluded_quadlet_owners,
+        excluded_owner_refs=excluded_quadlet_owners or None,
     )
     service_owner_results = _run_service_owner_actions(writes, removals_to_apply)
     coredns_owner_results = _run_coredns_owner_actions(writes, removals_to_apply)
@@ -359,6 +513,8 @@ def _print_apply_report(
     args: argparse.Namespace,
     sync: _ApplyFileSync,
     owner_execution: list[dict[str, object]],
+    image_acquisition_results: list[dict[str, object]],
+    build_transaction_results: list[dict[str, object]],
 ) -> None:
     """Print apply report in text or JSON form."""
     if args.json:
@@ -370,6 +526,8 @@ def _print_apply_report(
                     "removals": sync.remove_count,
                     "state_updated": True,
                     "allow_destructive": args.allow_destructive,
+                    "image_acquisitions": image_acquisition_results,
+                    "build_transactions": build_transaction_results,
                     "owner_execution": owner_execution,
                 },
                 indent=2,
@@ -380,6 +538,26 @@ def _print_apply_report(
             f"mode=apply writes={sync.write_count} "
             f"removals={sync.remove_count} state_updated=true"
         )
+
+
+def _run_managed_build_transactions(plan: PlanResult) -> list[dict[str, object]]:
+    """Run planned managed build transactions before consumer owner actions."""
+    actions = plan.get("build_transactions", [])
+    if not isinstance(actions, list):
+        return []
+    results: list[dict[str, object]] = []
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        service = action.get("service", "unknown")
+        try:
+            results.append(ManagedBuildExecutor.run_transaction(action))
+        except ApplyError as exc:
+            raise ApplyError(
+                "deployment blocked during managed build "
+                f"service={service} applied_state_unchanged=true reason={exc}"
+            ) from exc
+    return results
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -395,12 +573,32 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return _run_dry_run(args, paths, plan, owner_escalations)
 
+    image_acquisition_results = _run_image_acquisitions(plan)
     sync = _sync_files_for_apply(args, paths, plan, owner_escalations)
-    owner_execution = _run_apply_owner_actions(plan, sync)
+    build_transaction_results: list[dict[str, object]] = []
+    try:
+        build_transaction_results = _run_managed_build_transactions(plan)
+        owner_execution = _run_apply_owner_actions(plan, sync)
+    except ApplyError as exc:
+        if image_acquisition_results or build_transaction_results or plan.get("build_transactions"):
+            _restore_file_sync(sync.rollback_records)
+            _restore_quadlet_runtime(sync)
+            raise ApplyError(
+                "deployment failed after acquisition/build; previous artifacts restored "
+                "applied_state_unchanged=true "
+                f"reason={exc}"
+            ) from exc
+        raise
     LOG.info("apply.owners.complete")
     LOG.info("apply.state_update dir=%s", paths.state_dir)
     update_state_manifests(paths.desired_path, paths.state_dir)
-    _print_apply_report(args, sync, owner_execution)
+    _print_apply_report(
+        args,
+        sync,
+        owner_execution,
+        image_acquisition_results,
+        build_transaction_results,
+    )
 
     LOG.info("apply.complete writes=%d removals=%d", sync.write_count, sync.remove_count)
     return 0

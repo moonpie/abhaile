@@ -528,7 +528,6 @@ def _run_coredns_owner_actions(
     removals_to_apply: list[dict[str, object]],
 ) -> list[dict[str, object]]:
     """Run phase 7.4 CoreDNS actions for changed entries."""
-    build_inputs_changed = CorednsExecutor.build_inputs_changed(writes)
     config_changed = False
     zone_writes: list[dict[str, object]] = []
     zone_removals: list[dict[str, object]] = []
@@ -565,7 +564,7 @@ def _run_coredns_owner_actions(
             config_changed=config_changed,
             zone_writes=zone_writes,
             zone_removals=zone_removals,
-            build_inputs_changed=build_inputs_changed,
+            build_inputs_changed=False,
         )
         owner_results.append(
             {

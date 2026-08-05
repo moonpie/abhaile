@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Container]
 Image={{ image }}
+Pull={{ pull_policy }}
 Network={{ network.services[service_name].vlan }}.network
 PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
 Timezone=local

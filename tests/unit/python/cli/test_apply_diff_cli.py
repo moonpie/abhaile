@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import stat
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from abhaile.cli import apply as apply_cli
 from abhaile.cli.apply import main as main_apply
 from abhaile.cli.diff import main as main_diff
 from abhaile.apply.actions import ExecutionResult
+from abhaile.plan.diff import PlanResult
 from abhaile.utils.errors import ApplyError
 
 
@@ -113,6 +117,488 @@ class TestApplyCli:
         assert rc == 0
         assert not target.exists()
         assert not (tmp_path / "state" / "manifest.json").exists()
+
+    def test_apply_dry_run_json_includes_image_acquisition_plan(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--dry-run JSON should expose planned image acquisitions without pulling."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "blocky.container"
+
+        _write_manifest(
+            desired,
+            "deimos",
+            [
+                {
+                    "render_path": "services/blocky/etc/containers/systemd/blocky.container",
+                    "target_path": target.as_posix(),
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "sha256": _sha_of("[Container]\nImage=blocky:v2\nPull=missing\n"),
+                    "size": len("[Container]\nImage=blocky:v2\nPull=missing\n"),
+                    "apply_hints": {
+                        "rootless": False,
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                        "pull_policy": "missing",
+                    },
+                }
+            ],
+        )
+        _write_manifest(
+            applied,
+            "deimos",
+            [
+                {
+                    "render_path": "services/blocky/etc/containers/systemd/blocky.container",
+                    "target_path": target.as_posix(),
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "sha256": _sha_of("[Container]\nImage=blocky:v1\nPull=missing\n"),
+                    "size": len("[Container]\nImage=blocky:v1\nPull=missing\n"),
+                    "apply_hints": {
+                        "rootless": False,
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                        "pull_policy": "missing",
+                    },
+                }
+            ],
+        )
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.pre_pull_image",
+            lambda *args, **kwargs: pytest.fail("dry-run should not pull images"),
+        )
+
+        rc = main_apply(
+            [
+                "--desired-manifest",
+                desired.as_posix(),
+                "--applied-manifest",
+                applied.as_posix(),
+                "--dry-run",
+                "--json",
+            ]
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert payload["image_acquisitions"] == [
+            {
+                "service": "blocky",
+                "owner_ref": "unit:blocky.service",
+                "target_path": target.as_posix(),
+                "scope": "rootful",
+                "old_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                "desired_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                "pull_policy": "missing",
+                "action": "pre-pull",
+            }
+        ]
+
+    def test_apply_dry_run_json_includes_managed_build_plan(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """--dry-run JSON should expose managed build transactions without executing them."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "coredns-omada.build"
+        content = "[Build]\nImageTag=localhost/coredns-omada:latest\nPull=missing\n"
+        desired_entry = {
+            "render_path": "services/coredns/etc/containers/systemd/coredns-omada.build",
+            "target_path": target.as_posix(),
+            "kind": "quadlet.build",
+            "owner_ref": "unit:coredns-omada-build.service",
+            "sha256": _sha_of(content),
+            "size": len(content),
+            "apply_hints": {
+                "rootless": False,
+                "managed_build": {
+                    "service": "coredns-omada",
+                    "output_image": "localhost/coredns-omada:latest",
+                    "pull_policy": "missing",
+                    "input_fingerprint": "f" * 64,
+                    "inputs": ["coredns-omada/quadlets/build.build"],
+                    "consumers": ["coredns.service"],
+                },
+            },
+        }
+        applied_entry = {
+            **desired_entry,
+            "apply_hints": {
+                "rootless": False,
+                "managed_build": {
+                    "service": "coredns-omada",
+                    "output_image": "localhost/coredns-omada:latest",
+                    "pull_policy": "missing",
+                    "input_fingerprint": "e" * 64,
+                    "inputs": ["coredns-omada/quadlets/build.build"],
+                    "consumers": ["coredns.service"],
+                },
+            },
+        }
+        _write_manifest(desired, "phobos", [desired_entry])
+        _write_manifest(applied, "phobos", [applied_entry])
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "phobos")
+        monkeypatch.setattr(
+            "abhaile.cli.apply.ManagedBuildExecutor.run_transaction",
+            lambda *_args, **_kwargs: pytest.fail("dry-run should not start build units"),
+        )
+
+        rc = main_apply(
+            [
+                "--desired-manifest",
+                desired.as_posix(),
+                "--applied-manifest",
+                applied.as_posix(),
+                "--dry-run",
+                "--json",
+            ]
+        )
+
+        payload = json.loads(capsys.readouterr().out)
+        assert rc == 0
+        assert payload["build_transactions"][0]["action"] == "build"
+        assert payload["build_transactions"][0]["build_unit"] == "coredns-omada-build.service"
+        assert payload["build_transactions"][0]["desired_fingerprint"] == "f" * 64
+
+    def test_apply_prepull_failure_leaves_files_and_state_unchanged(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Image acquisition failure should abort before staging files or state."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+        source = tmp_path / "rendered" / "services" / "blocky" / "etc/containers/systemd"
+        source.mkdir(parents=True, exist_ok=True)
+        (source / "blocky.container").write_text(
+            "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.28.0\nPull=missing\n",
+            encoding="utf-8",
+        )
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "blocky.container"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPull=missing\n",
+            encoding="utf-8",
+        )
+
+        _write_manifest(
+            desired,
+            "deimos",
+            [
+                {
+                    "render_path": "services/blocky/etc/containers/systemd/blocky.container",
+                    "target_path": target.as_posix(),
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "sha256": _sha_of(
+                        "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.28.0\nPull=missing\n"
+                    ),
+                    "size": len(
+                        "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.28.0\nPull=missing\n"
+                    ),
+                    "apply_hints": {
+                        "rootless": False,
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                        "pull_policy": "missing",
+                    },
+                }
+            ],
+        )
+        _write_manifest(
+            applied,
+            "deimos",
+            [
+                {
+                    "render_path": "services/blocky/etc/containers/systemd/blocky.container",
+                    "target_path": target.as_posix(),
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "sha256": _sha_of(
+                        "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPull=missing\n"
+                    ),
+                    "size": len(
+                        "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPull=missing\n"
+                    ),
+                    "apply_hints": {
+                        "rootless": False,
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                        "pull_policy": "missing",
+                    },
+                }
+            ],
+        )
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.pre_pull_image",
+            lambda *args, **kwargs: (_ for _ in ()).throw(ApplyError("registry DNS failed")),
+        )
+        monkeypatch.setattr(
+            "abhaile.cli.apply._copy_artifact_for_apply",
+            lambda *args, **kwargs: pytest.fail("pre-pull failure should prevent staging"),
+        )
+
+        with pytest.raises(ApplyError, match="deployment blocked during image acquisition"):
+            main_apply(
+                [
+                    "--desired-manifest",
+                    desired.as_posix(),
+                    "--applied-manifest",
+                    applied.as_posix(),
+                ]
+            )
+
+        assert "v0.27.0" in target.read_text(encoding="utf-8")
+        assert not (tmp_path / "state" / "last-successful-commit").exists()
+
+    def test_apply_post_pull_failure_restores_previous_container_artifact(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Owner failure after image acquisition should restore previous live artifact."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        applied = tmp_path / "state" / "manifest.json"
+        source = tmp_path / "rendered" / "services" / "blocky" / "etc/containers/systemd"
+        source.mkdir(parents=True, exist_ok=True)
+        desired_content = "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.28.0\nPull=missing\n"
+        previous_content = "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\nPull=missing\n"
+        (source / "blocky.container").write_text(desired_content, encoding="utf-8")
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "blocky.container"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(previous_content, encoding="utf-8")
+
+        desired_entry = {
+            "render_path": "services/blocky/etc/containers/systemd/blocky.container",
+            "target_path": target.as_posix(),
+            "kind": "quadlet.container",
+            "owner_ref": "unit:blocky.service",
+            "sha256": _sha_of(desired_content),
+            "size": len(desired_content),
+            "apply_hints": {
+                "rootless": False,
+                "podman_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                "pull_policy": "missing",
+            },
+        }
+        applied_entry = {
+            **desired_entry,
+            "sha256": _sha_of(previous_content),
+            "size": len(previous_content),
+            "apply_hints": {
+                "rootless": False,
+                "podman_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                "pull_policy": "missing",
+            },
+        }
+        _write_manifest(desired, "deimos", [desired_entry])
+        _write_manifest(applied, "deimos", [applied_entry])
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.pre_pull_image",
+            lambda *args, **kwargs: {"image_id": "sha256:new", "success": True},
+        )
+        monkeypatch.setattr(
+            "abhaile.cli.apply._run_apply_owner_actions",
+            lambda *args, **kwargs: (_ for _ in ()).throw(ApplyError("restart failed")),
+        )
+        restored: list[dict[str, object]] = []
+
+        def fake_restore_owner(
+            owner_ref: str,
+            *,
+            kinds: list[str],
+            changed_phases: set[str],
+            rootless: bool,
+            run_as_user: str | None,
+            **_kwargs: object,
+        ) -> dict[str, object]:
+            payload = {
+                "owner_ref": owner_ref,
+                "kinds": kinds,
+                "changed_phases": changed_phases,
+                "rootless": rootless,
+                "run_as_user": run_as_user,
+            }
+            restored.append(payload)
+            return payload
+
+        monkeypatch.setattr(
+            "abhaile.cli.apply.QuadletExecutor.apply_owner_change",
+            fake_restore_owner,
+        )
+
+        with pytest.raises(ApplyError, match="previous artifacts restored"):
+            main_apply(
+                [
+                    "--desired-manifest",
+                    desired.as_posix(),
+                    "--applied-manifest",
+                    applied.as_posix(),
+                ]
+            )
+
+        assert target.read_text(encoding="utf-8") == previous_content
+        assert restored == [
+            {
+                "owner_ref": "unit:blocky.service",
+                "kinds": ["quadlet.container"],
+                "changed_phases": {"write"},
+                "rootless": False,
+                "run_as_user": None,
+            }
+        ]
+        assert "v0.27.0" in applied.read_text(encoding="utf-8")
+
+    def test_restore_file_sync_restores_changed_file_and_removes_created_file(
+        self, tmp_path: Path
+    ) -> None:
+        """Rollback restore should recreate old content and remove newly staged files."""
+        existing = tmp_path / "target" / "blocky.container"
+        existing.parent.mkdir(parents=True)
+        existing.write_text("old\n", encoding="utf-8")
+        existing.chmod(0o640)
+        created = tmp_path / "target" / "vault-agent.container"
+
+        records = [
+            apply_cli._snapshot_target(existing),
+            apply_cli._snapshot_target(created),
+        ]
+        existing.write_text("new\n", encoding="utf-8")
+        existing.chmod(0o600)
+        created.write_text("created\n", encoding="utf-8")
+
+        apply_cli._restore_file_sync(records)
+
+        assert existing.read_text(encoding="utf-8") == "old\n"
+        assert stat.S_IMODE(existing.stat().st_mode) == 0o640
+        assert not created.exists()
+
+    def test_run_image_acquisitions_skips_new_service_when_image_is_local(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A new service should not pull when its desired image already exists locally."""
+        exists_calls: list[tuple[str, bool, str | None]] = []
+        inspect_calls: list[tuple[str, bool, str | None]] = []
+
+        def fake_exists(image: str, *, rootless: bool, run_as_user: str | None) -> bool:
+            exists_calls.append((image, rootless, run_as_user))
+            return True
+
+        def fake_inspect(image: str, *, rootless: bool, run_as_user: str | None) -> dict[str, str]:
+            inspect_calls.append((image, rootless, run_as_user))
+            return {"image": image, "image_id": "sha256:local"}
+
+        monkeypatch.setattr(apply_cli.QuadletExecutor, "image_exists", fake_exists)
+        monkeypatch.setattr(apply_cli.QuadletExecutor, "inspect_image", fake_inspect)
+        monkeypatch.setattr(
+            apply_cli.QuadletExecutor,
+            "pre_pull_image",
+            lambda *args, **kwargs: pytest.fail("already-local image should not be pulled"),
+        )
+        plan = {
+            "image_acquisitions": [
+                {
+                    "service": "vault-agent",
+                    "scope": "rootless",
+                    "run_as_user": "abhaile",
+                    "old_image": None,
+                    "desired_image": "docker.io/hashicorp/vault:1.21.4",
+                    "action": "pre-pull",
+                }
+            ]
+        }
+
+        results = apply_cli._run_image_acquisitions(cast(PlanResult, plan))
+
+        assert exists_calls == [("docker.io/hashicorp/vault:1.21.4", True, "abhaile")]
+        assert inspect_calls == [("docker.io/hashicorp/vault:1.21.4", True, "abhaile")]
+        assert results == [
+            {
+                "service": "vault-agent",
+                "scope": "rootless",
+                "run_as_user": "abhaile",
+                "old_image": None,
+                "desired_image": "docker.io/hashicorp/vault:1.21.4",
+                "action": "pre-pull",
+                "result": "already-local",
+                "live_service_unchanged": True,
+                "image": "docker.io/hashicorp/vault:1.21.4",
+                "image_id": "sha256:local",
+            }
+        ]
+
+    def test_run_image_acquisitions_rejects_missing_desired_image(self) -> None:
+        """Image acquisition actions must identify the exact desired reference."""
+        with pytest.raises(ApplyError, match="missing desired_image"):
+            apply_cli._run_image_acquisitions(
+                cast(
+                    PlanResult,
+                    {"image_acquisitions": [{"service": "blocky", "action": "pre-pull"}]},
+                )
+            )
+
+    def test_restore_quadlet_runtime_uses_rootless_owner_context(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rollback runtime restore should restart rootless units in the right user manager."""
+        calls: list[dict[str, object]] = []
+
+        def fake_apply_owner_change(
+            owner_ref: str,
+            *,
+            kinds: list[str],
+            changed_phases: set[str],
+            rootless: bool,
+            run_as_user: str | None,
+            **_kwargs: object,
+        ) -> dict[str, object]:
+            payload = {
+                "owner_ref": owner_ref,
+                "kinds": kinds,
+                "changed_phases": changed_phases,
+                "rootless": rootless,
+                "run_as_user": run_as_user,
+            }
+            calls.append(payload)
+            return payload
+
+        monkeypatch.setattr(
+            apply_cli.QuadletExecutor,
+            "apply_owner_change",
+            fake_apply_owner_change,
+        )
+        sync = apply_cli._ApplyFileSync(
+            writes=[
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:vault-agent.service",
+                    "apply_hints": {"rootless": True, "podman_user": "abhaile"},
+                }
+            ],
+            removals_to_apply=[],
+            write_count=1,
+            remove_count=0,
+            rollback_records=[],
+        )
+
+        assert apply_cli._restore_quadlet_runtime(sync) == calls
+        assert calls == [
+            {
+                "owner_ref": "unit:vault-agent.service",
+                "kinds": ["quadlet.container"],
+                "changed_phases": {"write"},
+                "rootless": True,
+                "run_as_user": "abhaile",
+            }
+        ]
 
     def test_apply_writes_target_and_updates_state(
         self,

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +50,7 @@ def render_service_configs(
         service_data = read_yaml(service_yaml) or {}
         apply_hints = _service_config_apply_hints(service, service_data)
         directory_apply_hints = _service_directory_apply_hints(service_data)
+        build_hints = _managed_build_hints_by_service(service, config_root)
 
         config_entries = _collect_service_composition_entries(service, config_root, "config")
         systemd_entries = _collect_service_composition_entries(service, config_root, "systemd")
@@ -68,6 +71,7 @@ def render_service_configs(
                 resolved_entries,
                 apply_hints,
                 directory_apply_hints,
+                build_hints,
             )
 
             render_config_entries(
@@ -171,6 +175,7 @@ def _annotate_config_entries_with_apply_hints(
     entries: list[dict[str, Any]],
     apply_hints: dict[str, Any],
     directory_apply_hints: dict[str, Any],
+    build_hints_by_service: dict[str, dict[str, Any]],
 ) -> list[Any]:
     """Attach internal apply hints to service config/directory entries."""
     if not apply_hints and not directory_apply_hints:
@@ -184,18 +189,117 @@ def _annotate_config_entries_with_apply_hints(
 
         merged = dict(entry)
         entry_hints: dict[str, Any] = dict(apply_hints)
+        contributor = merged.get("_abhaile_contributor_ref")
+        destination = merged.get("destination")
         if "source" not in merged:
             entry_hints.update(directory_apply_hints)
             for key in ("owner", "group", "mode"):
                 value = merged.get(key)
                 if isinstance(value, str) and value:
                     entry_hints[key] = value
+        elif (
+            isinstance(contributor, str)
+            and isinstance(destination, str)
+            and Path(destination).suffix == ".build"
+            and contributor in build_hints_by_service
+        ):
+            entry_hints.update(build_hints_by_service[contributor])
 
         if entry_hints:
             merged["_abhaile_apply_hints"] = entry_hints
         annotated.append(merged)
 
     return annotated
+
+
+def _managed_build_hints_by_service(service: str, config_root: Path) -> dict[str, dict[str, Any]]:
+    """Build managed-build apply hints for a service and its includes."""
+    hints: dict[str, dict[str, Any]] = {}
+    for service_name in walk_service_includes(service, config_root):
+        service_yaml = config_root / "services" / service_name / "service.yaml"
+        service_data = read_yaml(service_yaml) or {}
+        build = service_data.get("build")
+        if not isinstance(build, dict):
+            continue
+        output_image = build.get("output_image")
+        if not isinstance(output_image, str) or not output_image:
+            raise RenderError(f"build.output_image must be a non-empty string for {service_name}")
+        pull_policy = build.get("pull_policy", "missing")
+        if pull_policy != "missing":
+            raise RenderError(f"Only build.pull_policy=missing is supported for {service_name}")
+        inputs = build.get("inputs", [])
+        if not isinstance(inputs, list) or not all(
+            isinstance(item, str) and item for item in inputs
+        ):
+            raise RenderError(f"build.inputs must be a list of source paths for {service_name}")
+        post_build = build.get("post_build")
+        consumers = build.get("consumers", [])
+        if not isinstance(consumers, list) or not all(
+            isinstance(item, str) and item for item in consumers
+        ):
+            raise RenderError(f"build.consumers must be a list of unit names for {service_name}")
+        rootless, podman_user = _service_podman_context(service_data)
+        hint: dict[str, Any] = {
+            "rootless": rootless,
+            "managed_build": {
+                "service": service_name,
+                "output_image": output_image,
+                "pull_policy": pull_policy,
+                "input_fingerprint": _managed_build_fingerprint(
+                    config_root / "services",
+                    input_paths=inputs,
+                    build=build,
+                ),
+                "inputs": inputs,
+                "consumers": consumers,
+            },
+        }
+        if rootless and podman_user is not None:
+            hint["podman_user"] = podman_user
+        if isinstance(post_build, dict):
+            hint["managed_build"]["post_build"] = post_build
+        hints[service_name] = hint
+    return hints
+
+
+def _service_podman_context(service_data: dict[str, Any]) -> tuple[bool, str | None]:
+    """Resolve service rootless context from podman config."""
+    podman = service_data.get("podman")
+    if not isinstance(podman, dict):
+        return False, None
+    user = podman.get("user")
+    if not isinstance(user, str) or not user:
+        return False, None
+    rootless_value = podman.get("rootless")
+    rootless = rootless_value if isinstance(rootless_value, bool) else user != "root"
+    return rootless, user if rootless else None
+
+
+def _managed_build_fingerprint(
+    services_root: Path,
+    *,
+    input_paths: list[str],
+    build: dict[str, Any],
+) -> str:
+    """Return a deterministic fingerprint for declared managed build inputs."""
+    payload: dict[str, Any] = {
+        "build": {
+            key: value for key, value in sorted(build.items()) if key not in {"input_fingerprint"}
+        },
+        "inputs": [],
+    }
+    for input_path in sorted(input_paths):
+        path = services_root / input_path
+        if not path.exists() or not path.is_file():
+            raise RenderError(f"Managed build input not found: {path}")
+        payload["inputs"].append(
+            {
+                "path": input_path,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _service_directory_apply_hints(service_data: dict[str, Any]) -> dict[str, Any]:

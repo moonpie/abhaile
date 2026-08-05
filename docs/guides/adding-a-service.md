@@ -47,6 +47,8 @@ Schema requirements:
 - Both `name` and `composition` are always required
 - If `podman:` is present, requires `user` and `network`; `composition` must include `pod` or `container`
 - Rootless services (`podman.user` ≠ `root`) can only use `network: host` — not `ipvlan-l2`
+- Registry-backed containers set `podman.image` or per-container `image`; `pull_policy` defaults to
+  `missing`
 
 ### 3. Add to host mapping
 
@@ -56,7 +58,7 @@ Schema requirements:
 
 - [ ] Create `config/services/<name>/quadlets/` directory
 - [ ] Add `container.container.j2` (or `pod.pod.j2` + per-container dirs)
-- [ ] Add `image.image` if template uses `{{ image }}`
+- [ ] Set the registry image in service configuration; templates use `{{ image }}` directly
 - [ ] Or add `build.build` if template uses `{{ build }}`
 - [ ] All source files must exist before first render attempt
 - [ ] All quadlet files must end with a trailing newline
@@ -71,26 +73,43 @@ Schema requirements:
 Reference: `config/services/blocky/service.yaml`
 
 - [ ] Set `podman.user: root` and `podman.network: ipvlan-l2`
+- [ ] Set `podman.image: <registry>/<image>:<version>` and optionally
+  `podman.pull_policy: missing`
 - [ ] Add `composition.container.named_volumes[]` for persistent data
   - If multiple services use the same `host_path`, all must set `shared: true`
 - [ ] Add `composition.container.mounted_files[]` for bind-mounted config files
 - [ ] Add `composition.config[]` for rendered config files
-- [ ] Create `quadlets/container.container.j2` and `quadlets/image.image`
+- [ ] Create `quadlets/container.container.j2`; include `Image={{ image }}` and
+  `Pull={{ pull_policy }}`
 
 ## Pattern: Pod Service
 
 Reference: `config/services/authelia/service.yaml`
 
 - [ ] Set `podman.user: root` and `podman.network: ipvlan-l2`
-- [ ] Add `composition.pod.containers[]` with `name` + `container.named_volumes[]`
+- [ ] Add `composition.pod.containers[]` with `name`, `image`, optional `pull_policy`,
+  and `container.named_volumes[]`
 - [ ] Create `quadlets/pod.pod.j2`
-- [ ] Per container: create `quadlets/<container-name>/container.container.j2` + `image.image`
+- [ ] Per container: create `quadlets/<container-name>/container.container.j2`; include
+  `Image={{ image }}` and `Pull={{ pull_policy }}`
+
+## Pattern: Managed Local Build
+
+- [ ] Create `quadlets/build.build` with `Pull=missing`; do not use `Policy=`
+- [ ] Declare `build.output_image`, `build.pull_policy: missing`, and all material `build.inputs`
+- [ ] Add `build.consumers[]` for services restarted after output image verification
+- [ ] For install workflows, add `build.post_build.install_unit` and optional
+  `build.post_build.verify_binary`
+- [ ] Keep runtime `.container` references pointed at the local build output, for example
+  `Image={{ build }}`
 
 ## Pattern: Rootless Container
 
 Reference: `config/services/vault-agent/service.yaml`
 
 - [ ] Set `podman.user: <username>` and `podman.network: host`
+- [ ] Set `podman.image: <registry>/<image>:<version>` and optionally
+  `podman.pull_policy: missing`
 - [ ] Add `composition.container.named_volumes[]` and config entries
 - [ ] Create quadlet sources under `quadlets/`
 

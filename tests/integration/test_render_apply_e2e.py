@@ -145,11 +145,22 @@ class TestRenderApplyE2E:
         ).read_text(encoding="utf-8")
         assert "EnvironmentFile=/srv/vault/agent/out/caddy-dns-desec.env" in caddy_dmz_quadlet
         assert "EnvironmentFile=/etc/caddy/dns.env" not in caddy_dmz_quadlet
+        caddy_dmz_build = (
+            phobos_root / "services/caddy-dmz/etc/containers/systemd/caddy-dmz.build"
+        ).read_text(encoding="utf-8")
+        assert "Pull=missing" in caddy_dmz_build
+        assert "Policy=" not in caddy_dmz_build
 
         for rendered_root, service_name in (
             (phobos_root, "coredns-a"),
             (deimos_root, "coredns-b"),
         ):
+            coredns_build = (
+                rendered_root
+                / f"services/{service_name}/etc/containers/systemd/coredns-omada.build"
+            ).read_text(encoding="utf-8")
+            assert "Pull=missing" in coredns_build
+            assert "Policy=" not in coredns_build
             corefile = (rendered_root / f"services/{service_name}/etc/coredns/Corefile").read_text(
                 encoding="utf-8"
             )
@@ -232,11 +243,15 @@ class TestRenderApplyE2E:
         )
         omada_mongodb_container = omada_service_root / "omada-controller-app-mongodb.container"
         assert omada_controller_container.exists()
-        assert (omada_service_root / "omada-controller-app-omada-controller.image").exists()
+        assert not (omada_service_root / "omada-controller-app-omada-controller.image").exists()
         assert omada_mongodb_container.exists()
-        assert (omada_service_root / "omada-controller-app-mongodb.image").exists()
+        assert not (omada_service_root / "omada-controller-app-mongodb.image").exists()
         omada_controller_content = omada_controller_container.read_text(encoding="utf-8")
         omada_mongodb_content = omada_mongodb_container.read_text(encoding="utf-8")
+        assert "Image=docker.io/mbentley/omada-controller:6.2.10.17" in (omada_controller_content)
+        assert "Pull=missing" in omada_controller_content
+        assert "Image=docker.io/library/mongo:8.0.26" in omada_mongodb_content
+        assert "Pull=missing" in omada_mongodb_content
         assert "EnvironmentFile=/etc/omada-controller/omada-controller.env" in (
             omada_controller_content
         )
@@ -249,13 +264,6 @@ class TestRenderApplyE2E:
         assert "StopSignal=SIGTERM" in omada_mongodb_content
         assert "StopTimeout=60" in omada_mongodb_content
         assert "/docker-entrypoint-initdb.d/omada.js:ro" in omada_mongodb_content
-        assert "Image=" in (
-            omada_service_root / "omada-controller-app-omada-controller.image"
-        ).read_text(encoding="utf-8")
-        assert "Image=" in (omada_service_root / "omada-controller-app-mongodb.image").read_text(
-            encoding="utf-8"
-        )
-
         omada_init = (
             phobos_root / "services/omada-controller/srv/omada-controller/mongodb/initdb/omada.js"
         )

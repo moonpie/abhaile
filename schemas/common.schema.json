@@ -219,6 +219,17 @@
       "type": "object",
       "description": "Container volume and mount configuration",
       "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Registry image reference rendered directly into the .container Quadlet"
+        },
+        "pull_policy": {
+          "type": "string",
+          "enum": ["always", "missing", "never", "newer"],
+          "default": "missing",
+          "description": "Quadlet boot-time image pull policy"
+        },
         "named_volumes": {
           "type": "array",
           "description": "Named volumes to mount",

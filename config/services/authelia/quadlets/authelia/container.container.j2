@@ -6,6 +6,7 @@ Requires=abhaile-secrets-ready.service authelia-config.service authelia-app-redi
 [Container]
 Pod={{ pod }}
 Image={{ image }}
+Pull={{ pull_policy }}
 Timezone=local
 {% for v in volume_lines %}
 {{ v }}

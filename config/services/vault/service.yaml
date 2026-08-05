@@ -2,6 +2,8 @@ name: vault
 podman:
   user: root
   network: ipvlan-l2
+  image: docker.io/hashicorp/vault:1.21.4
+  pull_policy: missing
 apply:
   config_change_restart_unit: vault.service
 composition:

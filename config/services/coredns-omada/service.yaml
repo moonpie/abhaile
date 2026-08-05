@@ -1,4 +1,15 @@
 name: coredns-omada
+build:
+  output_image: localhost/coredns-omada:latest
+  pull_policy: missing
+  inputs:
+    - coredns-omada/quadlets/build.build
+    - coredns-omada/build/Containerfile
+  post_build:
+    install_unit: coredns-omada-install.service
+    verify_binary: /usr/local/bin/coredns
+  consumers:
+    - coredns.service
 composition:
   config:
     - source: coredns-omada/build/Containerfile

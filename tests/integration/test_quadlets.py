@@ -39,8 +39,12 @@ class TestQuadretsIntegration:
 
         # Verify quadlet files exist
         service_dir = output_dir / "blocky-a" / "etc/containers/systemd"
-        assert (service_dir / "blocky-a.container").exists()
-        assert (service_dir / "blocky-a.image").exists()
+        container = service_dir / "blocky-a.container"
+        assert container.exists()
+        assert not (service_dir / "blocky-a.image").exists()
+        container_content = container.read_text(encoding="utf-8")
+        assert "Image=ghcr.io/0xerr0r/blocky:v0.27.0" in container_content
+        assert "Pull=missing" in container_content
 
         # Verify volume files for shared volumes
         shared_dir = output_dir / "_shared" / "etc/containers/systemd"
@@ -71,8 +75,12 @@ class TestQuadretsIntegration:
         )
 
         service_dir = output_dir / "vault" / "etc/containers/systemd"
-        assert (service_dir / "vault.container").exists()
-        assert (service_dir / "vault.image").exists()
+        container = service_dir / "vault.container"
+        assert container.exists()
+        assert not (service_dir / "vault.image").exists()
+        container_content = container.read_text(encoding="utf-8")
+        assert "Image=docker.io/hashicorp/vault:1.21.4" in container_content
+        assert "Pull=missing" in container_content
         assert (service_dir / "vault-config.volume").exists()
         assert (service_dir / "vault-data.volume").exists()
 
@@ -143,15 +151,12 @@ class TestQuadretsIntegration:
         assert container_file1.exists() and container_file2.exists()
         assert container_file1.read_text() == container_file2.read_text()
 
-        image_file1 = (
+        assert not (
             output_dir1 / "services" / "blocky-a" / "etc/containers/systemd/blocky-a.image"
-        )
-        image_file2 = (
+        ).exists()
+        assert not (
             output_dir2 / "services" / "blocky-a" / "etc/containers/systemd/blocky-a.image"
-        )
-
-        assert image_file1.exists() and image_file2.exists()
-        assert image_file1.read_text() == image_file2.read_text()
+        ).exists()
 
     @pytest.mark.slow
     def test_render_all_podman_services(self, tmp_path: Path) -> None:
@@ -246,11 +251,14 @@ class TestQuadretsIntegration:
             "authelia-app-redis.service"
         ) in authelia_content
 
-        # Verify authelia image file
+        assert "Image=docker.io/authelia/authelia:4.39.13" in authelia_content
+        assert "Pull=missing" in authelia_content
+
+        # Verify authelia image quadlet is not rendered
         authelia_image = (
             output_dir / "authelia" / "etc/containers/systemd" / "authelia-app-authelia.image"
         )
-        assert authelia_image.exists(), "Image should be named authelia-app-authelia.image"
+        assert not authelia_image.exists()
 
         # Verify redis container exists with correct naming
         redis_container = (
@@ -271,12 +279,14 @@ class TestQuadretsIntegration:
         assert "Notify=healthy" in redis_content
         assert "StopSignal=SIGTERM" in redis_content
         assert "StopTimeout=60" in redis_content
+        assert "Image=docker.io/library/redis:8.2.2-alpine" in redis_content
+        assert "Pull=missing" in redis_content
 
-        # Verify redis image file
+        # Verify redis image quadlet is not rendered
         redis_image = (
             output_dir / "authelia" / "etc/containers/systemd" / "authelia-app-redis.image"
         )
-        assert redis_image.exists(), "Redis image should be named authelia-app-redis.image"
+        assert not redis_image.exists()
 
         # Verify volume files with correct naming pattern (service-app-container-volume)
         volume_files = list((output_dir / "authelia" / "etc/containers/systemd").glob("*.volume"))
@@ -323,8 +333,8 @@ class TestQuadretsIntegration:
         assert pod.exists()
         assert controller.exists()
         assert mongodb.exists()
-        assert (service_dir / "omada-controller-app-omada-controller.image").exists()
-        assert (service_dir / "omada-controller-app-mongodb.image").exists()
+        assert not (service_dir / "omada-controller-app-omada-controller.image").exists()
+        assert not (service_dir / "omada-controller-app-mongodb.image").exists()
 
         pod_content = pod.read_text()
         assert "Network=services.network" in pod_content
@@ -332,7 +342,8 @@ class TestQuadretsIntegration:
 
         controller_content = controller.read_text()
         assert "Pod=omada-controller-app.pod" in controller_content
-        assert "Image=omada-controller-app-omada-controller.image" in controller_content
+        assert "Image=docker.io/mbentley/omada-controller:6.2.10.17" in controller_content
+        assert "Pull=missing" in controller_content
         assert (
             "After=abhaile-secrets-ready.service omada-controller-env.service "
             "omada-controller-app-mongodb.service" in controller_content
@@ -346,7 +357,8 @@ class TestQuadretsIntegration:
 
         mongodb_content = mongodb.read_text()
         assert "Pod=omada-controller-app.pod" in mongodb_content
-        assert "Image=omada-controller-app-mongodb.image" in mongodb_content
+        assert "Image=docker.io/library/mongo:8.0.26" in mongodb_content
+        assert "Pull=missing" in mongodb_content
         assert "After=abhaile-secrets-ready.service omada-mongodb-env.service" in mongodb_content
         assert "Requires=abhaile-secrets-ready.service omada-mongodb-env.service" in (
             mongodb_content

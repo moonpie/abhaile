@@ -88,3 +88,27 @@ def print_diff_summary(plan: PlanResult | dict[str, Any]) -> None:
         f"removals_drifted={summary['removals_drifted']} "
         f"removals_missing={summary['removals_missing']}"
     )
+    image_acquisitions = plan.get("image_acquisitions", [])
+    if isinstance(image_acquisitions, list) and image_acquisitions:
+        print(f"image pre-pulls={len(image_acquisitions)}")
+        for action in image_acquisitions:
+            if not isinstance(action, dict):
+                continue
+            service = action.get("service", "unknown")
+            old_image = action.get("old_image") or "<none>"
+            desired_image = action.get("desired_image", "unknown")
+            print(f"  {service}:")
+            print(f"    {old_image}")
+            print(f"    -> {desired_image}")
+    build_transactions = plan.get("build_transactions", [])
+    if isinstance(build_transactions, list) and build_transactions:
+        print(f"managed builds={len(build_transactions)}")
+        for action in build_transactions:
+            if not isinstance(action, dict):
+                continue
+            service = action.get("service", "unknown")
+            old_fingerprint = action.get("old_fingerprint") or "<none>"
+            desired_fingerprint = action.get("desired_fingerprint", "unknown")
+            print(f"  {service}:")
+            print(f"    {old_fingerprint}")
+            print(f"    -> {desired_fingerprint}")

@@ -7,6 +7,7 @@ Requires=abhaile-secrets-ready.service omada-controller-env.service omada-contro
 EnvironmentFile=/etc/omada-controller/omada-controller.env
 Pod={{ pod }}
 Image={{ image }}
+Pull={{ pull_policy }}
 StopTimeout=60
 Timezone=local
 Ulimit=nofile=4096:8192

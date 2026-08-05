@@ -287,6 +287,312 @@ class TestHealthHelpers:
             health.HealthResult("rootless-failed-units:abhaile", False, "machinectl unavailable"),
         ]
 
+    def test_podman_image_checks_use_rootful_and_rootless_contexts(self, monkeypatch: Any) -> None:
+        """Desired images should be checked in the same Podman context as the service."""
+        seen: list[list[str]] = []
+
+        def fake_command(
+            argv: list[str],
+            *,
+            timeout_seconds: int,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(argv)
+            return _completed("")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "apply_hints": {
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                    },
+                },
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:vault-agent.service",
+                    "apply_hints": {
+                        "rootless": True,
+                        "podman_user": "abhaile",
+                        "podman_image": "docker.io/hashicorp/vault:1.21.4",
+                    },
+                },
+            ]
+        }
+
+        results = health._check_podman_images(manifest, timeout_seconds=1)
+
+        assert [result.name for result in results] == [
+            "podman-image-local:blocky.service",
+            "podman-image-local:vault-agent.service",
+        ]
+        assert seen == [
+            ["podman", "image", "exists", "ghcr.io/0xerr0r/blocky:v0.27.0"],
+            [
+                "machinectl",
+                "shell",
+                "abhaile@",
+                "/usr/bin/podman",
+                "image",
+                "exists",
+                "docker.io/hashicorp/vault:1.21.4",
+            ],
+        ]
+
+    def test_podman_image_check_missing_rootless_user_fails_without_command(
+        self, monkeypatch: Any
+    ) -> None:
+        """Rootless image health must not fall back to root's Podman storage."""
+        monkeypatch.setattr(
+            health,
+            "_command",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected command")),
+        )
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:vault-agent.service",
+                    "apply_hints": {
+                        "rootless": True,
+                        "podman_image": "docker.io/hashicorp/vault:1.21.4",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_podman_images(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult(
+                "podman-image-local:vault-agent.service",
+                False,
+                "missing podman_user",
+            )
+        ]
+
+    def test_podman_image_check_reports_missing_image_output(self, monkeypatch: Any) -> None:
+        """A missing local image should report Podman's failure output."""
+
+        def fake_command(
+            argv: list[str],
+            *,
+            timeout_seconds: int,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                args=argv,
+                returncode=1,
+                stdout="",
+                stderr="image not found",
+            )
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "apply_hints": {
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_podman_images(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult(
+                "podman-image-local:blocky.service",
+                False,
+                "image not found",
+            )
+        ]
+
+    def test_podman_image_check_command_error_is_reported(self, monkeypatch: Any) -> None:
+        """Podman availability failures should be surfaced as image health failures."""
+
+        def fake_command(
+            argv: list[str],
+            *,
+            timeout_seconds: int,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            raise FileNotFoundError("podman missing")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "apply_hints": {
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_podman_images(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult("podman-image-local:blocky.service", False, "podman missing")
+        ]
+
+    def test_obsolete_image_unit_loaded_is_reported(self, monkeypatch: Any) -> None:
+        """Health should fail narrowly when an old generated image unit remains loaded."""
+
+        def fake_command(
+            argv: list[str],
+            *,
+            timeout_seconds: int,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            return _completed("loaded\nfailed\n")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky-b.service",
+                    "apply_hints": {
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_obsolete_image_units(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult(
+                "obsolete-image-unit:blocky-b-image.service",
+                False,
+                "failed,loaded",
+            )
+        ]
+
+    def test_obsolete_image_unit_rootless_uses_user_manager(self, monkeypatch: Any) -> None:
+        """Obsolete rootless image units should be checked in the user's systemd manager."""
+        seen: list[list[str]] = []
+
+        def fake_command(
+            argv: list[str],
+            *,
+            timeout_seconds: int,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(argv)
+            return _completed("not-found\ninactive\n")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:vault-agent.service",
+                    "apply_hints": {
+                        "rootless": True,
+                        "podman_user": "abhaile",
+                        "podman_image": "docker.io/hashicorp/vault:1.21.4",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_obsolete_image_units(manifest, timeout_seconds=1)
+
+        assert seen == [
+            [
+                "systemctl",
+                "--user",
+                "-M",
+                "abhaile@",
+                "show",
+                "vault-agent-image.service",
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--value",
+            ]
+        ]
+        assert results == [
+            health.HealthResult(
+                "obsolete-image-unit:vault-agent-image.service",
+                True,
+                "inactive,not-found",
+            )
+        ]
+
+    def test_obsolete_image_unit_missing_rootless_user_fails_without_command(
+        self, monkeypatch: Any
+    ) -> None:
+        """Stale-unit health must not inspect root's manager for a rootless service."""
+        monkeypatch.setattr(
+            health,
+            "_command",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected command")),
+        )
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:vault-agent.service",
+                    "apply_hints": {
+                        "rootless": True,
+                        "podman_image": "docker.io/hashicorp/vault:1.21.4",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_obsolete_image_units(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult(
+                "obsolete-image-unit:vault-agent-image.service",
+                False,
+                "missing podman_user",
+            )
+        ]
+
+    def test_obsolete_image_unit_command_error_is_reported(self, monkeypatch: Any) -> None:
+        """systemctl errors should fail only the targeted obsolete image unit check."""
+
+        def fake_command(
+            argv: list[str],
+            *,
+            timeout_seconds: int,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            raise FileNotFoundError("systemctl missing")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:blocky.service",
+                    "apply_hints": {
+                        "podman_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                    },
+                }
+            ]
+        }
+
+        results = health._check_obsolete_image_units(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult(
+                "obsolete-image-unit:blocky-image.service",
+                False,
+                "systemctl missing",
+            )
+        ]
+
     def test_secrets_ready_sentinel_missing_empty_and_service_gate(
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:

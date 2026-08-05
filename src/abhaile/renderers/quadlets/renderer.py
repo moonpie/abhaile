@@ -12,6 +12,8 @@ from abhaile.renderers.quadlets.container import (
 )
 from abhaile.renderers.quadlets.helpers import (
     _discover_build_image_files,
+    _resolve_container_image_config,
+    _resolve_managed_build_hints,
     _resolve_quadlet_source_file,
 )
 from abhaile.renderers.quadlets.network import (
@@ -145,6 +147,20 @@ def render_service_quadlets(
             service=service,
             services_root=services_root,
         )
+        image_reference, pull_policy = _resolve_container_image_config(
+            service=service,
+            container_name=None,
+            container_def=container_def,
+            podman=podman,
+            services_root=services_root,
+        )
+        if build_path is not None and image_reference is not None:
+            raise RenderError(
+                f"Service '{service}' specifies both registry image and local build sources"
+            )
+        build_apply_hints = (
+            _resolve_managed_build_hints(service, services_root) if build_path is not None else None
+        )
 
         volume_lines, volume_owner_refs = _render_named_volumes(
             service=service,
@@ -170,8 +186,6 @@ def render_service_quadlets(
             used_vlans.add(vlan)
             container_owner_requires.append(f"unit:{vlan}-network.service")
 
-        if image_filename is not None:
-            container_owner_requires.append(f"unit:{Path(image_filename).stem}-image.service")
         if build_filename is not None:
             container_owner_requires.append(f"unit:{Path(build_filename).stem}-build.service")
 
@@ -188,6 +202,9 @@ def render_service_quadlets(
             device_lines=device_lines,
             build_filename=build_filename,
             image_filename=image_filename,
+            image_reference=image_reference,
+            pull_policy=pull_policy,
+            build_apply_hints=build_apply_hints,
             output_root=output_root,
             collector=collector,
             rendered_root=rendered_root,

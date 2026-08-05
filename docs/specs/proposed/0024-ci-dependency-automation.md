@@ -32,7 +32,7 @@ The repo also pins and references software in several forms:
   `requirements.txt`, and `requirements-dev.txt`
 - pre-commit hook revisions in `.pre-commit-config.yaml`
 - GitHub Actions versions once CI workflows are added
-- container images in quadlet `.image` files and service build inputs
+- container images in `config/services/*/service.yaml` and service build inputs
 - host software downloads and checksums under `config/hosts/*/software/`
 - bootstrap and operational tool versions such as `sops` and `vault`
 
@@ -173,7 +173,7 @@ handled with broad ad hoc regexes. Preferred patterns:
 Custom extraction should cover:
 
 - host software download URLs and checksums under `config/hosts/*/software/`
-- container image references in `config/services/**/quadlets/**/image.image`
+- container image references in `config/services/*/service.yaml`
 - built service image inputs such as `config/services/**/build/Containerfile`
 - GitHub release or tag based tools that are not represented in standard
   dependency files
@@ -293,7 +293,7 @@ ADR covering:
 - [ ] Dependency automation config opens PRs for Python dependencies
 - [ ] Dependency automation config opens PRs for pre-commit hook revisions
 - [ ] Dependency automation config opens PRs for GitHub Actions versions
-- [ ] Dependency automation config detects container image updates in quadlet `.image` files
+- [ ] Dependency automation config detects container image updates in service image fields
 - [ ] Dependency automation config detects supported service build input updates
 - [ ] Host software download schema records datasource, package, version, URL, checksum, and policy metadata
 - [ ] Dependency automation config detects host software download updates where structured metadata supports it
@@ -360,7 +360,7 @@ approval.
 - `requirements-dev.txt`
 - `config/hosts/*/software/`
 - `config/services/*/service.yaml`
-- `config/services/**/quadlets/**/image.image`
+- `config/services/*/service.yaml`
 - `config/services/**/build/Containerfile`
 - Renovate documentation: `https://docs.renovatebot.com/`
 - Renovate regex custom manager documentation:

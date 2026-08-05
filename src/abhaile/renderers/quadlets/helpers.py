@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import json
 from typing import Any
 
 from abhaile.models.kinds import KIND_FAMILIES
 from abhaile.renderers.collector import ArtifactCollector
+from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
 # Derived from KIND_FAMILIES["quadlet"] — maps file suffix to artifact kind
 _QUADLET_KIND_BY_SUFFIX: dict[str, str] = {
     f".{kind.split('.', 1)[1]}": kind for kind in KIND_FAMILIES["quadlet"]
 }
+_SUPPORTED_PULL_POLICIES = {"always", "missing", "never", "newer"}
 
 
 def _quadlet_kind_from_filename(filename: str) -> str:
@@ -107,6 +111,157 @@ def _discover_build_image_files(
     image_filename = f"{name_base}.image" if image_path else None
 
     return build_path, image_path, build_filename, image_filename
+
+
+def _validate_registry_image(image: object, *, service: str) -> str:
+    """Validate and return a registry image reference."""
+    if not isinstance(image, str) or not image.strip():
+        raise RenderError(f"Podman image must be a non-empty string for service '{service}'")
+    return image.strip()
+
+
+def _validate_pull_policy(policy: object, *, service: str) -> str:
+    """Validate and return a Quadlet pull policy."""
+    if policy is None:
+        return "missing"
+    if not isinstance(policy, str) or policy not in _SUPPORTED_PULL_POLICIES:
+        supported = ", ".join(sorted(_SUPPORTED_PULL_POLICIES))
+        raise RenderError(
+            f"Unsupported Podman pull_policy for service '{service}': {policy!r} "
+            f"(supported: {supported})"
+        )
+    return policy
+
+
+def _service_podman_config(service: str, services_root: Path) -> dict[str, Any]:
+    """Read one service's podman config, returning an empty mapping when absent."""
+    service_path = services_root / service / "service.yaml"
+    data = read_yaml_mapping(service_path)
+    podman = data.get("podman", {}) or {}
+    return podman if isinstance(podman, dict) else {}
+
+
+def _resolve_service_image_config(
+    service: str,
+    services_root: Path,
+) -> tuple[str | None, str]:
+    """Resolve inherited service-level registry image and pull policy."""
+    from abhaile.utils.composition import walk_service_includes
+
+    image: str | None = None
+    pull_policy: str | None = None
+    for service_name in walk_service_includes(service, services_root.parent):
+        podman = _service_podman_config(service_name, services_root)
+        if "image" in podman:
+            image = _validate_registry_image(podman.get("image"), service=service_name)
+        if "pull_policy" in podman:
+            pull_policy = _validate_pull_policy(podman.get("pull_policy"), service=service_name)
+    return image, _validate_pull_policy(pull_policy, service=service)
+
+
+def _resolve_container_image_config(
+    *,
+    service: str,
+    container_name: str | None,
+    container_def: dict[str, Any],
+    podman: dict[str, Any],
+    services_root: Path,
+) -> tuple[str | None, str]:
+    """Resolve effective image reference and pull policy for a container."""
+    service_image, service_pull_policy = _resolve_service_image_config(service, services_root)
+    image = service_image
+    pull_policy = service_pull_policy
+
+    if "image" in podman:
+        image = _validate_registry_image(podman.get("image"), service=service)
+    if "pull_policy" in podman:
+        pull_policy = _validate_pull_policy(podman.get("pull_policy"), service=service)
+    if "image" in container_def:
+        image = _validate_registry_image(
+            container_def.get("image"),
+            service=f"{service}/{container_name}" if container_name else service,
+        )
+    if "pull_policy" in container_def:
+        pull_policy = _validate_pull_policy(
+            container_def.get("pull_policy"),
+            service=f"{service}/{container_name}" if container_name else service,
+        )
+
+    return image, pull_policy
+
+
+def _resolve_managed_build_hints(service: str, services_root: Path) -> dict[str, Any] | None:
+    """Resolve managed build metadata for a service's .build Quadlet."""
+    service_path = services_root / service / "service.yaml"
+    data = read_yaml_mapping(service_path)
+    build = data.get("build")
+    if not isinstance(build, dict):
+        return None
+    output_image = build.get("output_image")
+    if not isinstance(output_image, str) or not output_image:
+        raise RenderError(f"build.output_image must be a non-empty string for {service}")
+    pull_policy = build.get("pull_policy", "missing")
+    if pull_policy != "missing":
+        raise RenderError(f"Only build.pull_policy=missing is supported for {service}")
+    inputs = build.get("inputs", [])
+    if not isinstance(inputs, list) or not all(isinstance(item, str) and item for item in inputs):
+        raise RenderError(f"build.inputs must be a list of source paths for {service}")
+    consumers = build.get("consumers", [])
+    if not isinstance(consumers, list) or not all(
+        isinstance(item, str) and item for item in consumers
+    ):
+        raise RenderError(f"build.consumers must be a list of unit names for {service}")
+
+    payload: dict[str, Any] = {
+        "service": service,
+        "output_image": output_image,
+        "pull_policy": pull_policy,
+        "input_fingerprint": _managed_build_fingerprint(
+            services_root,
+            input_paths=inputs,
+            build=build,
+        ),
+        "inputs": inputs,
+        "consumers": consumers,
+    }
+    post_build = build.get("post_build")
+    if isinstance(post_build, dict):
+        payload["post_build"] = post_build
+    return {"managed_build": payload}
+
+
+def _managed_build_fingerprint(
+    services_root: Path,
+    *,
+    input_paths: list[str],
+    build: dict[str, Any],
+) -> str:
+    """Return a deterministic fingerprint for declared managed build inputs."""
+    payload: dict[str, Any] = {
+        "build": {key: value for key, value in sorted(build.items())},
+        "inputs": [],
+    }
+    for input_path in sorted(input_paths):
+        path = services_root / input_path
+        if not path.exists() or not path.is_file():
+            raise RenderError(f"Managed build input not found: {path}")
+        payload["inputs"].append(
+            {
+                "path": input_path,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _read_legacy_image_reference(image_path: Path, *, service: str) -> str:
+    """Read an image reference from a legacy image.image source file."""
+    _validate_trailing_newline(image_path, context="quadlet image source file")
+    for line in image_path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("Image="):
+            return _validate_registry_image(line.split("=", 1)[1], service=service)
+    raise RenderError(f"Legacy image.image file missing Image= line: {image_path}")
 
 
 def _resolve_quadlet_source_file(service: str, services_root: Path, filename: str) -> Path | None:

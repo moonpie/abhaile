@@ -14,6 +14,14 @@ flowchart LR
 
 Render is unprivileged and deterministic. Apply is privileged, atomic, and defaults to dry-run. See [README](../README.md) for design principles.
 
+Registry-backed Quadlet containers render direct `.container` image references with
+`Pull=missing`; normal boot uses local Podman storage and does not depend on registry DNS when the
+desired image is already present. GitOps image changes are acquired transactionally by apply before
+the new `.container` is staged or the service is restarted. Managed `.build` workflows are separate
+transactions keyed by declared build input fingerprints; they use `Pull=missing` for missing base
+images, verify the output image, run optional post-build actions, and restart consumers only after
+the build transaction succeeds.
+
 ## Network Topology
 
 ```mermaid

@@ -220,10 +220,10 @@ Image={{ image }}
         assert authelia_container.exists()
         authelia_content = authelia_container.read_text()
         assert "Pod=authelia-app.pod" in authelia_content
-        assert "Image=authelia-app-authelia.image" in authelia_content
+        assert "Image=authelia:latest" in authelia_content
         assert "Volume=authelia-app-authelia-config.volume:/config" in authelia_content
 
-        # Check authelia image
+        # Check authelia image quadlet is not rendered
         authelia_image = (
             output_dir
             / "authelia"
@@ -232,8 +232,7 @@ Image={{ image }}
             / "systemd"
             / "authelia-app-authelia.image"
         )
-        assert authelia_image.exists()
-        assert "Image=authelia:latest" in authelia_image.read_text()
+        assert not authelia_image.exists()
 
         # Check redis container
         redis_container = (
@@ -247,15 +246,14 @@ Image={{ image }}
         assert redis_container.exists()
         redis_content = redis_container.read_text()
         assert "Pod=authelia-app.pod" in redis_content
-        assert "Image=authelia-app-redis.image" in redis_content
+        assert "Image=redis:latest" in redis_content
         assert "Volume=authelia-app-redis-data.volume:/data" in redis_content
 
-        # Check redis image
+        # Check redis image quadlet is not rendered
         redis_image = (
             output_dir / "authelia" / "etc" / "containers" / "systemd" / "authelia-app-redis.image"
         )
-        assert redis_image.exists()
-        assert "Image=redis:latest" in redis_image.read_text()
+        assert not redis_image.exists()
 
         # Check volume files
         authelia_config_vol = (
@@ -653,27 +651,28 @@ composition:
         container_art = artifacts[container_key]
         assert container_art.kind == "quadlet.container"
         assert container_art.owner_ref == "unit:authelia-app-app.service"
-        assert container_art.apply_hints == {"rootless": False, "restart_mode": "manual"}
-
-        image_key = next(k for k in artifacts if k.endswith("authelia-app-app.image"))
-        image_art = artifacts[image_key]
-        assert image_art.kind == "quadlet.image"
-        assert image_art.owner_ref == "unit:authelia-app-app-image.service"
+        assert container_art.apply_hints == {
+            "rootless": False,
+            "restart_mode": "manual",
+            "podman_image": "authelia:latest",
+            "pull_policy": "missing",
+        }
 
         assert "unit:authelia-app.service" in owners
         assert "unit:authelia-app-app.service" in owners
-        assert "unit:authelia-app-app-image.service" in owners
+        assert "unit:authelia-app-app-image.service" not in owners
         assert owners["unit:authelia-app.service"].apply_hints == {"rootless": False}
         assert owners["unit:authelia-app.service"].requires == [
             "unit:services-network.service",
         ]
         assert owners["unit:authelia-app-app.service"].requires == [
-            "unit:authelia-app-app-image.service",
             "unit:authelia-app.service",
         ]
         assert owners["unit:authelia-app-app.service"].apply_hints == {
             "rootless": False,
             "restart_mode": "manual",
+            "podman_image": "authelia:latest",
+            "pull_policy": "missing",
         }
 
     def test_named_volume_host_directories_are_rendered(

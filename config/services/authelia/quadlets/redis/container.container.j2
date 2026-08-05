@@ -6,6 +6,7 @@ After=abhaile-secrets-ready.service authelia-redis-conf.service
 [Container]
 Pod={{ pod }}
 Image={{ image }}
+Pull={{ pull_policy }}
 Timezone=local
 {% for v in volume_lines %}
 {{ v }}

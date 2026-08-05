@@ -145,6 +145,92 @@ class QuadletExecutor:
         )
 
     @staticmethod
+    def image_exists(
+        image_ref: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> bool:
+        """Return True when an image reference exists in the target Podman storage."""
+        podman = QuadletExecutor._podman_binary()
+        result = run_command(
+            [podman, "image", "exists", image_ref],
+            action_id=f"podman-image-exists:{image_ref}",
+            action_type="podman",
+            run_as_user=run_as_user if rootless else None,
+            check=False,
+        )
+        return result.success
+
+    @staticmethod
+    def inspect_image(
+        image_ref: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> dict[str, Any]:
+        """Inspect a local image reference in the target Podman storage."""
+        podman = QuadletExecutor._podman_binary()
+        result = run_command(
+            [podman, "image", "inspect", image_ref, "--format", "{{.Id}} {{.Digest}}"],
+            action_id=f"podman-image-inspect:{image_ref}",
+            action_type="podman",
+            run_as_user=run_as_user if rootless else None,
+            check=True,
+        )
+        parts = result.stdout.strip().split(maxsplit=1)
+        payload: dict[str, Any] = {
+            "image": image_ref,
+            "image_id": parts[0] if parts else "",
+        }
+        if len(parts) > 1 and parts[1] != "<nil>":
+            payload["digest"] = parts[1]
+        return payload
+
+    @staticmethod
+    def pre_pull_image(
+        image_ref: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> dict[str, Any]:
+        """Pull and verify an image before a Quadlet container update is staged."""
+        podman = QuadletExecutor._podman_binary()
+        pull = run_command(
+            [podman, "pull", image_ref],
+            action_id=f"podman-pull:{image_ref}",
+            action_type="podman",
+            run_as_user=run_as_user if rootless else None,
+            check=False,
+        )
+        if not pull.success:
+            raise ApplyError(
+                "image pre-pull failed "
+                f"desired={image_ref} scope={'rootless' if rootless else 'rootful'} "
+                f"exit={pull.return_code} error={pull.error_message}"
+            )
+        if not QuadletExecutor.image_exists(
+            image_ref,
+            rootless=rootless,
+            run_as_user=run_as_user,
+        ):
+            raise ApplyError(f"Pulled image is not visible locally: {image_ref}")
+        inspect = QuadletExecutor.inspect_image(
+            image_ref,
+            rootless=rootless,
+            run_as_user=run_as_user,
+        )
+        return {
+            "action": "pre-pull",
+            "image": image_ref,
+            "scope": "rootless" if rootless else "rootful",
+            "run_as_user": run_as_user if rootless else None,
+            "success": True,
+            "return_code": pull.return_code,
+            **inspect,
+        }
+
+    @staticmethod
     def daemon_reload(*, rootless: bool, run_as_user: str | None) -> ExecutionResult:
         """Run daemon-reload for rootful or rootless systemd scope."""
         argv = ["systemctl"]
@@ -190,6 +276,54 @@ class QuadletExecutor:
                 f"systemd LoadState={result.stdout.strip() or 'unknown'} after daemon-reload"
             )
         return result
+
+    @staticmethod
+    def reset_failed_unit(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> ExecutionResult:
+        """Reset failed state for one obsolete generated unit."""
+        return run_systemctl_command(
+            "reset-failed",
+            unit_name,
+            user=rootless,
+            run_as_user=run_as_user if rootless else None,
+        )
+
+    @staticmethod
+    def verify_unit_unloaded(
+        unit_name: str,
+        *,
+        rootless: bool,
+        run_as_user: str | None,
+    ) -> ExecutionResult:
+        """Verify an obsolete generated unit is no longer loaded."""
+        argv = ["systemctl"]
+        if rootless:
+            argv.append("--user")
+            if run_as_user:
+                argv.extend(["-M", f"{run_as_user}@"])
+                run_as_user = None
+        argv.extend(["show", unit_name, "--property=LoadState", "--value"])
+        result = run_command(
+            argv,
+            action_id=f"verify-obsolete-unit-unloaded:{unit_name}",
+            action_type="validation",
+            run_as_user=run_as_user if rootless else None,
+            check=False,
+        )
+        if result.stdout.strip() == "loaded":
+            raise ApplyError(f"Obsolete generated image unit remains loaded: {unit_name}")
+        return ExecutionResult(
+            action_id=result.action_id,
+            action_type=result.action_type,
+            success=True,
+            return_code=result.return_code,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
 
     @staticmethod
     def apply_convergence_action(
@@ -242,6 +376,7 @@ class QuadletExecutor:
 
         kinds_set = set(kinds)
         only_remove = changed_phases == {"remove"}
+        obsolete_image_remove = only_remove and "quadlet.image" in kinds_set
         recreate_object = bool(kinds_set & QuadletExecutor.RECREATE_OBJECT_KINDS)
 
         if recreate_object and not only_remove:
@@ -256,6 +391,22 @@ class QuadletExecutor:
                     "action": "remove-object",
                     "success": remove_object.success,
                     "return_code": remove_object.return_code,
+                }
+            )
+
+        if obsolete_image_remove:
+            stop = run_systemctl_command(
+                "stop",
+                unit_name,
+                user=rootless,
+                run_as_user=run_as_user if rootless else None,
+            )
+            actions.append(
+                {
+                    "action": "stop",
+                    "unit": unit_name,
+                    "success": stop.success,
+                    "return_code": stop.return_code,
                 }
             )
 
@@ -297,20 +448,48 @@ class QuadletExecutor:
             )
 
         if only_remove:
-            stop = run_systemctl_command(
-                "stop",
-                unit_name,
-                user=rootless,
-                run_as_user=run_as_user if rootless else None,
-            )
-            actions.append(
-                {
-                    "action": "stop",
-                    "unit": unit_name,
-                    "success": stop.success,
-                    "return_code": stop.return_code,
-                }
-            )
+            if obsolete_image_remove:
+                reset = QuadletExecutor.reset_failed_unit(
+                    unit_name,
+                    rootless=rootless,
+                    run_as_user=run_as_user,
+                )
+                actions.append(
+                    {
+                        "action": "reset-failed",
+                        "unit": unit_name,
+                        "success": reset.success,
+                        "return_code": reset.return_code,
+                    }
+                )
+                unloaded = QuadletExecutor.verify_unit_unloaded(
+                    unit_name,
+                    rootless=rootless,
+                    run_as_user=run_as_user,
+                )
+                actions.append(
+                    {
+                        "action": "verify-unloaded",
+                        "unit": unit_name,
+                        "success": unloaded.success,
+                        "return_code": unloaded.return_code,
+                    }
+                )
+            else:
+                stop = run_systemctl_command(
+                    "stop",
+                    unit_name,
+                    user=rootless,
+                    run_as_user=run_as_user if rootless else None,
+                )
+                actions.append(
+                    {
+                        "action": "stop",
+                        "unit": unit_name,
+                        "success": stop.success,
+                        "return_code": stop.return_code,
+                    }
+                )
             if recreate_object:
                 remove_object = QuadletExecutor.remove_podman_object(
                     owner_ref,

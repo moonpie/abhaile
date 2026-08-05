@@ -200,6 +200,80 @@ class TestQuadletExecutor:
             run_as_user="abhaile",
         )
 
+    def test_apply_owner_change_image_remove_resets_after_reload(self, mocker: Any) -> None:
+        """Removed image quadlets should clear stale generated image unit state narrowly."""
+        mock_reload = mocker.patch.object(
+            QuadletExecutor,
+            "daemon_reload",
+            return_value=ExecutionResult(
+                action_id="systemctl-daemon-reload",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+        mock_systemctl = mocker.patch(
+            "abhaile.apply.quadlet.run_systemctl_command",
+            return_value=ExecutionResult(
+                action_id="systemctl",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+        mock_reset = mocker.patch.object(
+            QuadletExecutor,
+            "reset_failed_unit",
+            return_value=ExecutionResult(
+                action_id="systemctl reset-failed blocky-image.service",
+                action_type="systemctl",
+                success=True,
+                return_code=0,
+            ),
+        )
+        mock_unloaded = mocker.patch.object(
+            QuadletExecutor,
+            "verify_unit_unloaded",
+            return_value=ExecutionResult(
+                action_id="verify-obsolete-unit-unloaded:blocky-image.service",
+                action_type="validation",
+                success=True,
+                return_code=0,
+            ),
+        )
+
+        summary = QuadletExecutor.apply_owner_change(
+            "unit:blocky-image.service",
+            kinds=["quadlet.image"],
+            changed_phases={"remove"},
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert [action["action"] for action in summary["actions"]] == [
+            "stop",
+            "daemon-reload",
+            "reset-failed",
+            "verify-unloaded",
+        ]
+        mock_systemctl.assert_called_once_with(
+            "stop",
+            "blocky-image.service",
+            user=False,
+            run_as_user=None,
+        )
+        mock_reload.assert_called_once_with(rootless=False, run_as_user=None)
+        mock_reset.assert_called_once_with(
+            "blocky-image.service",
+            rootless=False,
+            run_as_user=None,
+        )
+        mock_unloaded.assert_called_once_with(
+            "blocky-image.service",
+            rootless=False,
+            run_as_user=None,
+        )
+
     def test_apply_convergence_action_runs_systemctl(self, mocker: Any) -> None:
         """Planner-emitted convergence actions should dispatch to systemctl."""
         mock_systemctl = mocker.patch(
@@ -272,6 +346,258 @@ class TestQuadletExecutor:
             run_as_user=None,
             check=True,
         )
+
+    def test_pre_pull_image_pulls_and_verifies_in_rootless_context(self, mocker: Any) -> None:
+        """Image pre-pull should use the service user's Podman storage."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        results = [
+            ExecutionResult(
+                action_id="podman-pull",
+                action_type="podman",
+                success=True,
+                return_code=0,
+            ),
+            ExecutionResult(
+                action_id="podman-image-exists",
+                action_type="podman",
+                success=True,
+                return_code=0,
+            ),
+            ExecutionResult(
+                action_id="podman-image-inspect",
+                action_type="podman",
+                success=True,
+                return_code=0,
+                stdout="sha256:abc repo@example\n",
+            ),
+        ]
+        mock_run = mocker.patch("abhaile.apply.quadlet.run_command", side_effect=results)
+
+        result = QuadletExecutor.pre_pull_image(
+            "docker.io/hashicorp/vault:1.21.4",
+            rootless=True,
+            run_as_user="abhaile",
+        )
+
+        assert result["scope"] == "rootless"
+        assert result["run_as_user"] == "abhaile"
+        assert result["image_id"] == "sha256:abc"
+        assert result["digest"] == "repo@example"
+        assert mock_run.call_args_list[0].args[0] == [
+            "/usr/bin/podman",
+            "pull",
+            "docker.io/hashicorp/vault:1.21.4",
+        ]
+        assert [call.kwargs["run_as_user"] for call in mock_run.call_args_list] == [
+            "abhaile",
+            "abhaile",
+            "abhaile",
+        ]
+
+    def test_pre_pull_image_failure_reports_non_destructive_context(self, mocker: Any) -> None:
+        """Pull command failure should raise before image verification."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        mock_run = mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="podman-pull",
+                action_type="podman",
+                success=False,
+                return_code=125,
+                stderr="lookup registry failed",
+            ),
+        )
+
+        with pytest.raises(ApplyError, match="image pre-pull failed"):
+            QuadletExecutor.pre_pull_image(
+                "ghcr.io/0xerr0r/blocky:v0.28.0",
+                rootless=False,
+                run_as_user=None,
+            )
+
+        mock_run.assert_called_once()
+
+    def test_image_exists_false_when_podman_reports_absent(self, mocker: Any) -> None:
+        """Image existence should be checked in the requested Podman storage."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        mock_run = mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="podman-image-exists",
+                action_type="podman",
+                success=False,
+                return_code=1,
+                stderr="image not known",
+            ),
+        )
+
+        exists = QuadletExecutor.image_exists(
+            "ghcr.io/0xerr0r/blocky:v0.28.0",
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert exists is False
+        mock_run.assert_called_once_with(
+            ["/usr/bin/podman", "image", "exists", "ghcr.io/0xerr0r/blocky:v0.28.0"],
+            action_id="podman-image-exists:ghcr.io/0xerr0r/blocky:v0.28.0",
+            action_type="podman",
+            run_as_user=None,
+            check=False,
+        )
+
+    def test_inspect_image_omits_nil_digest(self, mocker: Any) -> None:
+        """Podman inspect payload should not expose a fake digest for local-only images."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="podman-image-inspect",
+                action_type="podman",
+                success=True,
+                return_code=0,
+                stdout="sha256:abc <nil>\n",
+            ),
+        )
+
+        payload = QuadletExecutor.inspect_image(
+            "localhost/coredns:latest",
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert payload == {"image": "localhost/coredns:latest", "image_id": "sha256:abc"}
+
+    def test_pre_pull_image_requires_verified_local_image(self, mocker: Any) -> None:
+        """A successful pull command is not enough unless the reference is visible locally."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            side_effect=[
+                ExecutionResult(
+                    action_id="podman-pull",
+                    action_type="podman",
+                    success=True,
+                    return_code=0,
+                ),
+                ExecutionResult(
+                    action_id="podman-image-exists",
+                    action_type="podman",
+                    success=False,
+                    return_code=1,
+                ),
+            ],
+        )
+
+        with pytest.raises(ApplyError, match="not visible locally"):
+            QuadletExecutor.pre_pull_image(
+                "ghcr.io/0xerr0r/blocky:v0.28.0",
+                rootless=False,
+                run_as_user=None,
+            )
+
+    def test_verify_unit_unloaded_raises_when_unit_remains_loaded(self, mocker: Any) -> None:
+        """Obsolete generated image units must be gone after their Quadlet file is removed."""
+        mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="verify-obsolete-unit-unloaded:blocky-image.service",
+                action_type="validation",
+                success=True,
+                return_code=0,
+                stdout="loaded\n",
+            ),
+        )
+
+        with pytest.raises(ApplyError, match="remains loaded"):
+            QuadletExecutor.verify_unit_unloaded(
+                "blocky-image.service",
+                rootless=False,
+                run_as_user=None,
+            )
+
+    def test_verify_unit_unloaded_rootless_uses_user_manager(self, mocker: Any) -> None:
+        """Rootless obsolete unit checks should target the configured user's manager."""
+        mock_run = mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="verify-obsolete-unit-unloaded:vault-agent-image.service",
+                action_type="validation",
+                success=True,
+                return_code=0,
+                stdout="not-found\n",
+            ),
+        )
+
+        result = QuadletExecutor.verify_unit_unloaded(
+            "vault-agent-image.service",
+            rootless=True,
+            run_as_user="abhaile",
+        )
+
+        assert result.success is True
+        mock_run.assert_called_once_with(
+            [
+                "systemctl",
+                "--user",
+                "-M",
+                "abhaile@",
+                "show",
+                "vault-agent-image.service",
+                "--property=LoadState",
+                "--value",
+            ],
+            action_id="verify-obsolete-unit-unloaded:vault-agent-image.service",
+            action_type="validation",
+            run_as_user=None,
+            check=False,
+        )
+
+    def test_remove_podman_object_treats_absent_object_as_converged(self, mocker: Any) -> None:
+        """Missing generated Podman objects should not make removals fail."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="podman-network-rm:systemd-services",
+                action_type="podman",
+                success=False,
+                return_code=1,
+                stderr="Error: no such network",
+            ),
+        )
+
+        result = QuadletExecutor.remove_podman_object(
+            "unit:services-network.service",
+            kinds={"quadlet.network"},
+            rootless=False,
+            run_as_user=None,
+        )
+
+        assert result.success is True
+        assert result.return_code == 1
+
+    def test_remove_podman_object_failure_raises(self, mocker: Any) -> None:
+        """Unexpected Podman object removal failures should block the transaction."""
+        mocker.patch("abhaile.apply.quadlet.shutil.which", return_value="/usr/bin/podman")
+        mocker.patch(
+            "abhaile.apply.quadlet.run_command",
+            return_value=ExecutionResult(
+                action_id="podman-volume-rm:systemd-config",
+                action_type="podman",
+                success=False,
+                return_code=125,
+                stderr="permission denied",
+            ),
+        )
+
+        with pytest.raises(ApplyError, match="permission denied"):
+            QuadletExecutor.remove_podman_object(
+                "unit:config-volume.service",
+                kinds={"quadlet.volume"},
+                rootless=False,
+                run_as_user=None,
+            )
 
     def test_apply_owner_change_recreates_network_object_on_write(self, mocker: Any) -> None:
         """Changed quadlet networks should remove old object before reload/start."""

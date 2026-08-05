@@ -315,6 +315,86 @@ class TestServiceCompositionSchema:
 
         validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
 
+    def test_service_schema_accepts_registry_image_and_pull_policy(self) -> None:
+        """podman services may declare direct registry image metadata."""
+        repo_root = self._repo_root()
+        service_schema_path = repo_root / "schemas" / "service.schema.json"
+        service_schema = read_json(service_schema_path)
+
+        service_data: dict[str, Any] = {
+            "name": "blocky",
+            "podman": {
+                "user": "root",
+                "network": "ipvlan-l2",
+                "image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                "pull_policy": "missing",
+            },
+            "composition": {
+                "container": {
+                    "named_volumes": [],
+                    "mounted_files": [],
+                },
+            },
+        }
+
+        validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
+
+    def test_service_schema_rejects_empty_registry_image(self) -> None:
+        """registry image fields must be non-empty strings."""
+        repo_root = self._repo_root()
+        service_schema_path = repo_root / "schemas" / "service.schema.json"
+        service_schema = read_json(service_schema_path)
+
+        service_data: dict[str, Any] = {
+            "name": "blocky",
+            "podman": {
+                "user": "root",
+                "network": "ipvlan-l2",
+                "image": "",
+            },
+            "composition": {
+                "container": {
+                    "named_volumes": [],
+                    "mounted_files": [],
+                },
+            },
+        }
+
+        with pytest.raises(RenderError):
+            validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
+
+    def test_service_schema_rejects_unsupported_pull_policy(self) -> None:
+        """pull_policy accepts only explicitly supported values."""
+        repo_root = self._repo_root()
+        service_schema_path = repo_root / "schemas" / "service.schema.json"
+        service_schema = read_json(service_schema_path)
+
+        service_data: dict[str, Any] = {
+            "name": "authelia",
+            "podman": {
+                "user": "root",
+                "network": "ipvlan-l2",
+            },
+            "composition": {
+                "pod": {
+                    "containers": [
+                        {
+                            "name": "redis",
+                            "image": "docker.io/library/redis:8.2.2-alpine",
+                            "pull_policy": "opportunistic",
+                            "container": {
+                                "named_volumes": [],
+                                "mounted_files": [],
+                            },
+                        }
+                    ]
+                }
+            },
+        }
+
+        with pytest.raises(RenderError):
+            validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
+
     def test_service_schema_accepts_directory_metadata(self) -> None:
         """service config directory entries may declare owner/group/mode directly."""
         repo_root = self._repo_root()

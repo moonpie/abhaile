@@ -84,6 +84,17 @@
         "network": {
           "type": "string",
           "description": "Network mode: ipvlan-l2, host, or container:<name>"
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Registry image reference for single-container services or default pod containers"
+        },
+        "pull_policy": {
+          "type": "string",
+          "enum": ["always", "missing", "never", "newer"],
+          "default": "missing",
+          "description": "Quadlet boot-time image pull policy"
         }
       },
       "additionalProperties": false
@@ -108,6 +119,57 @@
         "config_change_restart_unit": {
           "type": ["string", "null"],
           "description": "Explicit systemd unit to restart after service.config/service.env updates, or null for static data that should not trigger a service restart"
+        }
+      },
+      "additionalProperties": false
+    },
+    "build": {
+      "type": "object",
+      "description": "Managed Quadlet build transaction metadata",
+      "required": ["output_image", "inputs"],
+      "properties": {
+        "output_image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Expected local image reference produced by the build"
+        },
+        "pull_policy": {
+          "type": "string",
+          "enum": ["missing"],
+          "default": "missing",
+          "description": "Quadlet build base-image pull policy for Podman 5.4.2"
+        },
+        "inputs": {
+          "type": "array",
+          "description": "Service source files that materially affect the build",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "post_build": {
+          "type": "object",
+          "description": "Optional post-build service-specific action",
+          "properties": {
+            "install_unit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "verify_binary": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "consumers": {
+          "type": "array",
+          "description": "Systemd units restarted after output verification and post-build success",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
         }
       },
       "additionalProperties": false
@@ -201,6 +263,17 @@
                   "name": {
                     "type": "string",
                     "description": "Container name"
+                  },
+                  "image": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Registry image reference for this pod container"
+                  },
+                  "pull_policy": {
+                    "type": "string",
+                    "enum": ["always", "missing", "never", "newer"],
+                    "default": "missing",
+                    "description": "Quadlet boot-time image pull policy for this pod container"
                   },
                   "container": {
                     "description": "Container configuration",

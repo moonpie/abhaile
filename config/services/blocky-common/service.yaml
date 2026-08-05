@@ -1,6 +1,8 @@
 name: blocky-common
 composition:
   container:
+    image: ghcr.io/0xerr0r/blocky:v0.27.0
+    pull_policy: missing
     named_volumes:
       - name: host-certs
         host_path: /etc/ssl/certs

@@ -2,6 +2,14 @@ name: caddy-dmz
 podman:
   user: root
   network: ipvlan-l2
+build:
+  output_image: localhost/caddy-desec:2.10.2
+  pull_policy: missing
+  inputs:
+    - caddy-dmz/quadlets/build.build
+    - caddy-dmz/build/Containerfile
+  consumers:
+    - caddy-dmz.service
 apply:
   config_change_restart_unit: null
 composition:

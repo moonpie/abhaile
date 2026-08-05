@@ -52,6 +52,8 @@ class PlanResult(TypedDict):
     diff: dict[str, list[dict[str, Any]]]
     sync: SyncPlan
     owner_plan: dict[str, Any]
+    image_acquisitions: list[dict[str, Any]]
+    build_transactions: list[dict[str, Any]]
     networkd_netdev_delete_order: list[str]
     quadlet_convergence_plans: dict[str, list[dict[str, str]]]
     summary: DiffSummary
@@ -650,6 +652,137 @@ def _build_quadlet_convergence_plans(
     return plans
 
 
+def _service_from_quadlet_owner(owner_ref: str) -> str:
+    """Derive service-ish name from a quadlet owner reference."""
+    if owner_ref.startswith("unit:"):
+        unit_name = owner_ref.split(":", 1)[1]
+        if unit_name.endswith(".service"):
+            return unit_name[: -len(".service")]
+        return unit_name
+    return owner_ref
+
+
+def _image_context_from_hints(hints: object) -> tuple[str, str | None]:
+    """Return image acquisition scope and rootless user from apply hints."""
+    if not isinstance(hints, dict) or not bool(hints.get("rootless")):
+        return "rootful", None
+    user = hints.get("podman_user")
+    return "rootless", user if isinstance(user, str) and user else None
+
+
+def _build_image_acquisition_plan(
+    *,
+    desired_by_target: dict[str, dict[str, Any]],
+    applied_by_target: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build explicit image pre-pull actions from manifest image metadata."""
+    actions: list[dict[str, Any]] = []
+    for target_path in sorted(desired_by_target.keys()):
+        desired_entry = desired_by_target[target_path]
+        if desired_entry.get("kind") != "quadlet.container":
+            continue
+
+        desired_hints = desired_entry.get("apply_hints")
+        if not isinstance(desired_hints, dict):
+            continue
+        desired_image = desired_hints.get("podman_image")
+        if not isinstance(desired_image, str) or not desired_image:
+            continue
+
+        applied_entry = applied_by_target.get(target_path)
+        applied_hints = (
+            applied_entry.get("apply_hints") if isinstance(applied_entry, dict) else None
+        )
+        old_image = (
+            applied_hints.get("podman_image")
+            if isinstance(applied_hints, dict)
+            and isinstance(applied_hints.get("podman_image"), str)
+            else None
+        )
+        if old_image == desired_image:
+            continue
+
+        scope, run_as_user = _image_context_from_hints(desired_hints)
+        action: dict[str, Any] = {
+            "service": _service_from_quadlet_owner(desired_entry["owner_ref"]),
+            "owner_ref": desired_entry["owner_ref"],
+            "target_path": target_path,
+            "scope": scope,
+            "old_image": old_image,
+            "desired_image": desired_image,
+            "pull_policy": desired_hints.get("pull_policy", "missing"),
+            "action": "pre-pull",
+        }
+        if run_as_user:
+            action["run_as_user"] = run_as_user
+        actions.append(action)
+    return actions
+
+
+def _build_managed_build_plan(
+    *,
+    desired_by_target: dict[str, dict[str, Any]],
+    applied_by_target: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build explicit managed build transactions from manifest build metadata."""
+    actions: list[dict[str, Any]] = []
+    for target_path in sorted(desired_by_target.keys()):
+        desired_entry = desired_by_target[target_path]
+        if desired_entry.get("kind") != "quadlet.build":
+            continue
+        desired_hints = desired_entry.get("apply_hints")
+        if not isinstance(desired_hints, dict):
+            continue
+        managed_build = desired_hints.get("managed_build")
+        if not isinstance(managed_build, dict):
+            continue
+        desired_fingerprint = managed_build.get("input_fingerprint")
+        if not isinstance(desired_fingerprint, str) or not desired_fingerprint:
+            continue
+
+        applied_entry = applied_by_target.get(target_path)
+        applied_hints = (
+            applied_entry.get("apply_hints") if isinstance(applied_entry, dict) else None
+        )
+        applied_build = (
+            applied_hints.get("managed_build") if isinstance(applied_hints, dict) else None
+        )
+        old_fingerprint = (
+            applied_build.get("input_fingerprint")
+            if isinstance(applied_build, dict)
+            and isinstance(applied_build.get("input_fingerprint"), str)
+            else None
+        )
+        if old_fingerprint == desired_fingerprint:
+            continue
+
+        scope, run_as_user = _image_context_from_hints(desired_hints)
+        build_unit = desired_entry["owner_ref"].split(":", 1)[1]
+        action: dict[str, Any] = {
+            "service": managed_build.get(
+                "service", _service_from_quadlet_owner(desired_entry["owner_ref"])
+            ),
+            "owner_ref": desired_entry["owner_ref"],
+            "target_path": target_path,
+            "scope": scope,
+            "old_fingerprint": old_fingerprint,
+            "desired_fingerprint": desired_fingerprint,
+            "output_image": managed_build.get("output_image"),
+            "pull_policy": managed_build.get("pull_policy", "missing"),
+            "build_unit": build_unit,
+            "inputs": managed_build.get("inputs", []),
+            "consumers": managed_build.get("consumers", []),
+            "action": "build",
+        }
+        post_build = managed_build.get("post_build")
+        if isinstance(post_build, dict):
+            action["post_build"] = post_build
+        if run_as_user:
+            action["run_as_user"] = run_as_user
+        actions.append(action)
+    return actions
+
+
 def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Path) -> PlanResult:
     """Compare desired and applied manifests and classify live drift."""
     desired = _load_manifest(rendered_manifest_path, allow_missing=False)
@@ -775,6 +908,14 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
         owners=merged_owners,
         owner_kinds=owner_kinds,
     )
+    image_acquisitions = _build_image_acquisition_plan(
+        desired_by_target=desired_by_target,
+        applied_by_target=applied_by_target,
+    )
+    build_transactions = _build_managed_build_plan(
+        desired_by_target=desired_by_target,
+        applied_by_target=applied_by_target,
+    )
 
     return {
         "host": desired.host,
@@ -794,6 +935,8 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
             "removals_missing": removals_missing,
         },
         "owner_plan": owner_plan,
+        "image_acquisitions": image_acquisitions,
+        "build_transactions": build_transactions,
         "networkd_netdev_delete_order": networkd_netdev_delete_order,
         "quadlet_convergence_plans": quadlet_convergence_plans,
         "summary": {

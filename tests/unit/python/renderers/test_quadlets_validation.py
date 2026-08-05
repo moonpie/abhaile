@@ -261,7 +261,7 @@ composition:
             )
 
     def test_template_with_image_and_build(self, tmp_path: Path, write_file: Any) -> None:
-        """Template with both image and build variables works when both provided."""
+        """Template with image and build variables rejects incompatible sources."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
@@ -303,20 +303,14 @@ composition:
             "services": {"app": {"vlan": "services"}},
         }
 
-        # Should succeed
-        render_service_quadlets(
-            "phobos",
-            ["app"],
-            network,
-            config_root,
-            output_dir,
-        )
-
-        # Verify all files were created
-        output_root = output_dir / "app" / "etc" / "containers" / "systemd"
-        assert (output_root / "app.container").exists()
-        assert (output_root / "app.image").exists()
-        assert (output_root / "app.build").exists()
+        with pytest.raises(RenderError, match="both registry image and local build"):
+            render_service_quadlets(
+                "phobos",
+                ["app"],
+                network,
+                config_root,
+                output_dir,
+            )
 
     def test_missing_trailing_newline_in_quadlet_source_raises(
         self, tmp_path: Path, write_file: Any

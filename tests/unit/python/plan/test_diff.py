@@ -71,6 +71,70 @@ def _directory_manifest_entry(
     }
 
 
+def _quadlet_container_entry(
+    target_path: Path,
+    *,
+    image: str,
+    owner_ref: str = "unit:blocky.service",
+    render_path: str = "services/blocky/etc/containers/systemd/blocky.container",
+    rootless: bool = False,
+    podman_user: str | None = None,
+) -> dict[str, object]:
+    hints: dict[str, object] = {
+        "rootless": rootless,
+        "podman_image": image,
+        "pull_policy": "missing",
+    }
+    if podman_user:
+        hints["podman_user"] = podman_user
+    return {
+        "render_path": render_path,
+        "target_path": target_path.as_posix(),
+        "kind": "quadlet.container",
+        "owner_ref": owner_ref,
+        "sha256": _sha_of(f"[Container]\nImage={image}\nPull=missing\n"),
+        "size": len(f"[Container]\nImage={image}\nPull=missing\n"),
+        "apply_hints": hints,
+    }
+
+
+def _quadlet_build_entry(
+    target_path: Path,
+    *,
+    fingerprint: str,
+    output_image: str = "localhost/coredns-omada:latest",
+    owner_ref: str = "unit:coredns-omada-build.service",
+    consumers: list[str] | None = None,
+) -> dict[str, object]:
+    content = "[Build]\nImageTag=localhost/coredns-omada:latest\nPull=missing\n"
+    return {
+        "render_path": "services/coredns/etc/containers/systemd/coredns-omada.build",
+        "target_path": target_path.as_posix(),
+        "kind": "quadlet.build",
+        "owner_ref": owner_ref,
+        "sha256": _sha_of(content),
+        "size": len(content),
+        "apply_hints": {
+            "rootless": False,
+            "managed_build": {
+                "service": "coredns-omada",
+                "output_image": output_image,
+                "pull_policy": "missing",
+                "input_fingerprint": fingerprint,
+                "inputs": [
+                    "coredns-omada/quadlets/build.build",
+                    "coredns-omada/build/Containerfile",
+                ],
+                "post_build": {
+                    "install_unit": "coredns-omada-install.service",
+                    "verify_binary": "/usr/local/bin/coredns",
+                },
+                "consumers": consumers or ["coredns.service"],
+            },
+        },
+    }
+
+
 class TestPlanManifestDrift:
     """Tests for plan_manifest_drift()."""
 
@@ -295,6 +359,176 @@ class TestPlanManifestDrift:
         assert plan["summary"]["added"] == 1
         assert plan["summary"]["writes"] == 1
         assert plan["summary"]["removed"] == 0
+
+    def test_changed_quadlet_image_creates_pre_pull_action(self, tmp_path: Path) -> None:
+        """Changed container image metadata should create an explicit pre-pull plan."""
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "blocky.container"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+
+        _write_manifest(
+            desired_manifest,
+            "deimos",
+            [_quadlet_container_entry(target, image="ghcr.io/0xerr0r/blocky:v0.28.0")],
+        )
+        _write_manifest(
+            applied_manifest,
+            "deimos",
+            [_quadlet_container_entry(target, image="ghcr.io/0xerr0r/blocky:v0.27.0")],
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["image_acquisitions"] == [
+            {
+                "service": "blocky",
+                "owner_ref": "unit:blocky.service",
+                "target_path": target.as_posix(),
+                "scope": "rootful",
+                "old_image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                "desired_image": "ghcr.io/0xerr0r/blocky:v0.28.0",
+                "pull_policy": "missing",
+                "action": "pre-pull",
+            }
+        ]
+
+    def test_unchanged_quadlet_image_creates_no_pre_pull_action(self, tmp_path: Path) -> None:
+        """Unchanged image metadata should not acquire on unrelated container drift."""
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "blocky.container"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _quadlet_container_entry(target, image="ghcr.io/0xerr0r/blocky:v0.27.0")
+        drifted_entry = dict(entry)
+        drifted_entry["sha256"] = _sha_of("[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\n")
+
+        _write_manifest(desired_manifest, "deimos", [entry])
+        _write_manifest(applied_manifest, "deimos", [drifted_entry])
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["image_acquisitions"] == []
+
+    def test_new_quadlet_container_records_acquisition_candidate(self, tmp_path: Path) -> None:
+        """New registry-backed containers should expose image acquisition intent."""
+        target = tmp_path / "target" / "etc" / "containers" / "systemd" / "blocky.container"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+
+        _write_manifest(
+            desired_manifest,
+            "deimos",
+            [_quadlet_container_entry(target, image="ghcr.io/0xerr0r/blocky:v0.27.0")],
+        )
+
+        plan = plan_manifest_drift(desired_manifest, tmp_path / "out" / "state" / "manifest.json")
+
+        assert plan["image_acquisitions"][0]["old_image"] is None
+        assert plan["image_acquisitions"][0]["desired_image"] == "ghcr.io/0xerr0r/blocky:v0.27.0"
+
+    def test_rootless_quadlet_image_acquisition_records_user(self, tmp_path: Path) -> None:
+        """Rootless image changes should be planned under the configured Podman user."""
+        target = (
+            tmp_path
+            / "target"
+            / "home"
+            / "abhaile"
+            / ".config"
+            / "containers"
+            / "systemd"
+            / "vault-agent.container"
+        )
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+
+        _write_manifest(
+            desired_manifest,
+            "deimos",
+            [
+                _quadlet_container_entry(
+                    target,
+                    image="docker.io/hashicorp/vault:1.21.4",
+                    owner_ref="unit:vault-agent.service",
+                    render_path="services/vault-agent/home/abhaile/.config/containers/systemd/vault-agent.container",
+                    rootless=True,
+                    podman_user="abhaile",
+                )
+            ],
+        )
+        _write_manifest(
+            applied_manifest,
+            "deimos",
+            [
+                _quadlet_container_entry(
+                    target,
+                    image="docker.io/hashicorp/vault:1.20.0",
+                    owner_ref="unit:vault-agent.service",
+                    render_path="services/vault-agent/home/abhaile/.config/containers/systemd/vault-agent.container",
+                    rootless=True,
+                    podman_user="abhaile",
+                )
+            ],
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["image_acquisitions"][0]["scope"] == "rootless"
+        assert plan["image_acquisitions"][0]["run_as_user"] == "abhaile"
+
+    def test_changed_build_fingerprint_creates_managed_build_transaction(
+        self, tmp_path: Path
+    ) -> None:
+        """Changed managed build inputs should create one explicit build transaction."""
+        target = tmp_path / "target" / "etc/containers/systemd/coredns-omada.build"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        _write_manifest(
+            desired_manifest,
+            "phobos",
+            [_quadlet_build_entry(target, fingerprint="f" * 64)],
+        )
+        _write_manifest(
+            applied_manifest,
+            "phobos",
+            [_quadlet_build_entry(target, fingerprint="e" * 64)],
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["build_transactions"] == [
+            {
+                "service": "coredns-omada",
+                "owner_ref": "unit:coredns-omada-build.service",
+                "target_path": target.as_posix(),
+                "scope": "rootful",
+                "old_fingerprint": "e" * 64,
+                "desired_fingerprint": "f" * 64,
+                "output_image": "localhost/coredns-omada:latest",
+                "pull_policy": "missing",
+                "build_unit": "coredns-omada-build.service",
+                "inputs": [
+                    "coredns-omada/quadlets/build.build",
+                    "coredns-omada/build/Containerfile",
+                ],
+                "consumers": ["coredns.service"],
+                "action": "build",
+                "post_build": {
+                    "install_unit": "coredns-omada-install.service",
+                    "verify_binary": "/usr/local/bin/coredns",
+                },
+            }
+        ]
+
+    def test_unchanged_build_fingerprint_creates_no_build_transaction(self, tmp_path: Path) -> None:
+        """Unchanged managed build inputs should not schedule a build."""
+        target = tmp_path / "target" / "etc/containers/systemd/coredns-omada.build"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _quadlet_build_entry(target, fingerprint="f" * 64)
+        _write_manifest(desired_manifest, "phobos", [entry])
+        _write_manifest(applied_manifest, "phobos", [entry])
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["build_transactions"] == []
 
     def test_removed_file_is_prune_safe_when_live_matches_applied(self, tmp_path: Path) -> None:
         """Removed files are prune-safe only when live hash matches applied hash."""

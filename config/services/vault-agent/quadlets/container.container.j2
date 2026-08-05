@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Container]
 Image={{ image }}
+Pull={{ pull_policy }}
 Network=host
 Timezone=local
 {% for v in volume_lines %}

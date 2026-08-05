@@ -9,6 +9,7 @@ from abhaile.renderers.quadlets.helpers import (
     _quadlet_kind_from_filename,
     _quadlet_unit_name,
     _register_quadlet_artifact,
+    _read_legacy_image_reference,
     _resolve_composition_definition,
     _validate_trailing_newline,
 )
@@ -39,6 +40,9 @@ def _render_service_quadlet_files(
     device_lines: list[str],
     build_filename: str | None,
     image_filename: str | None,
+    image_reference: str | None,
+    pull_policy: str,
+    build_apply_hints: dict[str, Any] | None = None,
     *,
     output_root: Path | None = None,
     collector: ArtifactCollector | None = None,
@@ -58,14 +62,21 @@ def _render_service_quadlet_files(
         container_template_path,
         context="quadlet source file",
     )
+    if image_reference is None and image_path is not None:
+        image_reference = _read_legacy_image_reference(image_path, service=service)
     template_text = container_template_path.read_text(encoding="utf-8")
-    if "{{ image" in template_text and not image_filename:
+    if "{{ image" in template_text and not image_reference:
         raise RenderError(
-            f"Template requires image variable but image.image not found: {container_template_path}"
+            f"Template requires image variable but podman.image is missing: "
+            f"{container_template_path}"
         )
     if "{{ build" in template_text and not build_filename:
         raise RenderError(
             f"Template requires build variable but build.build not found: {container_template_path}"
+        )
+    if build_filename is not None and image_reference is not None:
+        raise RenderError(
+            f"Service '{service}' specifies both registry image and local build sources"
         )
 
     template = jinja_env.get_template(container_template_path.name)
@@ -75,8 +86,9 @@ def _render_service_quadlet_files(
         service_name=service,
         volume_lines=volume_lines,
         device_lines=device_lines,
-        image=image_filename,
+        image=image_reference,
         build=build_filename,
+        pull_policy=pull_policy,
     )
     container_filename = f"{service}.container"
     container_path = output_dir / container_filename
@@ -90,8 +102,22 @@ def _render_service_quadlet_files(
             kind=_quadlet_kind_from_filename(container_filename),
             owner_ref=f"unit:{_quadlet_unit_name(container_filename)}",
             content=rendered,
-            apply_hints=apply_hints,
-            owner_apply_hints=apply_hints,
+            apply_hints={
+                **apply_hints,
+                **(
+                    {"podman_image": image_reference, "pull_policy": pull_policy}
+                    if image_reference is not None
+                    else {}
+                ),
+            },
+            owner_apply_hints={
+                **apply_hints,
+                **(
+                    {"podman_image": image_reference, "pull_policy": pull_policy}
+                    if image_reference is not None
+                    else {}
+                ),
+            },
             owner_requires=container_owner_requires,
         )
 
@@ -105,6 +131,9 @@ def _render_service_quadlet_files(
         content = source_path.read_text(encoding="utf-8")
         target.write_text(content, encoding="utf-8", newline="\n")
         if collector is not None and rendered_root is not None and output_root is not None:
+            artifact_apply_hints = apply_hints
+            if out_name.endswith(".build") and build_apply_hints is not None:
+                artifact_apply_hints = {**apply_hints, **build_apply_hints}
             _register_quadlet_artifact(
                 collector=collector,
                 rendered_root=rendered_root,
@@ -113,8 +142,8 @@ def _render_service_quadlet_files(
                 kind=_quadlet_kind_from_filename(out_name),
                 owner_ref=f"unit:{_quadlet_unit_name(out_name)}",
                 content=content,
-                apply_hints=apply_hints,
-                owner_apply_hints=apply_hints,
+                apply_hints=artifact_apply_hints,
+                owner_apply_hints=artifact_apply_hints,
             )
 
     rendered_aux_paths: set[Path] = set()
@@ -137,7 +166,6 @@ def _render_service_quadlet_files(
 
         if source_path.name == "image.image":
             rendered_aux_paths.add(source_path)
-            render_static_quadlet(source_path, f"{service}.image")
             continue
 
         if source_path.name == "build.build":
@@ -147,8 +175,8 @@ def _render_service_quadlet_files(
 
         render_static_quadlet(source_path, source_path.name)
 
-    if image_path is not None and image_path not in rendered_aux_paths:
-        render_static_quadlet(image_path, f"{service}.image")
+    if image_path is not None:
+        rendered_aux_paths.add(image_path)
 
     if build_path is not None and build_path not in rendered_aux_paths:
         render_static_quadlet(build_path, f"{service}.build")

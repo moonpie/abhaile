@@ -34,6 +34,66 @@ apply:
 
 - `abhaile-apply --dry-run` never dispatches service owner actions.
 - Dry-run reports drift only; restart, directory enforcement, and other mutations are skipped.
+- Registry image acquisitions are reported in `image_acquisitions` JSON output but are not
+  pulled during a normal dry-run.
+- Managed build transactions are reported in `build_transactions` JSON output but are not started
+  during a normal dry-run.
+
+## Registry Image Acquisition
+
+Registry-backed Quadlet containers render direct image references in their `.container` files:
+
+```ini
+[Container]
+Image=ghcr.io/0xerr0r/blocky:v0.27.0
+Pull=missing
+```
+
+Abhaile does not render a separate `.image` Quadlet for normal registry images. `Pull=missing`
+lets Podman start from local storage during boot and contact the registry only when the desired
+image is absent.
+
+Before a live apply stages a changed registry-backed `.container`, apply uses manifest
+`apply_hints` to plan explicit `pre-pull` actions. It pulls the desired image in the same Podman
+context as the service: rootful storage for rootful services, or the configured `podman.user`
+storage for rootless services.
+
+On Podman 5.4.2, apply uses `podman pull IMAGE`, verifies with `podman image exists IMAGE`, and
+records diagnostics from `podman image inspect IMAGE`. Abhaile does not pass `--policy`, and
+rendered Quadlets do not use `Policy=`.
+
+The transaction order is:
+
+1. Compare the desired image reference with the previously applied reference.
+1. Pull and verify the new image if acquisition is required.
+1. Stage the changed `.container` and remove any obsolete managed `.image` artifact.
+1. Run the appropriate systemd daemon reload.
+1. Restart and verify the generated service.
+1. Update applied state only after the apply transaction succeeds.
+
+If pre-pull fails, apply stops before writing the new `.container`, before removing the old
+`.image` migration artifact, before daemon reload, and before updating applied state. The running
+service is left unchanged. If a later restart or health step fails, normal apply failure handling
+preserves the last successful applied state; pulled images are left in local storage for manual
+cleanup.
+
+Use immutable version tags or digests for normal updates. Mutable tags are not refreshed at boot;
+refreshing an unchanged mutable tag is not an implicit reconciliation behavior.
+
+## Managed Build Transactions
+
+Managed `.build` Quadlets are a separate GitOps transaction type. They render `Pull=missing`, which
+only controls acquisition of missing base images referenced by `FROM`; it does not make build steps
+such as `apt update`, `git clone`, `curl`, or `go get` work offline. Builds are therefore started
+only by apply when the declared build input fingerprint changes, never by ordinary boot recovery.
+
+Build metadata declares the output image, input files, optional post-build action, and consumers.
+Apply stages build inputs and the `.build` Quadlet, reloads systemd, verifies the generated build
+unit, starts it, verifies the output image in the correct Podman store, runs any post-build action,
+then restarts consumers. Applied state is updated only after the whole transaction succeeds.
+
+CoreDNS is modeled through the generic build transaction by declaring `post_build.install_unit` and
+`post_build.verify_binary`; it is not a planner special case.
 
 ## File Metadata
 

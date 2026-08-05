@@ -428,7 +428,21 @@ systemctl list-units '*-app*' --no-pager
 # Check why a container won't start
 systemctl status <unit>.service
 podman logs systemd-<container-name>
+
+# Confirm a registry image is local without contacting the registry
+podman image exists ghcr.io/0xerr0r/blocky:v0.27.0
+machinectl shell abhaile@ /usr/bin/podman image exists docker.io/hashicorp/vault:1.21.4
 ```
+
+Registry-backed containers are rendered as direct `Image=<registry-ref>` entries in
+`.container` Quadlets with `Pull=missing`. Normal boot uses the existing local image and does not
+depend on external DNS or registry availability unless the desired image is absent locally.
+Separate `.image` Quadlets are not expected for registry-backed services.
+
+Managed `.build` Quadlets also use `Pull=missing`, but that only controls missing base images.
+Builds are GitOps transactions keyed by declared build inputs and are not expected to run during
+ordinary boot recovery. A failed managed build or post-build action should block deployment before
+consumer services are restarted.
 
 ## Decision Tree: Service Unreachable
 
@@ -540,11 +554,60 @@ When zone records change in `config/network.yaml`:
 
 ### Image Updates
 
-Container images are pinned in quadlet `.image` files. To update:
+Container images are pinned in `service.yaml`, not separate Quadlet `.image` files. To update:
 
-1. Edit the image tag in `config/services/<service>/quadlets/image.image`.
+1. Edit `podman.image` for simple/rootless containers, or the per-container `image` field for pod
+   members.
+1. Prefer immutable version tags or digests. Keep `pull_policy: missing` unless there is a
+   deliberate reason to change boot behavior.
 1. Commit, push, wait for runner (or manual render+apply).
-1. Verify: `podman images | grep <service>`
+1. Verify: `podman image exists <image-ref>` in the same rootful/rootless context as the service.
+
+During live apply, `abhaile-apply` pre-pulls a changed image before staging the new `.container`
+or restarting the service. If the pull fails, apply reports `deployment blocked during image
+acquisition`, leaves the live service and applied state unchanged, and does not remove migration
+`.image` artifacts.
+
+### Registry Image Quadlet Migration
+
+Migrate one host at a time. Keep that host's runner timer stopped until migration, health, and a
+second convergence dry-run have succeeded. Do Deimos first, then Phobos.
+
+```bash
+# On deimos first, then repeat on phobos after deimos is healthy.
+sudo systemctl stop abhaile-runner.timer
+sudo systemctl stop abhaile-runner.service
+
+cd /opt/abhaile
+sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
+
+# Review planned writes, safe removals, and image acquisitions.
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run --json
+
+# Live migration. Safe, manifest-matching .image removals are applied automatically.
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
+
+# Health and convergence checks.
+sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile
+sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
+
+# Confirm obsolete image units and files are gone.
+systemctl --failed
+test ! -e /etc/containers/systemd/blocky-b.image
+test ! -e /etc/containers/systemd/blocky-a.image
+test ! -e /home/abhaile/.config/containers/systemd/vault-agent.image
+systemctl list-units 'blocky*-image.service' 'vault-agent-image.service' --all --no-pager
+
+# Re-enable only after health and the second dry-run are clean.
+sudo systemctl start abhaile-runner.timer
+```
+
+For the outage recovery case, if the desired images already exist locally, Blocky and Vault Agent
+should restart even while external registry DNS is unavailable. Failed registry access should only
+affect a service whose desired image is genuinely absent locally. Do not restart generated
+`*-image.service` units; after migration, they should not be loaded or failed.
 
 ### State and History Cleanup
 
@@ -556,6 +619,10 @@ sudo ls /var/lib/abhaile/state/history/
 sudo podman image prune -a
 sudo -u abhaile podman image prune -a
 ```
+
+Do not run image pruning as part of a deployment transaction. Old images are rollback material
+until an operator verifies that no container, applied manifest, or other service still references
+them.
 
 ### NTP Verification
 

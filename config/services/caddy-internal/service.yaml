@@ -2,6 +2,8 @@ name: caddy-internal
 podman:
   user: root
   network: ipvlan-l2
+  image: docker.io/library/caddy:2.10.2
+  pull_policy: missing
 composition:
   ingress:
     internal:

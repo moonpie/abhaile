@@ -58,6 +58,8 @@ def run_health_audit(
             timeout_seconds=timeout_seconds,
         )
     )
+    results.extend(_check_podman_images(manifest, timeout_seconds=timeout_seconds))
+    results.extend(_check_obsolete_image_units(manifest, timeout_seconds=timeout_seconds))
     results.extend(
         _check_failed_units(
             timeout_seconds=timeout_seconds,
@@ -374,6 +376,135 @@ def _check_rootless_vault_agent(
             result.stderr.strip() or result.stdout.strip(),
         )
     ]
+
+
+def _podman_image_entries(manifest: dict[str, Any]) -> list[dict[str, str | bool | None]]:
+    """Return manifest-declared container images with runtime context."""
+    entries = manifest.get("entries", [])
+    if not isinstance(entries, list):
+        return []
+    images: list[dict[str, str | bool | None]] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("kind") != "quadlet.container":
+            continue
+        hints = entry.get("apply_hints")
+        if not isinstance(hints, dict):
+            continue
+        image = hints.get("podman_image")
+        if not isinstance(image, str) or not image:
+            continue
+        owner_ref = entry.get("owner_ref")
+        unit = owner_ref.split(":", 1)[1] if isinstance(owner_ref, str) and ":" in owner_ref else ""
+        rootless = bool(hints.get("rootless"))
+        podman_user = hints.get("podman_user")
+        images.append(
+            {
+                "unit": unit,
+                "image": image,
+                "rootless": rootless,
+                "podman_user": podman_user if isinstance(podman_user, str) else None,
+            }
+        )
+    return images
+
+
+def _check_podman_images(
+    manifest: dict[str, Any],
+    *,
+    timeout_seconds: int,
+) -> list[HealthResult]:
+    """Verify desired registry images exist in the correct local Podman storage."""
+    results: list[HealthResult] = []
+    for item in _podman_image_entries(manifest):
+        image = item["image"]
+        unit = item["unit"]
+        rootless = item["rootless"] is True
+        podman_user = item["podman_user"]
+        if not isinstance(image, str) or not isinstance(unit, str):
+            continue
+        if rootless:
+            if not isinstance(podman_user, str) or not podman_user:
+                results.append(
+                    HealthResult(f"podman-image-local:{unit}", False, "missing podman_user")
+                )
+                continue
+            argv = [
+                "machinectl",
+                "shell",
+                f"{podman_user}@",
+                "/usr/bin/podman",
+                "image",
+                "exists",
+                image,
+            ]
+        else:
+            argv = ["podman", "image", "exists", image]
+        try:
+            result = _command(argv, timeout_seconds=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            results.append(HealthResult(f"podman-image-local:{unit}", False, str(exc)))
+            continue
+        results.append(
+            HealthResult(
+                f"podman-image-local:{unit}",
+                result.returncode == 0,
+                image if result.returncode == 0 else result.stderr.strip() or result.stdout.strip(),
+            )
+        )
+    return results
+
+
+def _check_obsolete_image_units(
+    manifest: dict[str, Any],
+    *,
+    timeout_seconds: int,
+) -> list[HealthResult]:
+    """Verify old generated image units for managed containers are not loaded or failed."""
+    results: list[HealthResult] = []
+    for item in _podman_image_entries(manifest):
+        unit = item["unit"]
+        rootless = item["rootless"] is True
+        podman_user = item["podman_user"]
+        if not isinstance(unit, str) or not unit.endswith(".service"):
+            continue
+        obsolete_unit = f"{unit[: -len('.service')]}-image.service"
+        argv = ["systemctl"]
+        if rootless:
+            if not isinstance(podman_user, str) or not podman_user:
+                results.append(
+                    HealthResult(
+                        f"obsolete-image-unit:{obsolete_unit}",
+                        False,
+                        "missing podman_user",
+                    )
+                )
+                continue
+            argv.append("--user")
+            argv.extend(["-M", f"{podman_user}@"])
+        argv.extend(
+            [
+                "show",
+                obsolete_unit,
+                "--property=LoadState",
+                "--property=ActiveState",
+                "--value",
+            ]
+        )
+        try:
+            result = _command(argv, timeout_seconds=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            results.append(HealthResult(f"obsolete-image-unit:{obsolete_unit}", False, str(exc)))
+            continue
+        states = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+        loaded_or_failed = "loaded" in states or "failed" in states
+        results.append(
+            HealthResult(
+                f"obsolete-image-unit:{obsolete_unit}",
+                result.returncode == 0 and not loaded_or_failed,
+                ",".join(sorted(states)) or result.stderr.strip(),
+            )
+        )
+    return results
 
 
 def _check_failed_units(*, timeout_seconds: int, rootless_users: list[str]) -> list[HealthResult]:

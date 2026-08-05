@@ -10,7 +10,10 @@ from abhaile.renderers.quadlets.helpers import (
     _quadlet_kind_from_filename,
     _quadlet_unit_name,
     _register_quadlet_artifact,
+    _read_legacy_image_reference,
+    _resolve_container_image_config,
     _resolve_composition_definition,
+    _resolve_managed_build_hints,
     _validate_trailing_newline,
 )
 from abhaile.renderers.quadlets.network import _lookup_service_vlan
@@ -160,6 +163,23 @@ def _render_pod_quadlets(
             service=service,
             container_name=container_name,
         )
+        image_reference, pull_policy = _resolve_container_image_config(
+            service=service,
+            container_name=container_name,
+            container_def=container_def,
+            podman=podman,
+            services_root=services_root,
+        )
+        if image_reference is None and image_path is not None:
+            image_reference = _read_legacy_image_reference(
+                image_path,
+                service=f"{service}/{container_name}",
+            )
+        if build_path is not None and image_reference is not None:
+            raise RenderError(
+                f"Container '{service}/{container_name}' specifies both registry image "
+                "and local build sources"
+            )
 
         # Render container quadlet template
         container_template_path = container_dir / "container.container.j2"
@@ -175,9 +195,9 @@ def _render_pod_quadlets(
         template_text = container_template_path.read_text(encoding="utf-8")
 
         # Check for conditional requirements
-        if "{{ image" in template_text and not image_filename:
+        if "{{ image" in template_text and not image_reference:
             raise RenderError(
-                f"Template requires image variable but image.image not found: {container_template_path}"
+                f"Template requires image variable but image is missing: {container_template_path}"
             )
         if "{{ build" in template_text and not build_filename:
             raise RenderError(
@@ -190,8 +210,9 @@ def _render_pod_quadlets(
             host_name=host,
             service_name=service,
             volume_lines=volume_lines,
-            image=image_filename,
+            image=image_reference,
             build=build_filename,
+            pull_policy=pull_policy,
             pod=pod_name,
         )
         container_output_name = f"{service}-app-{container_name}.container"
@@ -203,11 +224,17 @@ def _render_pod_quadlets(
         if collector is not None and rendered_root is not None:
             container_owner = f"unit:{_quadlet_unit_name(container_output_name)}"
             container_owner_requires = [pod_owner_ref, *volume_owner_refs]
-            if image_filename is not None:
-                container_owner_requires.append(f"unit:{Path(image_filename).stem}-image.service")
             if build_filename is not None:
                 container_owner_requires.append(f"unit:{Path(build_filename).stem}-build.service")
-            container_apply_hints = {**_apply_hints, "restart_mode": "manual"}
+            container_apply_hints = {
+                **_apply_hints,
+                "restart_mode": "manual",
+                **(
+                    {"podman_image": image_reference, "pull_policy": pull_policy}
+                    if image_reference is not None
+                    else {}
+                ),
+            }
             _register_quadlet_artifact(
                 collector=collector,
                 rendered_root=rendered_root,
@@ -224,6 +251,7 @@ def _render_pod_quadlets(
         # Copy build and image files
         if build_path:
             assert build_filename is not None
+            build_apply_hints = _resolve_managed_build_hints(service, services_root)
             _validate_trailing_newline(
                 build_path,
                 context="quadlet build source file",
@@ -240,28 +268,15 @@ def _render_pod_quadlets(
                     kind=_quadlet_kind_from_filename(build_filename),
                     owner_ref=f"unit:{_quadlet_unit_name(build_filename)}",
                     content=content,
-                    apply_hints=_apply_hints,
-                    owner_apply_hints=_apply_hints,
+                    apply_hints={
+                        **_apply_hints,
+                        **(build_apply_hints or {}),
+                    },
+                    owner_apply_hints={
+                        **_apply_hints,
+                        **(build_apply_hints or {}),
+                    },
                 )
 
         if image_path:
-            assert image_filename is not None
-            _validate_trailing_newline(
-                image_path,
-                context="quadlet image source file",
-            )
-            target = service_output_dir / image_filename
-            content = image_path.read_text(encoding="utf-8")
-            target.write_text(content, encoding="utf-8", newline="\n")
-            if collector is not None and rendered_root is not None:
-                _register_quadlet_artifact(
-                    collector=collector,
-                    rendered_root=rendered_root,
-                    output_path=target,
-                    target_path=str(output_root / image_filename),
-                    kind=_quadlet_kind_from_filename(image_filename),
-                    owner_ref=f"unit:{_quadlet_unit_name(image_filename)}",
-                    content=content,
-                    apply_hints=_apply_hints,
-                    owner_apply_hints=_apply_hints,
-                )
+            _validate_trailing_newline(image_path, context="quadlet image source file")

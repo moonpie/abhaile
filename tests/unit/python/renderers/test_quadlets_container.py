@@ -107,14 +107,11 @@ Subnet={{ network.vlans[vlan_name].cidr }}
         image_file = output_dir / "blocky" / "etc/containers/systemd/blocky.image"
 
         assert container_file.exists()
-        assert image_file.exists()
+        assert not image_file.exists()
 
         container_content = container_file.read_text()
-        assert "Image=blocky.image" in container_content
+        assert "Image=ghcr.io/0xerr0r/blocky:v0.27.0" in container_content
         assert "Network=services.network" in container_content
-
-        image_content = image_file.read_text()
-        assert "ghcr.io/0xerr0r/blocky:v0.27.0" in image_content
 
     def test_render_container_inherits_quadlets_from_include(
         self, tmp_path: Path, write_file: Any
@@ -173,8 +170,8 @@ composition:
         container_file = output_dir / "blocky-a" / "etc/containers/systemd/blocky-a.container"
         image_file = output_dir / "blocky-a" / "etc/containers/systemd/blocky-a.image"
 
-        assert container_file.read_text() == "[Container]\nImage=blocky-a.image\n"
-        assert image_file.read_text() == ("[Image]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\n")
+        assert container_file.read_text() == "[Container]\nImage=ghcr.io/0xerr0r/blocky:v0.27.0\n"
+        assert not image_file.exists()
 
     def test_podman_service_without_resolved_container_raises(
         self, tmp_path: Path, write_file: Any
@@ -559,7 +556,7 @@ composition:
 
         write_file(
             config_root / "services" / "coredns-custom" / "quadlets" / "build.build",
-            "[Build]\nDockerfile=./Dockerfile\n",
+            "[Build]\nDockerfile=./Dockerfile\nPull=missing\n",
         )
 
         write_file(
@@ -591,7 +588,10 @@ composition:
         )
 
         assert build_file.exists()
-        assert "Dockerfile=./Dockerfile" in build_file.read_text()
+        build_content = build_file.read_text()
+        assert "Dockerfile=./Dockerfile" in build_content
+        assert "Pull=missing" in build_content
+        assert "Policy=" not in build_content
 
         container_content = container_file.read_text()
         assert "Image=coredns-custom.build" in container_content
@@ -826,11 +826,6 @@ composition:
         assert container_art.owner_ref == "unit:blocky.service"
         assert container_art.target_path == "/etc/containers/systemd/blocky.container"
 
-        image_key = next(k for k in artifacts if k.endswith("blocky.image"))
-        image_art = artifacts[image_key]
-        assert image_art.kind == "quadlet.image"
-        assert image_art.owner_ref == "unit:blocky-image.service"
-
         network_key = next(k for k in artifacts if k.endswith("services.network"))
         network_art = artifacts[network_key]
         assert network_art.kind == "quadlet.network"
@@ -841,10 +836,9 @@ composition:
             "shared": True,
         }
         assert owners["unit:blocky.service"].requires == [
-            "unit:blocky-image.service",
             "unit:services-network.service",
         ]
 
         assert "unit:blocky.service" in owners
-        assert "unit:blocky-image.service" in owners
+        assert "unit:blocky-image.service" not in owners
         assert "unit:services-network.service" in owners

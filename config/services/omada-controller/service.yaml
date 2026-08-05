@@ -50,6 +50,8 @@ composition:
     containers:
       - name: omada-controller
         container:
+          image: docker.io/mbentley/omada-controller:6.2.10.17
+          pull_policy: missing
           named_volumes:
             - name: cert
               host_path: /srv/omada-controller/omada-controller/cert
@@ -67,6 +69,8 @@ composition:
               shared: true
       - name: mongodb
         container:
+          image: docker.io/library/mongo:8.0.26
+          pull_policy: missing
           named_volumes:
             - name: config
               host_path: /srv/omada-controller/mongodb/config
