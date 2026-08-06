@@ -339,6 +339,43 @@ class TestServiceCompositionSchema:
 
         validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
 
+    def test_service_schema_accepts_named_volume_host_directory_metadata(self) -> None:
+        """named volumes may declare host directory ownership metadata."""
+        repo_root = self._repo_root()
+        service_schema_path = repo_root / "schemas" / "service.schema.json"
+        service_schema = read_json(service_schema_path)
+
+        service_data: dict[str, Any] = {
+            "name": "mongodb",
+            "podman": {
+                "user": "root",
+                "network": "ipvlan-l2",
+            },
+            "composition": {
+                "container": {
+                    "named_volumes": [
+                        {
+                            "name": "data",
+                            "host_path": "/srv/mongodb/data",
+                            "mount_path": "/data/db",
+                            "host_owner": 999,
+                            "host_group": "999",
+                            "host_mode": "0750",
+                        },
+                        {
+                            "name": "cache",
+                            "host_path": "/srv/mongodb/cache",
+                            "mount_path": "/cache",
+                            "manage_host_ownership": False,
+                        },
+                    ],
+                    "mounted_files": [],
+                },
+            },
+        }
+
+        validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
+
     def test_service_schema_rejects_empty_registry_image(self) -> None:
         """registry image fields must be non-empty strings."""
         repo_root = self._repo_root()

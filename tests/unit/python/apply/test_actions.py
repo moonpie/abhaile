@@ -13,6 +13,8 @@ from abhaile.apply.actions import (
     atomic_copy_file_with_perms,
     check_destructive_gate,
     remove_target_file,
+    resolve_gid,
+    resolve_uid,
     run_command,
     run_systemctl_command,
     run_validation,
@@ -80,6 +82,26 @@ class TestAtomicCopyFile:
 
         with pytest.raises(ApplyError, match="User not found"):
             atomic_copy_file_with_perms(source, target, owner_user="nonexistent_user_xyz")
+
+
+class TestOwnerResolution:
+    """Tests for user/group ownership resolution."""
+
+    def test_resolve_uid_accepts_numeric_string(self) -> None:
+        """Numeric UID strings are treated as UIDs, not usernames."""
+        assert resolve_uid("999") == 999
+
+    def test_resolve_uid_accepts_integer(self) -> None:
+        """Integer UID values are returned directly."""
+        assert resolve_uid(999) == 999
+
+    def test_resolve_gid_accepts_numeric_string(self) -> None:
+        """Numeric GID strings are treated as GIDs, not group names."""
+        assert resolve_gid("999") == 999
+
+    def test_resolve_gid_accepts_integer(self) -> None:
+        """Integer GID values are returned directly."""
+        assert resolve_gid(999) == 999
 
 
 class TestRemoveTargetFile:

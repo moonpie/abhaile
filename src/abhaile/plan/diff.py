@@ -243,8 +243,8 @@ def _desired_directory_metadata(desired_entry: dict[str, Any]) -> dict[str, str]
         desired_entry.get("apply_hints"),
     )
     return {
-        "owner": metadata.owner,
-        "group": metadata.group,
+        "owner": str(metadata.owner),
+        "group": str(metadata.group),
         "mode": metadata.mode,
     }
 

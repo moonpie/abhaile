@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from abhaile.renderers.quadlets.helpers import (
     _quadlet_kind_from_filename,
@@ -169,7 +169,7 @@ def _render_named_volumes(
         _render_named_volume_host_directory(
             service=service,
             user=user,
-            host_path=host_path,
+            volume=volume,
             shared=shared,
             output_dir=output_dir,
             collector=collector,
@@ -207,16 +207,22 @@ def _render_named_volume_host_directory(
     *,
     service: str,
     user: str,
-    host_path: str,
+    volume: dict[str, Any],
     shared: bool,
     output_dir: Path,
     collector: ArtifactCollector | None,
     rendered_root: Path | None,
 ) -> None:
     """Render the host-side directory required by a bind-backed named volume."""
-    if shared:
+    if shared or volume.get("manage_host_ownership") is False:
         return
 
+    host_path = str(volume["host_path"])
+    owner, group, mode = _named_volume_host_directory_metadata(
+        service=service,
+        user=user,
+        volume=volume,
+    )
     output_path = output_dir / service / host_path.lstrip("/")
     if output_path.exists():
         return
@@ -225,8 +231,6 @@ def _render_named_volume_host_directory(
     if collector is None or rendered_root is None:
         return
 
-    owner = user if user != "root" else "root"
-    group = owner if owner != "root" else "root"
     collector.register_artifact(
         render_path=output_path.relative_to(rendered_root).as_posix(),
         target_path=host_path,
@@ -238,9 +242,62 @@ def _render_named_volume_host_directory(
         apply_hints={
             "owner": owner,
             "group": group,
-            "mode": "0750",
+            "mode": mode,
         },
     )
+
+
+def _named_volume_host_directory_metadata(
+    *,
+    service: str,
+    user: str,
+    volume: dict[str, Any],
+) -> tuple[str | int, str | int, str]:
+    """Resolve explicit host directory metadata for a named volume."""
+    owner = volume.get("host_owner")
+    group = volume.get("host_group")
+    mode = volume.get("host_mode", "0750")
+    if user != "root":
+        return (
+            _owner_value_or_default(owner, user),
+            _owner_value_or_default(group, user),
+            mode if isinstance(mode, str) and mode else "0750",
+        )
+
+    missing = [
+        key
+        for key, value in (
+            ("host_owner", owner),
+            ("host_group", group),
+        )
+        if value is None or value == ""
+    ]
+    if missing:
+        raise RenderError(
+            f"Rootful writable volume requires explicit host_owner and host_group: "
+            f"{volume['host_path']}"
+        )
+    if not _valid_owner_value(owner):
+        raise RenderError(f"Invalid host_owner for service '{service}' named volume: {owner}")
+    if not _valid_owner_value(group):
+        raise RenderError(f"Invalid host_group for service '{service}' named volume: {group}")
+    if not isinstance(mode, str) or not mode:
+        raise RenderError(f"Invalid host_mode for service '{service}' named volume: {mode}")
+    return cast(str | int, owner), cast(str | int, group), mode
+
+
+def _owner_value_or_default(value: Any, default: str) -> str | int:
+    """Return an explicit owner/group value or a named default."""
+    if _valid_owner_value(value):
+        return cast(str | int, value)
+    return default
+
+
+def _valid_owner_value(value: Any) -> bool:
+    """Return True when a host directory owner/group value is usable."""
+    if isinstance(value, int):
+        return value >= 0
+    return isinstance(value, str) and bool(value)
 
 
 def _build_mounted_file_lines(container_def: dict[str, Any]) -> list[str]:

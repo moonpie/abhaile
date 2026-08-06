@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
-from abhaile.renderers.collector import ArtifactCollector
 
 
 class TestRenderServiceQuadlets:
@@ -222,9 +222,15 @@ composition:
       - name: config
         host_path: /srv/vault/config
         mount_path: /vault/config
+        host_owner: root
+        host_group: root
+        host_mode: "0750"
       - name: data
         host_path: /srv/vault/data
         mount_path: /vault/data
+        host_owner: root
+        host_group: root
+        host_mode: "0750"
     mounted_files: []
 """,
         )
@@ -372,6 +378,9 @@ composition:
       - name: config
         host_path: /srv/caddy/config
         mount_path: /config
+        host_owner: root
+        host_group: root
+        host_mode: "0750"
     mounted_files:
       - host_path: /srv/caddy/Caddyfile
         mount_path: /etc/caddy/Caddyfile
@@ -470,6 +479,60 @@ composition:
             / "home/abhaile/.config/containers/systemd/vault-agent.container"
         )
         assert container_file.exists()
+
+    def test_rootless_named_volume_directory_defaults_to_user(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Rootless named volume host directories default to the rootless user."""
+        config_root = tmp_path / "config"
+        rendered_root = tmp_path / "rendered" / "phobos"
+        output_dir = rendered_root / "services"
+
+        write_file(
+            config_root / "services" / "vault-agent" / "service.yaml",
+            """name: vault-agent
+podman:
+  user: abhaile
+  network: host
+composition:
+  container:
+    named_volumes:
+      - name: out
+        host_path: /srv/vault/agent/out
+        mount_path: /agent/out
+    mounted_files: []
+""",
+        )
+        write_file(
+            config_root / "services" / "vault-agent" / "quadlets" / "image.image",
+            "[Image]\nImage=vault:latest\n",
+        )
+        write_file(
+            config_root / "services" / "vault-agent" / "quadlets" / "container.container.j2",
+            "[Container]\nImage={{ image }}\n{% for vol in volume_lines %}{{ vol }}\n{% endfor %}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2",
+            "[Volume]\nDevice={{ host_path }}\nOptions=bind\n",
+        )
+
+        collector = ArtifactCollector()
+        render_service_quadlets(
+            "phobos",
+            ["vault-agent"],
+            {},
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = {artifact.target_path: artifact for artifact in collector.get_all_artifacts()}
+        assert artifacts["/srv/vault/agent/out"].apply_hints == {
+            "owner": "abhaile",
+            "group": "abhaile",
+            "mode": "0750",
+        }
 
     def test_network_quadlets_deduped(self, tmp_path: Path, write_file: Any) -> None:
         """Network quadlets are generated once per VLAN."""
@@ -642,9 +705,11 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
+        manage_host_ownership: false
       - name: data
         host_path: /shared/path
         mount_path: /data
+        manage_host_ownership: false
     mounted_files: []
 """,
         )
@@ -703,6 +768,7 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
+        manage_host_ownership: false
     mounted_files: []
 """,
         )
@@ -729,6 +795,7 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
+        manage_host_ownership: false
     mounted_files: []
 """,
         )

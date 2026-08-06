@@ -26,9 +26,11 @@ composition:
       - name: config
         host_path: /srv/vault/config
         mount_path: /vault/config
+        manage_host_ownership: false
       - name: data
         host_path: /srv/vault/data
         mount_path: /vault/data
+        manage_host_ownership: false
       - name: host-certs
         host_path: /etc/ssl/certs
         mount_path: /etc/ssl/certs

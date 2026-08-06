@@ -155,6 +155,29 @@
         "shared": {
           "type": "boolean",
           "description": "Whether volume is shared between containers"
+        },
+        "host_owner": {
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {"type": "integer", "minimum": 0}
+          ],
+          "description": "Owner user name or numeric UID for the host-side volume directory"
+        },
+        "host_group": {
+          "oneOf": [
+            {"type": "string", "minLength": 1},
+            {"type": "integer", "minimum": 0}
+          ],
+          "description": "Group name or numeric GID for the host-side volume directory"
+        },
+        "host_mode": {
+          "type": "string",
+          "pattern": "^0[0-7]{3}$",
+          "description": "Mode for the host-side volume directory"
+        },
+        "manage_host_ownership": {
+          "type": "boolean",
+          "description": "Whether Abhaile should create and enforce host-side directory ownership"
         }
       },
       "additionalProperties": false

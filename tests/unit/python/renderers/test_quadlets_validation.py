@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.renderers.quadlets.helpers import _quadlet_unit_name
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
@@ -40,6 +41,7 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
+        manage_host_ownership: false
     mounted_files: []
 """,
         )
@@ -64,6 +66,7 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
+        manage_host_ownership: false
     mounted_files: []
 """,
         )
@@ -536,9 +539,15 @@ composition:
       - name: config
         host_path: /data/config
         mount_path: /config
+        host_owner: root
+        host_group: root
+        host_mode: "0750"
       - name: data
         host_path: /data/store
         mount_path: /data
+        host_owner: root
+        host_group: root
+        host_mode: "0750"
     mounted_files: []
 """,
         )
@@ -581,3 +590,124 @@ composition:
         output_root = output_dir / "app" / "etc" / "containers" / "systemd"
         assert (output_root / "app-config.volume").exists()
         assert (output_root / "app-data.volume").exists()
+
+    def test_rootful_writable_volume_requires_host_metadata(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Rootful writable named volume host directories require explicit metadata."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output" / "services"
+
+        write_file(
+            config_root / "services" / "app" / "service.yaml",
+            """name: app
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  container:
+    named_volumes:
+      - name: data
+        host_path: /data/store
+        mount_path: /data
+    mounted_files: []
+""",
+        )
+
+        write_file(
+            config_root / "services" / "app" / "quadlets" / "image.image",
+            "[Image]\nImage=app:latest\n",
+        )
+        write_file(
+            config_root / "services" / "app" / "quadlets" / "container.container.j2",
+            "[Container]\nImage={{ image }}\n{% for vol in volume_lines %}{{ vol }}\n{% endfor %}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2",
+            "[Volume]\nPath={{ host_path }}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "network.network.j2",
+            "[Network]\n",
+        )
+
+        network: dict[str, Any] = {
+            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "services": {"app": {"vlan": "services"}},
+        }
+
+        with pytest.raises(
+            RenderError,
+            match=r"Rootful writable volume requires explicit host_owner and host_group: /data/store",
+        ):
+            render_service_quadlets(
+                "phobos",
+                ["app"],
+                network,
+                config_root,
+                output_dir,
+            )
+
+    def test_rootful_writable_volume_defaults_host_mode(
+        self, tmp_path: Path, write_file: Any
+    ) -> None:
+        """Rootful writable named volume host directory mode defaults to 0750."""
+        config_root = tmp_path / "config"
+        output_dir = tmp_path / "output" / "services"
+        rendered_root = tmp_path / "output"
+
+        write_file(
+            config_root / "services" / "app" / "service.yaml",
+            """name: app
+podman:
+  user: root
+  network: ipvlan-l2
+composition:
+  container:
+    named_volumes:
+      - name: data
+        host_path: /data/store
+        mount_path: /data
+        host_owner: 999
+        host_group: 999
+    mounted_files: []
+""",
+        )
+        write_file(
+            config_root / "services" / "app" / "quadlets" / "image.image",
+            "[Image]\nImage=app:latest\n",
+        )
+        write_file(
+            config_root / "services" / "app" / "quadlets" / "container.container.j2",
+            "[Container]\nImage={{ image }}\n{% for vol in volume_lines %}{{ vol }}\n{% endfor %}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "volume.volume.j2",
+            "[Volume]\nPath={{ host_path }}\n",
+        )
+        write_file(
+            config_root / "_templates" / "services" / "quadlets" / "network.network.j2",
+            "[Network]\n",
+        )
+        network: dict[str, Any] = {
+            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "services": {"app": {"vlan": "services"}},
+        }
+
+        collector = ArtifactCollector()
+        render_service_quadlets(
+            "phobos",
+            ["app"],
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+
+        artifacts = {artifact.target_path: artifact for artifact in collector.get_all_artifacts()}
+        assert artifacts["/data/store"].apply_hints == {
+            "owner": 999,
+            "group": 999,
+            "mode": "0750",
+        }

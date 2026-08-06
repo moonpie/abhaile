@@ -271,14 +271,17 @@ class TestRenderApplyE2E:
         omada_init_content = omada_init.read_text(encoding="utf-8")
         assert "process.env.OMADA_MONGODB_USERNAME" in omada_init_content
         assert "process.env.OMADA_MONGODB_PASSWORD" in omada_init_content
-        for bind_dir in (
+        for unmanaged_bind_dir in (
             "srv/omada-controller/omada-controller/cert",
             "srv/omada-controller/omada-controller/data",
             "srv/omada-controller/omada-controller/logs",
+        ):
+            assert not (phobos_root / f"services/omada-controller/{unmanaged_bind_dir}").exists()
+        for managed_bind_dir in (
             "srv/omada-controller/mongodb/config",
             "srv/omada-controller/mongodb/data",
         ):
-            assert (phobos_root / f"services/omada-controller/{bind_dir}").is_dir()
+            assert (phobos_root / f"services/omada-controller/{managed_bind_dir}").is_dir()
 
         omada_env_path = phobos_root / "services/omada-controller/etc/systemd/system"
         assert not (omada_env_path / "omada-mongodb-ready.service").exists()

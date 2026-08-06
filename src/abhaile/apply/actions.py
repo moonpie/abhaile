@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import grp
 import pwd
 import shutil
 import subprocess
@@ -14,6 +15,8 @@ from pathlib import Path
 from abhaile.utils.errors import ApplyError
 
 LOG = logging.getLogger(__name__)
+
+OwnerValue = str | int
 
 
 @dataclass(frozen=True)
@@ -48,8 +51,8 @@ def atomic_copy_file_with_perms(
     target: Path,
     *,
     mode: int | None = None,
-    owner_user: str | None = None,
-    owner_group: str | None = None,
+    owner_user: OwnerValue | None = None,
+    owner_group: OwnerValue | None = None,
 ) -> None:
     """Copy source file to target atomically with optional ownership and mode enforcement."""
     if not source.exists() or not source.is_file():
@@ -82,17 +85,9 @@ def atomic_copy_file_with_perms(
             uid = -1
             gid = -1
             if owner_user is not None:
-                try:
-                    uid = pwd.getpwnam(owner_user).pw_uid
-                except KeyError as exc:
-                    raise ApplyError(f"User not found: {owner_user}") from exc
+                uid = resolve_uid(owner_user)
             if owner_group is not None:
-                try:
-                    import grp
-
-                    gid = grp.getgrnam(owner_group).gr_gid
-                except KeyError as exc:
-                    raise ApplyError(f"Group not found: {owner_group}") from exc
+                gid = resolve_gid(owner_group)
             if os.geteuid() == 0:
                 os.chown(tmp_path, uid, gid)
 
@@ -102,6 +97,28 @@ def atomic_copy_file_with_perms(
     finally:
         if tmp_path is not None and tmp_path.exists():
             tmp_path.unlink(missing_ok=True)
+
+
+def resolve_uid(value: OwnerValue) -> int:
+    """Resolve a username or numeric UID value to a UID."""
+    text = str(value)
+    if text.isdecimal():
+        return int(text)
+    try:
+        return pwd.getpwnam(text).pw_uid
+    except KeyError as exc:
+        raise ApplyError(f"User not found: {text}") from exc
+
+
+def resolve_gid(value: OwnerValue) -> int:
+    """Resolve a group name or numeric GID value to a GID."""
+    text = str(value)
+    if text.isdecimal():
+        return int(text)
+    try:
+        return grp.getgrnam(text).gr_gid
+    except KeyError as exc:
+        raise ApplyError(f"Group not found: {text}") from exc
 
 
 def remove_target_file(target: Path) -> None:

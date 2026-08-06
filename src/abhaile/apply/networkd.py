@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import grp
 import os
-import pwd
 import shutil
 from pathlib import Path
 from typing import Any
 
-from abhaile.apply.actions import ExecutionResult, run_command
+from abhaile.apply.actions import ExecutionResult, resolve_gid, resolve_uid, run_command
 from abhaile.models.directory import resolve_directory_metadata
 from abhaile.utils.errors import ApplyError
 
@@ -220,9 +218,9 @@ class NetworkdExecutor:
         group = metadata.group
         mode = metadata.mode
 
-        if not isinstance(owner, str) or not owner:
+        if not isinstance(owner, (str, int)) or owner == "":
             raise ApplyError(f"Invalid owner apply hint for networkd directory: {target_path}")
-        if not isinstance(group, str) or not group:
+        if not isinstance(group, (str, int)) or group == "":
             raise ApplyError(f"Invalid group apply hint for networkd directory: {target_path}")
         if not isinstance(mode, str) or not mode:
             raise ApplyError(f"Invalid mode apply hint for networkd directory: {target_path}")
@@ -237,13 +235,8 @@ class NetworkdExecutor:
         target = Path(target_path)
         target.mkdir(parents=True, exist_ok=True)
 
-        try:
-            uid = pwd.getpwnam(owner).pw_uid
-            gid = grp.getgrnam(group).gr_gid
-        except KeyError as exc:
-            raise ApplyError(
-                f"Unable to resolve networkd directory owner/group for {target_path}: {owner}:{group}"
-            ) from exc
+        uid = resolve_uid(owner)
+        gid = resolve_gid(group)
 
         try:
             os.chown(target, uid, gid)

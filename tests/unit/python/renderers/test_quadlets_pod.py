@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.utils.errors import RenderError
-from abhaile.renderers.collector import ArtifactCollector
 
 
 class TestRenderServiceQuadlets:
@@ -113,12 +113,18 @@ composition:
           - name: config
             host_path: /var/lib/authelia/config
             mount_path: /config
+            host_owner: root
+            host_group: root
+            host_mode: "0750"
         mounted_files: []
       - name: redis
         named_volumes:
           - name: data
             host_path: /var/lib/authelia/redis
             mount_path: /data
+            host_owner: root
+            host_group: root
+            host_mode: "0750"
         mounted_files: []
 """,
         )
@@ -695,8 +701,17 @@ composition:
       - name: app
         named_volumes:
           - name: data
-            host_path: /srv/omada-controller/omada-controller/data
-            mount_path: /opt/tplink/EAPController/data
+            host_path: /srv/omada-controller/mongodb/data
+            mount_path: /data/db
+            host_owner: 999
+            host_group: 999
+            host_mode: "0750"
+          - name: config
+            host_path: /srv/omada-controller/mongodb/config
+            mount_path: /data/configdb
+            host_owner: 999
+            host_group: 999
+            host_mode: "0755"
           - name: host-certs
             host_path: /etc/ssl/certs
             mount_path: /etc/ssl/certs
@@ -747,17 +762,26 @@ Image={{ image }}
             rendered_root=rendered_root,
         )
 
-        data_dir = output_dir / "omada" / "srv/omada-controller/omada-controller/data"
+        data_dir = output_dir / "omada" / "srv/omada-controller/mongodb/data"
+        config_dir = output_dir / "omada" / "srv/omada-controller/mongodb/config"
         shared_certs_dir = output_dir / "omada" / "etc/ssl/certs"
         assert data_dir.is_dir()
+        assert config_dir.is_dir()
         assert not shared_certs_dir.exists()
 
         artifacts = {artifact.target_path: artifact for artifact in collector.get_all_artifacts()}
-        assert artifacts["/srv/omada-controller/omada-controller/data"].kind == "service.directory"
-        assert artifacts["/srv/omada-controller/omada-controller/data"].is_directory
-        assert artifacts["/srv/omada-controller/omada-controller/data"].apply_hints == {
-            "owner": "root",
-            "group": "root",
+        assert artifacts["/srv/omada-controller/mongodb/config"].kind == "service.directory"
+        assert artifacts["/srv/omada-controller/mongodb/config"].is_directory
+        assert artifacts["/srv/omada-controller/mongodb/config"].apply_hints == {
+            "owner": 999,
+            "group": 999,
+            "mode": "0755",
+        }
+        assert artifacts["/srv/omada-controller/mongodb/data"].kind == "service.directory"
+        assert artifacts["/srv/omada-controller/mongodb/data"].is_directory
+        assert artifacts["/srv/omada-controller/mongodb/data"].apply_hints == {
+            "owner": 999,
+            "group": 999,
             "mode": "0750",
         }
         assert "/etc/ssl/certs" not in artifacts

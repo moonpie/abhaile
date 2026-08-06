@@ -171,10 +171,8 @@ class TestServiceConfigExecutor:
         self, mocker: Any, tmp_path: Path
     ) -> None:
         """Directory enforcement should mkdir, chown, and chmod target path."""
-        mock_uid = mocker.Mock(pw_uid=1001)
-        mock_gid = mocker.Mock(gr_gid=1001)
-        mocker.patch("abhaile.apply.service.pwd.getpwnam", return_value=mock_uid)
-        mocker.patch("abhaile.apply.service.grp.getgrnam", return_value=mock_gid)
+        mocker.patch("abhaile.apply.service.resolve_uid", return_value=1001)
+        mocker.patch("abhaile.apply.service.resolve_gid", return_value=1001)
         mock_chown = mocker.patch("abhaile.apply.service.os.chown")
 
         target = tmp_path / "srv" / "authelia" / "config"
@@ -194,15 +192,13 @@ class TestServiceConfigExecutor:
     def test_apply_directory_change_idempotent_existing_directory(
         self, mocker: Any, tmp_path: Path
     ) -> None:
-        """Existing directory should be safely re-enforced without errors."""
+        """Existing directory ownership and mode should be safely re-enforced."""
         target = tmp_path / "srv" / "existing" / "config"
         target.mkdir(parents=True, exist_ok=True)
 
-        mock_uid = mocker.Mock(pw_uid=0)
-        mock_gid = mocker.Mock(gr_gid=0)
-        mocker.patch("abhaile.apply.service.pwd.getpwnam", return_value=mock_uid)
-        mocker.patch("abhaile.apply.service.grp.getgrnam", return_value=mock_gid)
-        mocker.patch("abhaile.apply.service.os.chown")
+        mocker.patch("abhaile.apply.service.resolve_uid", return_value=0)
+        mocker.patch("abhaile.apply.service.resolve_gid", return_value=0)
+        mock_chown = mocker.patch("abhaile.apply.service.os.chown")
 
         summary = ServiceConfigExecutor.apply_directory_change(
             target.as_posix(),
@@ -211,7 +207,25 @@ class TestServiceConfigExecutor:
 
         assert summary["actions"][0]["action"] == "ensure-directory"
         assert target.exists()
+        mock_chown.assert_called_once_with(target, 0, 0)
         assert target.stat().st_mode & 0o777 == 0o755
+
+    def test_apply_directory_change_accepts_numeric_owner_group(
+        self, mocker: Any, tmp_path: Path
+    ) -> None:
+        """Numeric UID/GID metadata should be accepted by service.directory apply."""
+        target = tmp_path / "srv" / "mongodb" / "data"
+        mock_chown = mocker.patch("abhaile.apply.service.os.chown")
+
+        summary = ServiceConfigExecutor.apply_directory_change(
+            target.as_posix(),
+            {"owner": 999, "group": 999, "mode": "0750"},
+        )
+
+        assert summary["owner"] == 999
+        assert summary["group"] == 999
+        mock_chown.assert_called_once_with(target, 999, 999)
+        assert target.stat().st_mode & 0o777 == 0o750
 
     def test_apply_directory_change_rejects_invalid_mode(self, tmp_path: Path) -> None:
         """Invalid mode hints should fail closed."""
@@ -224,10 +238,8 @@ class TestServiceConfigExecutor:
 
     def test_apply_directory_change_uses_shared_resolver(self, mocker: Any, tmp_path: Path) -> None:
         """Service directory enforcement should respect the shared metadata resolver."""
-        mock_uid = mocker.Mock(pw_uid=1001)
-        mock_gid = mocker.Mock(gr_gid=1001)
-        mocker.patch("abhaile.apply.service.pwd.getpwnam", return_value=mock_uid)
-        mocker.patch("abhaile.apply.service.grp.getgrnam", return_value=mock_gid)
+        mocker.patch("abhaile.apply.service.resolve_uid", return_value=1001)
+        mocker.patch("abhaile.apply.service.resolve_gid", return_value=1001)
         mock_chown = mocker.patch("abhaile.apply.service.os.chown")
         mocker.patch(
             "abhaile.apply.service.resolve_directory_metadata",

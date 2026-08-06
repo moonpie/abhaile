@@ -5,13 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+OwnerValue = str | int
+
 
 @dataclass(frozen=True)
 class DirectoryMetadata:
     """Resolved owner/group/mode for a managed directory artifact."""
 
-    owner: str
-    group: str
+    owner: OwnerValue
+    group: OwnerValue
     mode: str
 
 
@@ -50,9 +52,9 @@ def resolve_directory_metadata(
         else:
             raise ValueError(f"Unsupported directory artifact kind: {kind}")
 
-    if not isinstance(owner, str) or not owner:
+    if not _valid_owner_value(owner):
         raise ValueError(f"Invalid owner apply hint for {kind}: {owner}")
-    if not isinstance(group, str) or not group:
+    if not _valid_owner_value(group):
         raise ValueError(f"Invalid group apply hint for {kind}: {group}")
     if not isinstance(mode, str) or not mode:
         raise ValueError(f"Invalid mode apply hint for {kind}: {mode}")
@@ -60,6 +62,13 @@ def resolve_directory_metadata(
     return DirectoryMetadata(owner=owner, group=group, mode=mode)
 
 
-def directory_metadata_to_hints(metadata: DirectoryMetadata) -> dict[str, str]:
+def directory_metadata_to_hints(metadata: DirectoryMetadata) -> dict[str, OwnerValue | str]:
     """Convert resolved directory metadata to apply_hints payload."""
     return {"owner": metadata.owner, "group": metadata.group, "mode": metadata.mode}
+
+
+def _valid_owner_value(value: Any) -> bool:
+    """Return True when a directory owner/group hint is a non-empty name or numeric ID."""
+    if isinstance(value, int):
+        return value >= 0
+    return isinstance(value, str) and bool(value)

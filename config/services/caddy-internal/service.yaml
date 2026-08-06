@@ -15,9 +15,11 @@ composition:
       - name: config
         host_path: /srv/caddy/internal/config
         mount_path: /config
+        manage_host_ownership: false
       - name: data
         host_path: /srv/caddy/internal/data
         mount_path: /data
+        manage_host_ownership: false
       - name: host-certs
         host_path: /etc/ssl/certs
         mount_path: /etc/ssl/certs

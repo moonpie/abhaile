@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import grp
 import os
-import pwd
 from pathlib import Path
 from typing import Any
 
-from abhaile.apply.actions import run_command, run_systemctl_command
+from abhaile.apply.actions import resolve_gid, resolve_uid, run_command, run_systemctl_command
 from abhaile.models.directory import resolve_directory_metadata
 from abhaile.utils.errors import ApplyError
 
@@ -136,13 +134,8 @@ class ServiceConfigExecutor:
         target = Path(target_path)
         target.mkdir(parents=True, exist_ok=True)
 
-        try:
-            uid = pwd.getpwnam(owner).pw_uid
-            gid = grp.getgrnam(group).gr_gid
-        except KeyError as exc:
-            raise ApplyError(
-                f"Unable to resolve service.directory owner/group for {target_path}: {owner}:{group}"
-            ) from exc
+        uid = resolve_uid(owner)
+        gid = resolve_gid(group)
 
         try:
             os.chown(target, uid, gid)

@@ -56,12 +56,15 @@ composition:
             - name: cert
               host_path: /srv/omada-controller/omada-controller/cert
               mount_path: /cert
+              manage_host_ownership: false
             - name: data
               host_path: /srv/omada-controller/omada-controller/data
               mount_path: /opt/tplink/EAPController/data
+              manage_host_ownership: false
             - name: logs
               host_path: /srv/omada-controller/omada-controller/logs
               mount_path: /opt/tplink/EAPController/logs
+              manage_host_ownership: false
             - name: host-certs
               host_path: /etc/ssl/certs
               mount_path: /etc/ssl/certs
@@ -75,9 +78,15 @@ composition:
             - name: config
               host_path: /srv/omada-controller/mongodb/config
               mount_path: /data/configdb
+              host_owner: 999
+              host_group: 999
+              host_mode: "0755"
             - name: data
               host_path: /srv/omada-controller/mongodb/data
               mount_path: /data/db
+              host_owner: 999
+              host_group: 999
+              host_mode: "0750"
           mounted_files:
             - host_path: /srv/omada-controller/mongodb/initdb/omada.js
               mount_path: /docker-entrypoint-initdb.d/omada.js
