@@ -191,20 +191,26 @@ def _live_file_sha256(target_path: str) -> str | None:
         raise DiffError(f"Failed to hash live file: {target_path} ({exc})") from exc
 
 
-def _resolve_uid(uid: int) -> str:
-    """Resolve a uid to a user name, falling back to the numeric id."""
+def _canonical_uid(value: str | int) -> str:
+    """Resolve a username or numeric UID to a canonical numeric UID string."""
+    text = str(value)
+    if text.isdecimal():
+        return str(int(text))
     try:
-        return pwd.getpwuid(uid).pw_name
-    except KeyError:
-        return str(uid)
+        return str(pwd.getpwnam(text).pw_uid)
+    except KeyError as exc:
+        raise DiffError(f"User not found: {text}") from exc
 
 
-def _resolve_gid(gid: int) -> str:
-    """Resolve a gid to a group name, falling back to the numeric id."""
+def _canonical_gid(value: str | int) -> str:
+    """Resolve a group name or numeric GID to a canonical numeric GID string."""
+    text = str(value)
+    if text.isdecimal():
+        return str(int(text))
     try:
-        return grp.getgrgid(gid).gr_name
-    except KeyError:
-        return str(gid)
+        return str(grp.getgrnam(text).gr_gid)
+    except KeyError as exc:
+        raise DiffError(f"Group not found: {text}") from exc
 
 
 def _live_directory_state(target_path: str) -> dict[str, Any]:
@@ -218,8 +224,8 @@ def _live_directory_state(target_path: str) -> dict[str, Any]:
         raise DiffError(f"Failed to inspect live directory: {target_path} ({exc})") from exc
 
     live_metadata: dict[str, Any] = {
-        "owner": _resolve_uid(st.st_uid),
-        "group": _resolve_gid(st.st_gid),
+        "owner": str(st.st_uid),
+        "group": str(st.st_gid),
         "mode": f"{stat.S_IMODE(st.st_mode):04o}",
     }
 
@@ -243,8 +249,8 @@ def _desired_directory_metadata(desired_entry: dict[str, Any]) -> dict[str, str]
         desired_entry.get("apply_hints"),
     )
     return {
-        "owner": str(metadata.owner),
-        "group": str(metadata.group),
+        "owner": _canonical_uid(metadata.owner),
+        "group": _canonical_gid(metadata.group),
         "mode": metadata.mode,
     }
 

@@ -6,11 +6,13 @@ import json
 import os
 import grp
 import pwd
+import stat
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
-from abhaile.plan.diff import plan_manifest_drift
+from abhaile.plan.diff import _live_directory_state, plan_manifest_drift
 from abhaile.utils.errors import DiffError
 
 
@@ -50,8 +52,8 @@ def _directory_manifest_entry(
     *,
     render_path: str,
     owner_ref: str,
-    owner: str,
-    group: str,
+    owner: str | int,
+    group: str | int,
     mode: str,
     kind: str = "service.directory",
 ) -> dict[str, object]:
@@ -138,6 +140,136 @@ def _quadlet_build_entry(
 class TestPlanManifestDrift:
     """Tests for plan_manifest_drift()."""
 
+    def test_numeric_directory_owner_matches_identical_live_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Numeric desired UID/GID should converge with identical live numeric IDs."""
+        target = tmp_path / "target" / "srv" / "omada" / "mongodb" / "data"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/omada/srv/omada/mongodb/data",
+            owner_ref="service:omada",
+            owner=999,
+            group=999,
+            mode="0750",
+        )
+        _write_manifest(desired_manifest, "phobos", [entry])
+        _write_manifest(applied_manifest, "phobos", [entry])
+
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {
+                "state": "directory",
+                "live_metadata": {"owner": "999", "group": "999", "mode": "0750"},
+            },
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 0
+        assert plan["summary"]["changed"] == 0
+
+    def test_named_directory_owner_matches_same_live_ids(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Named desired owner/group should compare by UID/GID, not by text."""
+        target = tmp_path / "target" / "srv" / "omada" / "mongodb" / "config"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/omada/srv/omada/mongodb/config",
+            owner_ref="service:omada",
+            owner="mongo",
+            group="mongo",
+            mode="0755",
+        )
+        _write_manifest(desired_manifest, "phobos", [entry])
+        _write_manifest(applied_manifest, "phobos", [entry])
+        monkeypatch.setattr(
+            "abhaile.plan.diff.pwd.getpwnam",
+            lambda name: SimpleNamespace(pw_uid=999),
+        )
+        monkeypatch.setattr(
+            "abhaile.plan.diff.grp.getgrnam",
+            lambda name: SimpleNamespace(gr_gid=999),
+        )
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {
+                "state": "directory",
+                "live_metadata": {"owner": "999", "group": "999", "mode": "0755"},
+            },
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 0
+        assert plan["summary"]["changed"] == 0
+
+    def test_live_directory_state_reports_numeric_ids_when_accounts_exist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Host-side account names for UID/GID 999 should not enter drift comparison."""
+        monkeypatch.setattr(
+            Path,
+            "lstat",
+            lambda self: SimpleNamespace(
+                st_uid=999,
+                st_gid=999,
+                st_mode=stat.S_IFDIR | 0o750,
+            ),
+        )
+
+        state = _live_directory_state((tmp_path / "target").as_posix())
+
+        assert state == {
+            "state": "directory",
+            "live_metadata": {"owner": "999", "group": "999", "mode": "0750"},
+        }
+
+    def test_different_numeric_directory_owner_still_reports_drift(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A genuinely different UID/GID should still schedule metadata correction."""
+        target = tmp_path / "target" / "srv" / "omada" / "mongodb" / "data"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/omada/srv/omada/mongodb/data",
+            owner_ref="service:omada",
+            owner=999,
+            group=999,
+            mode="0750",
+        )
+        _write_manifest(desired_manifest, "phobos", [entry])
+        _write_manifest(applied_manifest, "phobos", [entry])
+        monkeypatch.setattr(
+            "abhaile.plan.diff._live_directory_state",
+            lambda path: {
+                "state": "directory",
+                "live_metadata": {"owner": "0", "group": "0", "mode": "0750"},
+            },
+        )
+
+        plan = plan_manifest_drift(desired_manifest, applied_manifest)
+
+        assert plan["summary"]["writes"] == 1
+        assert plan["sync"]["writes"][0]["reason"] == "metadata-drift"
+        assert plan["sync"]["writes"][0]["desired_metadata"] == {
+            "owner": "999",
+            "group": "999",
+            "mode": "0750",
+        }
+        assert plan["sync"]["writes"][0]["live_metadata"] == {
+            "owner": "0",
+            "group": "0",
+            "mode": "0750",
+        }
+
     def test_directory_entry_is_converged_when_metadata_matches(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -145,6 +277,10 @@ class TestPlanManifestDrift:
         target = tmp_path / "target" / "srv" / "vault" / "agent" / "out"
         desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
         applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        uid = os.getuid()
+        gid = os.getgid()
+        owner = pwd.getpwuid(uid).pw_name
+        group = grp.getgrgid(gid).gr_name
 
         _write_manifest(
             desired_manifest,
@@ -154,8 +290,8 @@ class TestPlanManifestDrift:
                     target,
                     render_path="services/vault/srv/vault/agent/out",
                     owner_ref="service:vault",
-                    owner="abhaile",
-                    group="abhaile",
+                    owner=owner,
+                    group=group,
                     mode="0750",
                 )
             ],
@@ -168,8 +304,8 @@ class TestPlanManifestDrift:
                     target,
                     render_path="services/vault/srv/vault/agent/out",
                     owner_ref="service:vault",
-                    owner="abhaile",
-                    group="abhaile",
+                    owner=owner,
+                    group=group,
                     mode="0750",
                 )
             ],
@@ -179,7 +315,7 @@ class TestPlanManifestDrift:
             "abhaile.plan.diff._live_directory_state",
             lambda path: {
                 "state": "directory",
-                "live_metadata": {"owner": "abhaile", "group": "abhaile", "mode": "0750"},
+                "live_metadata": {"owner": str(uid), "group": str(gid), "mode": "0750"},
             },
         )
 
@@ -196,13 +332,17 @@ class TestPlanManifestDrift:
         target = tmp_path / "target" / "srv" / "vault" / "agent" / "run"
         desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
         applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        uid = os.getuid()
+        gid = os.getgid()
+        owner = pwd.getpwuid(uid).pw_name
+        group = grp.getgrgid(gid).gr_name
 
         entry = _directory_manifest_entry(
             target,
             render_path="services/vault/srv/vault/agent/run",
             owner_ref="service:vault",
-            owner="abhaile",
-            group="abhaile",
+            owner=owner,
+            group=group,
             mode="0750",
         )
         _write_manifest(desired_manifest, "deimos", [entry])
@@ -218,8 +358,8 @@ class TestPlanManifestDrift:
         assert plan["summary"]["writes"] == 1
         assert plan["sync"]["writes"][0]["reason"] == "missing"
         assert plan["sync"]["writes"][0]["desired_metadata"] == {
-            "owner": "abhaile",
-            "group": "abhaile",
+            "owner": str(uid),
+            "group": str(gid),
             "mode": "0750",
         }
 
@@ -234,20 +374,26 @@ class TestPlanManifestDrift:
         target = tmp_path / "target" / "srv" / "vault" / "agent" / "templates"
         desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
         applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        uid = os.getuid()
+        gid = os.getgid()
+        owner = pwd.getpwuid(uid).pw_name
+        group = grp.getgrgid(gid).gr_name
 
         entry = _directory_manifest_entry(
             target,
             render_path="services/vault/srv/vault/agent/templates",
             owner_ref="service:vault",
-            owner="abhaile",
-            group="abhaile",
+            owner=owner,
+            group=group,
             mode="0750",
         )
         _write_manifest(desired_manifest, "deimos", [entry])
         _write_manifest(applied_manifest, "deimos", [entry])
 
-        live_metadata = {"owner": "abhaile", "group": "abhaile", "mode": "0750"}
-        live_metadata[field] = "root" if field != "mode" else "0777"
+        live_metadata = {"owner": str(uid), "group": str(gid), "mode": "0750"}
+        live_metadata[field] = str(uid + 1) if field == "owner" else str(gid + 1)
+        if field == "mode":
+            live_metadata[field] = "0777"
         monkeypatch.setattr(
             "abhaile.plan.diff._live_directory_state",
             lambda path: {"state": "directory", "live_metadata": live_metadata},
@@ -258,8 +404,8 @@ class TestPlanManifestDrift:
         assert plan["summary"]["writes"] == 1
         assert plan["sync"]["writes"][0]["reason"] == "metadata-drift"
         assert plan["sync"]["writes"][0]["desired_metadata"] == {
-            "owner": "abhaile",
-            "group": "abhaile",
+            "owner": str(uid),
+            "group": str(gid),
             "mode": "0750",
         }
         assert plan["sync"]["writes"][0]["live_metadata"] == live_metadata
