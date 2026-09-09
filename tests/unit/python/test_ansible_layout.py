@@ -162,7 +162,9 @@ def test_ansible_local_convergence_layout_exists() -> None:
     assert "mapping.yaml" in config_validation_text
     assert "network.yaml" in config_validation_text
     assert ".sops.yaml" in config_validation_text
-    assert "vault-agent.sops.yaml" in config_validation_text
+    assert "yaml.safe_load" in config_validation_text
+    assert "creation_rules" in config_validation_text
+    assert "vault-agent" in config_validation_text
     assert "secrets" in config_validation_text
     assert (
         "ABHAILE_HOST" in config_validation_text

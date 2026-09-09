@@ -2,7 +2,8 @@
   ansible.builtin.command:
     cmd: |
       python3 -c "
-      import os, pathlib, sys
+      import os, pathlib, re, sys
+      import yaml
       root = pathlib.Path('{{ playbook_dir | dirname | dirname }}')
       host = os.environ.get('ABHAILE_HOST', 'localhost')
       mapping = root / 'config' / 'mapping.yaml'
@@ -13,10 +14,13 @@
           sys.exit(1)
       mapping_text = mapping.read_text(encoding='utf-8')
       network_text = network.read_text(encoding='utf-8')
-      sops_text = sops_cfg.read_text(encoding='utf-8')
-      required_path = f'secrets/{host}/vault-agent.sops.yaml'
-      if host not in mapping_text or host not in network_text or required_path not in sops_text:
+      sops_data = yaml.safe_load(sops_cfg.read_text(encoding='utf-8')) or {}
+      if host not in mapping_text or host not in network_text:
           sys.exit(2)
+      rules = sops_data.get('creation_rules', [])
+      candidate_path = f'secrets/{host}/vault-agent.sops.yaml'
+      if not any(re.search(rule.get('path_regex', ''), candidate_path) for rule in rules):
+          sys.exit(3)
       print(host)
       "
   environment:

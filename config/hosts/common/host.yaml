@@ -33,6 +33,7 @@ composition:
       - age
       - jq
       - bind9-utils
+      - ansible-core
     downloads:
       - sops
       - vault-cli

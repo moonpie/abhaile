@@ -5,12 +5,6 @@ sequence only.
 
 ## Next Up
 
-- [ ] 2026-06-21 Clean-room the bootstrap flow using `docs/guides/bootstrap.md`.
-- [x] 2026-06-22 Run general homelab health checks across `phobos` and `deimos`.
-- [x] 2026-06-22 Resolve general homelab health findings before bootstrap.
-- [ ] 2026-06-22 Complete `deimos` bootstrap prerequisites.
-- [ ] 2026-06-21 Deploy GitOps management on `deimos`.
-- [ ] 2026-06-21 Deploy GitOps management on `phobos`.
 - [ ] 2026-06-21 Work through Phase 3 service specs.
 - [ ] 2026-06-21 Work through Phase 4 network/controller spec.
 - [ ] 2026-06-21 Work through Phase 5 CI/dependency automation spec.
@@ -23,7 +17,7 @@ This is a temporary execution checklist for the migration from the legacy custom
 
 The hosts are already enrolled with the old bootstrap path, so migration is not just a repo push. The sequence below reflects the actual transition to the new model.
 
-- [ ] 2026-09-09 Push the repo changes for the new model and confirm the target branch is the one the hosts will fetch.
+- [x] 2026-09-09 Push the repo changes for the new model and confirm the target branch is the one the hosts will fetch.
 - [ ] 2026-09-09 On each host, confirm the one-time bootstrap prerequisites are present before the new flow is enabled: `abhaile` age identity at `/home/abhaile/.config/sops/age/keys.txt`, repo deploy key at `/home/abhaile/.ssh/gitops_ed25519`, and `known_hosts` is populated.
 - [ ] 2026-09-09 On each host, confirm the matching repo secret bundle exists at `secrets/<host>/vault-agent.sops.yaml` and that `.sops.yaml` contains the host recipient rule before enabling the Ansible convergence path.
 - [ ] 2026-09-09 Run the host bootstrap / re-enrollment flow on each host using the new path (`scripts/bootstrap.sh` or the equivalent host bootstrap command) so the host is enrolled in the new GitOps + local convergence model rather than the legacy flow.
@@ -60,8 +54,6 @@ The cleanup phase must not begin until all items below are satisfied and explici
 
 | Phase | Spec / Authority |
 | --- | --- |
-| Bootstrap | `docs/specs/accepted/0014-bootstrap.md`, `docs/guides/bootstrap.md` |
-| GitOps runner | `docs/specs/accepted/0012-gitops-runner.md` |
 | Phase 3 services | `docs/specs/proposed/0015-services-home-automation.md` through `0020-host-hardening.md` |
 | Phase 4 network/controller automation | `docs/specs/proposed/0021-network-devices.md` |
 | Phase 5 CI/dependency automation | `docs/specs/proposed/0024-ci-dependency-automation.md` |
@@ -78,31 +70,6 @@ The cleanup phase must not begin until all items below are satisfied and explici
 | `docs/specs/proposed/0020-host-hardening.md` | nftables, fail2ban, CIS-lite, per-UID routing |
 
 Acceptance criteria live in each spec. Don't duplicate them here.
-
-## Bootstrap Clean-Room Tracks
-
-### General Homelab Health
-
-- [x] 2026-06-22 Check Vault seal and raft health.
-- [x] 2026-06-22 Check failed system and user units on `phobos` and `deimos`.
-- [x] 2026-06-22 Check rootful and rootless Podman health on both hosts.
-- [x] 2026-06-22 Repair known `deimos` `abhaile` rootless Podman storage issue.
-- [x] 2026-06-22 Check DNS, NTP, network-online, and host service IP health.
-
-### Deimos Bootstrap Prerequisites
-
-- [x] 2026-06-22 Create encrypted `secrets/deimos/vault-agent.sops.yaml`.
-- [x] 2026-06-22 Confirm `deimos` age identity exists at `/home/abhaile/.config/sops/age/keys.txt`.
-- [x] 2026-06-22 Confirm `deimos` read-only Git deploy key and `known_hosts` are in place.
-- [x] 2026-06-22 Create or verify the `deimos` Vault AppRole and sealed `role_id`.
-- [ ] 2026-06-22 Generate a response-wrapped SecretID for `deimos` bootstrap.
-
-### Vault Recovery Prerequisites
-
-- [x] 2026-06-23 Create root-owned phobos Vault unseal age identity.
-- [x] 2026-06-23 Add `secrets/phobos/vault-unseal.sops.yaml` SOPS recipient rule.
-- [x] 2026-06-23 Create encrypted `secrets/phobos/vault-unseal.sops.yaml`.
-- [x] 2026-06-23 Update bootstrap and unseal scripts for `secrets/<host>/` artifact layout.
 
 ## Implementation decisions
 

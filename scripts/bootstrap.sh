@@ -321,7 +321,7 @@ stage_prerequisites() {
     log "=== Stage 2: Prerequisites ==="
 
     local packages=(
-        git python3 python3-venv podman crun age jq curl unzip systemd-container bind9-utils
+        git python3 python3-venv podman crun age jq curl unzip systemd-container bind9-utils ansible-core
     )
     local to_install=()
 
@@ -438,7 +438,7 @@ stage_repo_and_env() {
     fi
 
     log "Synchronizing Abhaile CLI entrypoints"
-    ABHAILE_REPO_DIR="$REPO_DIR" \
+    env ABHAILE_REPO_DIR="$REPO_DIR" \
         ABHAILE_OWNER="$ABHAILE_USER" \
         ABHAILE_GROUP="$ABHAILE_GROUP" \
         "${REPO_DIR}/scripts/install-abhaile-entrypoints"

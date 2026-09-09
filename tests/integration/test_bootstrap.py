@@ -130,6 +130,19 @@ class TestBootstrapPreflight:
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert "systemd-container" in script
 
+    def test_bootstrap_installs_ansible_core_before_convergence(self) -> None:
+        """Bootstrap installs ansible-core so the local converge playbook can run."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "ansible-core" in script
+
+    def test_bootstrap_does_not_reassign_readonly_group_in_env(self) -> None:
+        """Bootstrap passes repo env vars without reassigning readonly shell variables."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert 'env ABHAILE_REPO_DIR="$REPO_DIR"' in script
+        assert 'ABHAILE_OWNER="$ABHAILE_USER"' in script
+        assert 'ABHAILE_GROUP="$ABHAILE_GROUP"' in script
+        assert "scripts/install-abhaile-entrypoints" in script
+
     def test_bootstrap_installs_coredns_validation_tooling(self) -> None:
         """Bootstrap installs bind tooling before first CoreDNS zone apply."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
