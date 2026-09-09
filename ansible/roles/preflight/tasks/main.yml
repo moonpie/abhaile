@@ -1,0 +1,17 @@
+- name: preflight host checks
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['hostname'] is defined
+      - ansible_facts['distribution'] | default('') | lower == 'debian'
+      - ansible_facts['distribution_major_version'] | default('') | string == '13'
+    fail_msg: "Host must run Debian 13 (trixie) before local convergence proceeds."
+- name: assert required network connectivity for bootstrap flow
+  ansible.builtin.command:
+    cmd: curl -fsSo /dev/null --connect-timeout 10 https://github.com
+  register: github_connectivity
+  changed_when: false
+  failed_when: github_connectivity.rc != 0
+  become: true
+- name: record expected host target for preflight
+  ansible.builtin.debug:
+    msg: "Preflight: Ansible convergence target host is {{ abhaile_expected_host }}"

@@ -1,0 +1,11 @@
+- name: ensure abhaile repo checkout exists
+  ansible.builtin.git:
+    repo: git@github.com:moonpie/abhaile.git
+    dest: /opt/abhaile
+    version: main
+    remote: origin
+    update: true
+    force: false
+    accept_hostkey: true
+  become: true
+  become_user: abhaile

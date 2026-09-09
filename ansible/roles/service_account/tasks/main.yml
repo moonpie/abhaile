@@ -1,0 +1,21 @@
+- name: ensure abhaile group exists
+  ansible.builtin.group:
+    name: abhaile
+    gid: 1001
+    state: present
+- name: ensure abhaile user exists
+  ansible.builtin.user:
+    name: abhaile
+    uid: 1001
+    group: abhaile
+    home: /home/abhaile
+    shell: /bin/bash
+    comment: "Abhaile service account"
+    state: present
+- name: ensure abhaile home directory exists
+  ansible.builtin.file:
+    path: /home/abhaile
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0750"

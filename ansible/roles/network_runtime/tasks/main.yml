@@ -1,0 +1,19 @@
+- name: ensure systemd-networkd is enabled and started
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: started
+    enabled: true
+    daemon_reload: true
+- name: ensure systemd-resolved is enabled and started
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: started
+    enabled: true
+    daemon_reload: true
+- name: ensure network runtime directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/network
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"

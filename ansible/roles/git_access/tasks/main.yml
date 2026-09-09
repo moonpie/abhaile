@@ -1,0 +1,29 @@
+- name: ensure abhaile git access directory exists
+  ansible.builtin.file:
+    path: /home/abhaile/.ssh
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0700"
+- name: ensure repo deploy key is configured for git operations
+  ansible.builtin.file:
+    path: /home/abhaile/.ssh/gitops_ed25519
+    state: touch
+    owner: abhaile
+    group: abhaile
+    mode: "0600"
+- name: ensure known_hosts exists for repo access
+  ansible.builtin.file:
+    path: /home/abhaile/.ssh/known_hosts
+    state: touch
+    owner: abhaile
+    group: abhaile
+    mode: "0600"
+- name: ensure the abhaile ssh auth file is present for repo bootstrap state
+  ansible.builtin.copy:
+    dest: /home/abhaile/.ssh/authorized_keys
+    content: "# Managed by Abhaile. Add host-approved SSH keys here for bootstrap/repo access.\n"
+    owner: abhaile
+    group: abhaile
+    mode: "0600"
+    force: false

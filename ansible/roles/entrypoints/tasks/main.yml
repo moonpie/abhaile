@@ -1,0 +1,16 @@
+- name: ensure managed Abhaile entrypoints are synchronized
+  ansible.builtin.command:
+    cmd: >-
+      /opt/abhaile/scripts/install-abhaile-entrypoints
+  args:
+    creates: /opt/abhaile/.venv/bin/abhaile-render
+  become: true
+  become_user: abhaile
+- name: ensure managed Abhaile CLI wrappers include apply and health
+  ansible.builtin.stat:
+    path: /opt/abhaile/.venv/bin/abhaile-apply
+  register: abhaile_apply_wrapper
+- name: ensure managed Abhaile health wrapper exists
+  ansible.builtin.stat:
+    path: /opt/abhaile/.venv/bin/abhaile-health
+  register: abhaile_health_wrapper

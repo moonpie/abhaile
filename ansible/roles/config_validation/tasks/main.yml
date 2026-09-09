@@ -1,0 +1,29 @@
+- name: assert host is declared in repo mapping config
+  ansible.builtin.command:
+    cmd: |
+      python3 -c "
+      import os, pathlib, sys
+      root = pathlib.Path('{{ playbook_dir | dirname | dirname }}')
+      host = os.environ.get('ABHAILE_HOST', 'localhost')
+      mapping = root / 'config' / 'mapping.yaml'
+      network = root / 'config' / 'network.yaml'
+      sops_cfg = root / '.sops.yaml'
+      secret_path = root / 'secrets' / host / 'vault-agent.sops.yaml'
+      if not mapping.exists() or not network.exists() or not sops_cfg.exists() or not secret_path.exists():
+          sys.exit(1)
+      mapping_text = mapping.read_text(encoding='utf-8')
+      network_text = network.read_text(encoding='utf-8')
+      sops_text = sops_cfg.read_text(encoding='utf-8')
+      required_path = f'secrets/{host}/vault-agent.sops.yaml'
+      if host not in mapping_text or host not in network_text or required_path not in sops_text:
+          sys.exit(2)
+      print(host)
+      "
+  environment:
+    ABHAILE_HOST: "{{ abhaile_expected_host }}"
+  changed_when: false
+  failed_when: config_validation.rc != 0
+  register: config_validation
+- name: report validated host target
+  ansible.builtin.debug:
+    msg: "Config validation passed for host {{ abhaile_expected_host }} in mapping.yaml, network.yaml, and the required SOPS secret bundle"

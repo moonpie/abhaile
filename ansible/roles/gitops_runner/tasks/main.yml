@@ -1,0 +1,11 @@
+- name: ensure abhaile runner service unit is enabled
+  ansible.builtin.systemd:
+    name: abhaile-runner.service
+    enabled: true
+    daemon_reload: true
+- name: ensure abhaile runner timer unit is enabled and started
+  ansible.builtin.systemd:
+    name: abhaile-runner.timer
+    state: started
+    enabled: true
+    daemon_reload: true

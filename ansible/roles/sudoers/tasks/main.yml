@@ -1,0 +1,9 @@
+- name: ensure abhaile sudoers file exists
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/abhaile
+    content: |
+      abhaile ALL=(root) NOPASSWD: /opt/abhaile/.venv/bin/abhaile-apply *
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s

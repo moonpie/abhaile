@@ -118,6 +118,136 @@ class TestApplyCli:
         assert not target.exists()
         assert not (tmp_path / "state" / "manifest.json").exists()
 
+    def test_apply_ansible_wrapper_invokes_ansible_playbook(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The compatibility wrapper should delegate apply work to ansible-playbook."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        _write_manifest(desired, "deimos", [])
+
+        calls: list[dict[str, object]] = []
+
+        def fake_run(
+            cmd: list[str],
+            check: bool,
+            capture_output: bool,
+            text: bool,
+            env: dict[str, str] | None = None,
+        ) -> object:
+            calls.append(
+                {
+                    "cmd": cmd,
+                    "check": check,
+                    "capture_output": capture_output,
+                    "text": text,
+                    "env": env,
+                }
+            )
+            return type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+        monkeypatch.setattr(
+            "abhaile.cli.apply.shutil.which", lambda name: "/usr/bin/ansible-playbook"
+        )
+        monkeypatch.setattr("abhaile.cli.apply.subprocess.run", fake_run)
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+
+        rc = main_apply(["--desired-manifest", desired.as_posix(), "--ansible"])
+        assert rc == 0
+        assert len(calls) == 1
+        cmd = calls[0]["cmd"]
+        assert isinstance(cmd, list)
+        assert all(isinstance(item, str) for item in cmd)
+        assert cmd[0].endswith("ansible-playbook")
+        assert "-i" in cmd
+        assert "localhost," in cmd
+        assert "--extra-vars" in cmd
+
+    def test_apply_ansible_dry_run_uses_check_mode(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Ansible compatibility mode should translate --dry-run into Ansible check mode."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        _write_manifest(desired, "deimos", [])
+
+        calls: list[dict[str, object]] = []
+
+        def fake_run(
+            cmd: list[str],
+            check: bool,
+            capture_output: bool,
+            text: bool,
+            env: dict[str, str] | None = None,
+        ) -> object:
+            calls.append(
+                {
+                    "cmd": cmd,
+                    "check": check,
+                    "capture_output": capture_output,
+                    "text": text,
+                    "env": env,
+                }
+            )
+            return type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+        monkeypatch.setattr(
+            "abhaile.cli.apply.shutil.which", lambda name: "/usr/bin/ansible-playbook"
+        )
+        monkeypatch.setattr("abhaile.cli.apply.subprocess.run", fake_run)
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+
+        rc = main_apply(["--desired-manifest", desired.as_posix(), "--ansible", "--dry-run"])
+        assert rc == 0
+        assert len(calls) == 1
+        cmd = calls[0]["cmd"]
+        assert isinstance(cmd, list)
+        assert all(isinstance(item, str) for item in cmd)
+        assert "--check" in cmd
+        assert "--diff" in cmd
+
+    def test_apply_ansible_sets_expected_host_in_environment(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The compatibility wrapper should export the target host for the local playbook."""
+        desired = tmp_path / "rendered" / "manifest.json"
+        _write_manifest(desired, "deimos", [])
+
+        calls: list[dict[str, object]] = []
+
+        def fake_run(
+            cmd: list[str], check: bool, capture_output: bool, text: bool, env: dict[str, str]
+        ) -> object:
+            calls.append(
+                {
+                    "cmd": cmd,
+                    "check": check,
+                    "capture_output": capture_output,
+                    "text": text,
+                    "env": env,
+                }
+            )
+            return type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+        monkeypatch.setattr(
+            "abhaile.cli.apply.shutil.which", lambda name: "/usr/bin/ansible-playbook"
+        )
+        monkeypatch.setattr("abhaile.cli.apply.subprocess.run", fake_run)
+        monkeypatch.setattr("abhaile.cli.apply._local_hostname", lambda: "deimos")
+
+        rc = main_apply(["--desired-manifest", desired.as_posix(), "--ansible"])
+        assert rc == 0
+        assert len(calls) == 1
+        env = calls[0]["env"]
+        assert isinstance(env, dict)
+        assert all(isinstance(k, str) and isinstance(v, str) for k, v in env.items())
+        assert env["ABHAILE_HOST"] == "deimos"
+
     def test_apply_dry_run_json_includes_image_acquisition_plan(
         self,
         tmp_path: Path,

@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import shutil
 import socket
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,6 +150,11 @@ def parse_apply_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Allow destructive operations (volume/network recreate/delete)",
     )
     parser.add_argument("--json", action="store_true", help="Output structured JSON report")
+    parser.add_argument(
+        "--ansible",
+        action="store_true",
+        help="Delegate local convergence to ansible-playbook using the local Ansible compatibility wrapper",
+    )
     parser.add_argument(
         "-v",
         "--verbose",
@@ -771,6 +779,49 @@ def _run_managed_build_transactions(plan: PlanResult) -> list[dict[str, object]]
     return results
 
 
+def _run_ansible_wrapper(args: argparse.Namespace, plan: PlanResult) -> int:
+    """Delegate compatibility-mode apply to ansible-playbook against the local playbook."""
+    ansible_bin = shutil.which("ansible-playbook")
+    if ansible_bin is None:
+        raise ApplyError("ansible-playbook is required for --ansible compatibility mode")
+
+    host = args.host if isinstance(args.host, str) and args.host else plan.get("host")
+    if not isinstance(host, str) or not host:
+        raise ApplyError("Missing host context for ansible compatibility mode")
+
+    repo_root = Path(__file__).resolve().parents[3]
+    playbook = repo_root / "ansible" / "playbooks" / "converge.yml"
+    if not playbook.exists():
+        raise ApplyError(f"Missing Ansible playbook: {playbook}")
+
+    cmd = [
+        ansible_bin,
+        "-i",
+        "localhost,",
+        "-c",
+        "local",
+        str(playbook),
+    ]
+    if args.dry_run:
+        cmd.extend(["--check", "--diff"])
+    cmd.extend(["--extra-vars", f"abhaile_expected_host={host}"])
+    env = {**os.environ, "ABHAILE_HOST": host}
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, env=env)
+    if result.returncode != 0:
+        stderr = result.stderr.strip() or result.stdout.strip() or "unknown ansible failure"
+        raise ApplyError(f"Ansible convergence failed: {stderr}")
+
+    if args.json:
+        print(
+            json.dumps(
+                {"mode": "ansible", "host": host, "return_code": result.returncode}, indent=2
+            )
+        )
+    else:
+        print(f"mode=ansible host={host} return_code={result.returncode}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run abhaile-apply."""
     args = parse_apply_args(argv)
@@ -780,6 +831,9 @@ def main(argv: list[str] | None = None) -> int:
     owner_escalations = _collect_owner_escalations(plan)
     if not args.json:
         print_diff_summary(plan)
+
+    if args.ansible:
+        return _run_ansible_wrapper(args, plan)
 
     if args.dry_run:
         return _run_dry_run(args, paths, plan, owner_escalations)

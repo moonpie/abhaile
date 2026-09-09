@@ -1,0 +1,16 @@
+- name: ensure abhaile repo root exists
+  ansible.builtin.file:
+    path: /opt/abhaile
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0750"
+- name: ensure abhaile repo has writable git metadata for service account
+  ansible.builtin.file:
+    path: /opt/abhaile/.git
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0755"
+    recurse: true
+  ignore_errors: true

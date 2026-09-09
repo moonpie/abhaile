@@ -1,0 +1,22 @@
+- name: ensure vault agent runtime directory exists
+  ansible.builtin.file:
+    path: /home/abhaile/.config/vault-agent
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0700"
+- name: ensure vault agent runtime data layout exists
+  ansible.builtin.file:
+    path: /srv/vault/agent
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0750"
+    recurse: true
+- name: ensure vault-agent service is enabled and started
+  ansible.builtin.systemd:
+    name: vault-agent.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true

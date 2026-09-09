@@ -1,0 +1,19 @@
+- name: ensure abhaile runtime config directory exists
+  ansible.builtin.file:
+    path: /etc/abhaile
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+- name: ensure runner environment file exists
+  ansible.builtin.copy:
+    dest: /etc/abhaile/runner.env
+    content: |
+      ABHAILE_BRANCH=main
+      ABHAILE_REMOTE=origin
+      ABHAILE_OUTPUT=/var/lib/abhaile
+      ABHAILE_VERBOSE=0
+    owner: root
+    group: root
+    mode: "0644"
+    force: false

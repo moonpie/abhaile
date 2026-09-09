@@ -1,0 +1,68 @@
+- name: Converge local host state
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  vars:
+    abhaile_expected_host: "{{ lookup('env', 'ABHAILE_HOST', default='localhost') }}"
+  tasks:
+    - name: Preflight host checks
+      ansible.builtin.include_role:
+        name: preflight
+    - name: Create abhaile service account
+      ansible.builtin.include_role:
+        name: service_account
+    - name: Prepare abhaile runtime directories
+      ansible.builtin.include_role:
+        name: runtime_dirs
+    - name: Ensure base host services are enabled
+      ansible.builtin.include_role:
+        name: base_services
+    - name: Install base host packages
+      ansible.builtin.include_role:
+        name: base_packages
+    - name: Install pinned host operations tooling
+      ansible.builtin.include_role:
+        name: ops_tooling
+    - name: Configure sudo access for abhaile user
+      ansible.builtin.include_role:
+        name: sudoers
+    - name: Configure SSH access for abhaile user
+      ansible.builtin.include_role:
+        name: ssh_access
+    - name: Manage abhaile gitops runner units
+      ansible.builtin.include_role:
+        name: gitops_runner
+    - name: Configure abhaile runner environment
+      ansible.builtin.include_role:
+        name: runner_env
+    - name: Synchronize managed Abhaile entrypoints
+      ansible.builtin.include_role:
+        name: entrypoints
+    - name: Ensure abhaile repo layout ownership and permissions
+      ansible.builtin.include_role:
+        name: repo_layout
+    - name: Validate this host is declared in the repo config
+      ansible.builtin.include_role:
+        name: config_validation
+    - name: Ensure abhaile source checkout is present
+      ansible.builtin.include_role:
+        name: git_repo
+    - name: Ensure abhaile user has rootless runtime support
+      ansible.builtin.include_role:
+        name: rootless_runtime
+    - name: ConfigureVault Agent secret runtime layout
+      ansible.builtin.include_role:
+        name: vault_agent
+    - name: Ensure abhaile git access credential files exist
+      ansible.builtin.include_role:
+        name: git_access
+    - name: Ensure abhaile log directory exists
+      ansible.builtin.include_role:
+        name: log_runtime
+    - name: Manage systemd network runtime
+      ansible.builtin.include_role:
+        name: network_runtime
+    - name: Prepare abhaile python virtualenv
+      ansible.builtin.include_role:
+        name: python_venv

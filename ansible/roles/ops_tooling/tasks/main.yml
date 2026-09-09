@@ -1,0 +1,41 @@
+- name: check whether sops is already installed at the pinned version
+  ansible.builtin.command: /usr/local/bin/sops --version
+  register: sops_version_check
+  changed_when: false
+  failed_when: false
+- name: install pinned sops binary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    tmp="$(mktemp)"
+    curl -fsSL -o "$tmp" "https://github.com/getsops/sops/releases/download/v3.13.1/sops-v3.13.1.linux.amd64"
+    actual_sha="$(sha256sum "$tmp" | awk '{print $1}')"
+    if [[ "$actual_sha" != "620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a" ]]; then
+      rm -f "$tmp"
+      echo "sops checksum mismatch" >&2
+      exit 1
+    fi
+    install -m 0755 "$tmp" /usr/local/bin/sops
+    rm -f "$tmp"
+  when: sops_version_check.rc != 0 or '3.13.1' not in sops_version_check.stdout
+  args:
+    executable: /bin/bash
+- name: check whether vault is already installed at the pinned version
+  ansible.builtin.command: /usr/local/bin/vault version
+  register: vault_version_check
+  changed_when: false
+  failed_when: false
+- name: install pinned vault binary
+  ansible.builtin.shell: |
+    set -euo pipefail
+    tmpdir="$(mktemp -d)"
+    zip_path="$tmpdir/vault.zip"
+    curl -fsSL -o "$zip_path" "https://releases.hashicorp.com/vault/1.21.4/vault_1.21.4_linux_amd64.zip"
+    curl -fsSL -o "$tmpdir/vault_SHA256SUMS" "https://releases.hashicorp.com/vault/1.21.4/vault_1.21.4_SHA256SUMS"
+    cd "$tmpdir"
+    grep "vault_1.21.4_linux_amd64.zip" "$tmpdir/vault_SHA256SUMS" | sha256sum -c -
+    unzip -p "$zip_path" vault > "$tmpdir/vault-bin"
+    install -m 0755 "$tmpdir/vault-bin" /usr/local/bin/vault
+    rm -rf "$tmpdir"
+  when: vault_version_check.rc != 0 or 'Vault v1.21.4' not in vault_version_check.stdout
+  args:
+    executable: /bin/bash

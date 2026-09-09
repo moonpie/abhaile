@@ -1,0 +1,15 @@
+- name: ensure abhaile ssh directory exists
+  ansible.builtin.file:
+    path: /home/abhaile/.ssh
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0700"
+- name: ensure abhaile authorized_keys file exists
+  ansible.builtin.copy:
+    dest: /home/abhaile/.ssh/authorized_keys
+    content: ""
+    owner: abhaile
+    group: abhaile
+    mode: "0600"
+    force: false

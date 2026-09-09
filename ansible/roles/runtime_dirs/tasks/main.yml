@@ -1,0 +1,28 @@
+- name: ensure abhaile runtime roots exist
+  ansible.builtin.file:
+    path: "/var/lib/abhaile"
+    state: directory
+    owner: root
+    group: abhaile
+    mode: "0750"
+- name: ensure rendered worktree exists
+  ansible.builtin.file:
+    path: "/var/lib/abhaile/rendered"
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0750"
+- name: ensure runner state directory exists
+  ansible.builtin.file:
+    path: "/var/lib/abhaile/runner"
+    state: directory
+    owner: abhaile
+    group: abhaile
+    mode: "0750"
+- name: ensure apply state directory exists
+  ansible.builtin.file:
+    path: "/var/lib/abhaile/state"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"

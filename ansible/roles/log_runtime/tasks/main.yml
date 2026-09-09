@@ -1,0 +1,7 @@
+- name: ensure abhaile log dir exists
+  ansible.builtin.file:
+    path: /var/log/abhaile
+    state: directory
+    owner: root
+    group: abhaile
+    mode: "0750"

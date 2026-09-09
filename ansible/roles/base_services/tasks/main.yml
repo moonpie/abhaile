@@ -1,0 +1,15 @@
+- name: ensure systemd-networkd is enabled and started
+  ansible.builtin.service:
+    name: systemd-networkd
+    state: started
+    enabled: true
+- name: ensure systemd-resolved is enabled and started
+  ansible.builtin.service:
+    name: systemd-resolved
+    state: started
+    enabled: true
+- name: ensure chrony is enabled and started
+  ansible.builtin.service:
+    name: chrony
+    state: started
+    enabled: true
