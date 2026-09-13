@@ -1,12 +1,12 @@
 ---
 
-description: Systemd, podman, networking, security, and operations for Abhaile
+description: Ansible, systemd, podman, networking, security, and operations for Abhaile
 tools: [vscode/extensions, vscode/askQuestions, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/resolveMemoryFileUri, vscode/runCommand, vscode/vscodeAPI, vscode/toolSearch, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runTests, execute/testFailure, execute/runNotebookCell, execute/runInTerminal, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, read/getNotebookSummary, read/problems, read/readFile, read/viewImage, read/readNotebookCellOutput, agent/runSubagent, browser/openBrowserPage, browser/readPage, browser/screenshotPage, browser/navigatePage, browser/clickElement, browser/dragElement, browser/hoverElement, browser/typeInPage, browser/runPlaywrightCode, browser/handleDialog, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/codebase, search/fileSearch, search/listDirectory, search/textSearch, search/usages, web/fetch, web/githubRepo, web/githubTextSearch, todo]
 handoffs:
 
 - label: Implement Changes
   agent: developer
-  prompt: Implement the operational recommendations above through the GitOps config/render/apply flow and existing code patterns.
+  prompt: Implement the operational recommendations above through the GitOps config/render/apply flow, including bounded Ansible convergence where applicable, and existing code patterns.
   send: false
 - label: Resolve Design Impact
   agent: architect

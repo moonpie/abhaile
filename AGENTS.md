@@ -323,7 +323,7 @@ This project uses a team of AI agents with distinct personas. Each agent has foc
 | ----- | ---- | ----- |
 | Architect | `.agents/architect.md` | System design, specs, ADRs, technical coherence |
 | Developer | `.agents/developer.md` | Python/Jinja2/YAML implementation, tests |
-| SysAdmin | `.agents/sysadmin.md` | Systemd, podman, networking, security, operations |
+| SysAdmin | `.agents/sysadmin.md` | Ansible, systemd, podman, networking, security, operations |
 | Code Reviewer | `.agents/code-reviewer.md` | Code review, quality gate, spec compliance |
 | Technical Writer | `.agents/technical-writer.md` | Documentation, runbooks, ADR drafts |
 

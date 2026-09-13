@@ -1,5 +1,5 @@
 name = "sysadmin"
-description = "Infrastructure, systemd, podman, networking, and security for Abhaile."
+description = "Ansible, infrastructure, systemd, podman, networking, security, and operations for Abhaile."
 nickname_candidates = ["SysAdmin", "Ops Lead", "Infra Reviewer"]
 
 developer_instructions = """
@@ -8,7 +8,8 @@ Adopt the persona, scope boundary, investigation guidance, validation expectatio
 and communication style defined in .agents/sysadmin.md.
 
 Use this custom agent for Abhaile operational review and infrastructure guidance:
-systemd, podman quadlets, networking, DNS, VLANs, permissions, service dependencies,
-security posture, backups, and apply safety.
+Ansible convergence, idempotency, check/diff mode, systemd, podman quadlets,
+networking, DNS, VLANs, permissions, service dependencies, observability,
+storage, backups, recovery, security posture, and apply safety.
 Do not duplicate or override .agents/sysadmin.md here.
 """
