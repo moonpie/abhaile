@@ -23,10 +23,45 @@ Abhaile will continue to own declarative intent, render, validation, manifest ge
 - `config/` remains the canonical source of declarative intent.
 - `abhaile-render` remains the host-scoped compiler for the initial migration.
 - `rendered/manifest.json` remains the compatibility boundary between renderer and converger.
-- `abhaile-apply` remains the canonical operator-facing entry point during the migration, delegating to Ansible.
+- `abhaile-apply` remains the canonical operator-facing entry point and delegates host mutation to Ansible.
 - Ansible runs locally on the target host, not through a central control plane or SSH fan-out.
-- A reduced applied-state ledger remains for safe-prune and reporting purposes until a later decision removes it.
+- A reduced applied-state ledger remains for safe-prune, rollback planning, and reporting.
 - Destructive operations and prune safety remain explicit and fail closed unless approval is provided.
+
+### Privileged Code Trust
+
+The `abhaile` service account must not be able to modify code or desired-state data that root
+executes or consumes. The runner requests convergence of a full commit object ID through a
+root-owned launcher. A root-owned updater fetches the configured branch into a bare mirror using a
+pinned Git host key and root-controlled read-only credential. It rejects non-fast-forward updates
+unless explicitly approved. The launcher accepts only commits reachable from the root-fetched
+trusted ref or retained by the root-owned last-known-good ref.
+
+The launcher exports an accepted revision into a new root-owned staging tree. A dedicated
+non-login render identity reads that protected source and writes only to unique temporary output.
+After render exits, root validates the manifest, host, paths, hashes, ownership metadata, and
+completeness; removes render-identity write access; and atomically seals source and output as one
+immutable convergence capsule. Root runs `abhaile-apply` and Ansible from the sealed source and
+consumes only its sealed manifest and artifacts.
+
+The launcher never copies executable or desired-state content from the service-account checkout.
+The last-known-good ref and capsule remain cached for offline rollback. Mirror garbage collection
+preserves trusted, last-known-good, active-transaction, and configured rollback-history objects.
+Launcher and trust-policy updates are privileged atomic installations from an already trusted
+capsule and take effect only on a subsequent invocation.
+
+The sudo policy permits only the fixed root-owned launcher invocation. It does not grant
+`NOPASSWD:ALL`, execute an entry point from the service-account-writable checkout or virtual
+environment, or accept caller-controlled paths outside configured roots. Rootless service actions
+explicitly transition from the root play context to the declared service user with the correct
+home, runtime directory, and user manager.
+
+### State and Health Boundaries
+
+Apply state and runner state are separate ledgers. Apply records a manifest only after convergence
+and local validation succeed. The runner records a last-known-good revision only after its wider
+health gate succeeds. If wider health fails, rollback retains the previous last-known-good revision
+and plans reconvergence from the actual newly applied manifest to that revision's desired manifest.
 
 ### Required Migration Constraints
 
@@ -35,6 +70,9 @@ Abhaile will continue to own declarative intent, render, validation, manifest ge
 - No change to the secrets trust boundary: runtime secrets remain stored and rendered by Vault Agent and host-local runtime paths.
 - No direct migration of the host to a central Ansible controller or remote orchestration model.
 - No hidden broadening of privileged trust boundaries.
+- No root execution of repository content controlled by the `abhaile` service account.
+- No root consumption of manifests or artifacts controlled by the `abhaile` service account.
+- No dependency on remote availability when reconverging a cached last-known-good revision.
 
 ### Operational Model
 
@@ -79,11 +117,14 @@ This option is the chosen direction.
 - A compatibility layer is required during the migration.
 - The current apply and drift semantics must be documented as a constrained transitional model.
 - Some state and prune semantics remain temporarily more complex than a pure Ansible model.
-- Operators must keep using the Abhaile CLI surface until a later explicit decision removes it.
+- Operators continue using the stable Abhaile CLI surface after the custom Python mutation backend
+  and temporary Ansible selector are removed.
+- Root-owned revision staging introduces a protected checkout and trust-verification mechanism that
+  must be maintained alongside the unprivileged runner checkout.
 
 ## References
 
-- Spec 0028: Ansible Reconciliation Migration
+- [Spec 0028: Target Host Reconciliation Model](../specs/active/0028-target-host-reconciliation-model.md)
 - ADR 0002: Hash-based Drift Detection and State Model
 - ADR 0003: GitOps Runner Responsibility Boundary
 - ADR 0004: Apply Execution Model
