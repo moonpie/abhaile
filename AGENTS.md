@@ -4,8 +4,8 @@ This is the shared context for all AI agents working on the Abhaile project. It 
 
 ## Instruction Ownership
 
-`AGENTS.md` is the canonical instruction file for this repository. Provider-specific files
-under `.github/` are adapters only: they may point to these instructions or configure
+`AGENTS.md` is the canonical instruction file for this repository. Provider-specific files under
+`.github/`, `.claude/`, and `CLAUDE.md` are adapters only: they may point to these instructions or configure
 provider-specific tools, but they must not duplicate or override project rules.
 
 Role-specific files under `.agents/` may define persona focus, review emphasis, preferred
@@ -43,6 +43,7 @@ Instruction resolution table:
 - `AGENTS.md` is the canonical, provider-neutral project context.
 - `.agents/` contains provider-neutral persona definitions.
 - `.github/` contains GitHub/Copilot-specific adapters and configuration.
+- `.claude/` and `CLAUDE.md` contain Claude Code-specific adapters and configuration.
 - `docs/specs/` contains project workflow documents that are useful with or without AI tools.
 
 ## Project Overview
@@ -330,6 +331,10 @@ This project uses a team of AI agents with distinct personas. Each agent has foc
 ### Invoking Agents
 
 **VS Code Copilot Chat:** Select the agent from the agents dropdown. Custom agents are defined in `.github/agents/` with tool restrictions and handoffs between roles.
+
+**Claude Code:** Select or delegate to the project subagents defined in `.claude/agents/`.
+`CLAUDE.md` points to these instructions, and each adapter points to its role definition in
+`.agents/`.
 
 **Other tools:** Provide this file and the relevant agent file as context.
 
