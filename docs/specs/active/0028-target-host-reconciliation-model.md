@@ -8,7 +8,7 @@ title: Target Host Reconciliation Model
 status: active
 owner: moonpie
 created: 2026-09-04
-updated: 2026-09-13
+updated: 2026-09-26
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -384,6 +384,144 @@ changed.
   temporary Vault or network unavailability.
 
 ## Decision Notes
+
+- Decision: Validate and hash capsule trees through directory-file-descriptor-anchored,
+  no-follow traversal, comparing file identity and metadata before and after each read.
+
+- Rationale: Pathname checks followed by later pathname reads leave a replacement window in
+  which a caller-controlled link or inode could cross the root trust boundary.
+
+- Impact: Descriptor snapshots reject links, special files, hard-linked files, type changes, and
+  files that change during an opened-descriptor read. Root materializes the validated snapshot as
+  new inodes beneath a root-only parent. Renderer-held descriptors and surviving renderer children
+  can therefore mutate only abandoned scratch inodes, never the sealed capsule.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Bind a trusted fetch to one canonical SSH URL host, user, and port and retain trusted,
+  last-known-good, active-transaction, named-transaction, and bounded rollback-history objects
+  through root-owned mirror refs.
+
+- Rationale: Pinned key material is insufficient if the configured remote can select another
+  transport or hostname, and object caching is not durable unless garbage collection has explicit
+  protected roots.
+
+- Impact: Production fetch rejects HTTP, local paths, shorthand URLs, aliases, and endpoint
+  mismatches before invoking Git. Local remotes remain available only through an explicit test
+  injection. An exclusive protected lock serializes fetch, capsule preparation, activation, ref
+  rotation, and garbage collection. Named transaction refs, the active ref, last-known-good, and
+  bounded distinct rollback refs protect required objects.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Derive sealed-capsule retention from valid revisions named by the protected trusted,
+  last-known-good, active-transaction, named-transaction, and rollback refs, and collect only
+  verified canonical capsules outside that set. The incoming fetch ref is not admitted
+  capsule-retention authority.
+
+- Rationale: Capsule age is not evidence that a revision is disposable. Trusted,
+  last-known-good, active-transaction, named-transaction, and rollback refs are the root-owned
+  authority for revisions that must remain available.
+
+- Impact: Capsule garbage collection holds the exclusive trust lock, treats the host capsule
+  directory as a closed fail-closed namespace, validates all candidates before deletion, and
+  atomically quarantines collectible capsules before bounded removal. Dry-run never invokes this
+  lifecycle operation.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Retain isolated `.render-orphan.*` scratch until a root-created process-containment
+  boundary can prove that the complete renderer process tree is quiescent.
+
+- Rationale: Return of the direct renderer process does not prove that descendants have exited or
+  released writable descriptors. Elapsed time, PID disappearance, or a renderer-supplied boolean
+  cannot establish that trust-boundary fact.
+
+- Impact: Phase 1 preserves abandoned render scratch rather than deleting it unsafely. A later
+  runtime-foundation task must provide root-verifiable process-group or cgroup containment before
+  bounded orphan cleanup may be enabled.
+
+- ADR: null
+
+- Decision: Phase 1 validates the existing manifest v1 structural and security contract without
+  defining Phase 3 convergence semantics.
+
+- Rationale: Root must reject malformed ownership graphs, unknown artifact kinds, non-canonical or
+  duplicate paths, incomplete output, and hash/type mismatches, but target-root allowlists and
+  per-kind lifecycle behavior belong to the later manifest-contract audit.
+
+- Impact: Every rendered file except `manifest.json` and necessary parent directories must have a
+  manifest entry. Existing implicit `service:` and `unit:` owner references remain a narrow legacy
+  vocabulary; all other owners must be declared. Current unmanifested `software/*` output is
+  rejected fail closed until Phase 3 defines its artifact kinds and convergence semantics.
+
+- ADR: null
+
+- Decision: Existing-host discovery uses typed, injected read-only observations and emits only
+  sanitized classifications, reasons, and provenance.
+
+- Rationale: Identity, sudo, repository/SSH, state, runtime, unit, Vault, and network evidence have
+  different ambiguity and secrecy risks; category-labelled path existence is insufficient.
+
+- Impact: Unavailable, malformed, ambiguous, or relationship-mismatched evidence is a conflict.
+  Fixed collectors accept only catalogued command and metadata requests, use bounded shell-free
+  execution, and emit no raw evidence. Phase 1 covers metadata-level prerequisites; active
+  rootless runtime, Podman, user-manager, unit, and generated-Quadlet observation follows the
+  Phase 2 runtime transport design. Repository tests use synthetic backends only. Actual host
+  reports remain later explicitly authorized adoption gates.
+
+- ADR: null
+
+- Decision: During scaffold quarantine, offline Phase 1 evidence covers admission, protected
+  render, sealed capsule verification, and preflight selection; it does not claim host convergence.
+
+- Rationale: Claiming actual offline convergence would contradict the unconditional `--ansible`
+  rejection and fail-closed Ansible play required until manifest convergence is ready.
+
+- Impact: Actual offline host convergence remains a later cutover gate. Phase 1 does not weaken
+  quarantine merely to satisfy that future operational proof.
+
+- ADR: null
+
+- Decision: Constrained sudo cutover stages and syntax-checks both artifacts, activates the
+  root-owned launcher first, exercises the exact offline dry-run invocation, and only then
+  activates and revalidates the constrained policy while retaining the legacy recovery rule.
+
+- Rationale: Enabling sudo before proving its only permitted launcher command creates a remote
+  lockout hazard.
+
+- Impact: The repository provides injectable planning and candidate artifacts, but live policy
+  installation and legacy-policy removal remain explicit host gates outside this session.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Protected rendering uses the fixed root-policy interpreter in isolated mode, inserts
+  only the admitted capsule's `src/` directory as the application import root, and passes the
+  transaction root through the renderer's existing output override.
+
+- Rationale: The interpreter and dependency environment must be protected independently, while
+  the renderer implementation and configuration must come from the same admitted revision as the
+  capsule. A caller-selected checkout or an installed copy of Abhaile cannot satisfy that binding.
+
+- Impact: Capsule preparation keeps the exported source root-owned and read-only, temporarily
+  assigns only the isolated output directory to the configured render UID, verifies that identity
+  after rendering, then returns the output tree to root ownership before validation and sealing.
+  The renderer CLI does not gain a caller-controlled repository-root option.
+
+- ADR: null
+
+- Decision: Dry-run may refresh the root-owned trusted mirror and populate the sealed capsule
+  cache, but it may not activate a capsule, update apply or runner last-known-good state, install
+  policy, run garbage collection, or mutate managed host state.
+
+- Rationale: Independent trust fetch and protected rendering are prerequisites for a useful
+  preview, while state activation and retention changes imply convergence success that dry-run
+  cannot establish.
+
+- Impact: Online dry-run can warm protected rollback inputs. Offline dry-run accepts only an
+  already admitted trusted or retained last-known-good revision and its cached objects.
+
+- ADR: null
 
 - Decision: Use this spec as the durable implementation authority for the final host
   reconciliation model; keep the temporary host-by-host migration sequence in `TODO.md`.

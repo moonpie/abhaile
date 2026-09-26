@@ -1,0 +1,4 @@
+#!/bin/sh
+# Installed root-owned at /usr/local/sbin; never execute from the runner checkout.
+set -eu
+exec /usr/lib/abhaile-trust-runtime/bin/python -m abhaile.trust.launcher "$@"

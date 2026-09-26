@@ -1,0 +1,3 @@
+# Candidate only: install and validate launcher before activating this policy.
+Cmnd_Alias ABHAILE_CONVERGE = /usr/local/sbin/abhaile-converge-launcher ^--runner --host (deimos|phobos) --revision [0-9a-f]{40} --dry-run( --offline)?$
+abhaile ALL=(root) NOPASSWD: ABHAILE_CONVERGE
