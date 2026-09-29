@@ -152,6 +152,58 @@ def test_seals_source_manifest_and_artifacts(store: tuple[CapsuleStore, str]) ->
     assert capsule_store.verify(capsule.path, revision) == capsule
 
 
+def test_seals_complete_convergence_manifest_v2(store: tuple[CapsuleStore, str]) -> None:
+    """Seal the validated v2 manifest and its referenced artifact as fresh inodes."""
+    capsule_store, revision = store
+
+    def render_v2(source: Path, output: Path, host: str, _boundary: object) -> None:
+        assert source.joinpath("trusted.txt").is_file()
+        artifact = output / "system/unit.service"
+        artifact.parent.mkdir()
+        artifact.write_bytes(b"unit\n")
+        (output / "manifest.json").write_text(
+            json.dumps({"version": "1", "host": host, "entries": []}), encoding="utf-8"
+        )
+        (output / "convergence-manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "host": host,
+                    "rendered_root": ".",
+                    "entries": [
+                        {
+                            "render_path": "system/unit.service",
+                            "target_path": "/etc/systemd/system/unit.service",
+                            "kind": "systemd.unit",
+                            "action": "publish",
+                            "owner_ref": "unit:unit.service",
+                            "sha256": hashlib.sha256(b"unit\n").hexdigest(),
+                            "size": 5,
+                            "execution_context": "system",
+                            "metadata": {"owner": "root", "group": "root", "mode": "0644"},
+                            "validation": "systemd",
+                            "lifecycle": ["manager-reload"],
+                            "safe_prune": "safe-if-unchanged",
+                        }
+                    ],
+                    "owners": {
+                        "unit:unit.service": {
+                            "name": "unit:unit.service",
+                            "owner_kind": "unit",
+                            "execution_context": "system",
+                            "requires": [],
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    capsule = capsule_store.prepare(revision, render_v2)
+    assert capsule.rendered.joinpath("convergence-manifest.json").is_file()
+    assert capsule_store.verify(capsule.path, revision) == capsule
+
+
 def test_rejects_manifest_artifact_tampering(store: tuple[CapsuleStore, str]) -> None:
     """Detect caller-style artifact changes before capsule consumption."""
     capsule_store, revision = store

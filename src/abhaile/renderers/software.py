@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import yaml
 
+from abhaile.renderers.collector import ArtifactCollector
+from abhaile.models.software import parse_software_operation
 from abhaile.utils.composition import walk_host_includes
 from abhaile.utils.config import read_json, read_yaml_mapping
 from abhaile.utils.errors import RenderError
@@ -19,6 +20,9 @@ def render_software_artifacts(
     host: str,
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render software package/install artifacts for a host.
 
@@ -33,7 +37,20 @@ def render_software_artifacts(
     ordered_hosts = walk_host_includes(host, config_root)
     refs, sources = _collect_software_refs(ordered_hosts, config_root)
 
-    _write_packages_file(refs["packages"], output_dir / "packages.txt")
+    packages_path = output_dir / "packages.txt"
+    _write_packages_file(refs["packages"], packages_path)
+    _register_software_artifact(
+        collector,
+        rendered_root,
+        packages_path,
+        operation_id="packages",
+        operation_type="packages",
+        kind="software.packages",
+        effects=[
+            {"kind": "package", "target": package, "role": "requirement"}
+            for package in refs["packages"]
+        ],
+    )
 
     schema_path = config_root.parent / "schemas" / "software-action.schema.json"
     schema = read_json(schema_path)
@@ -50,6 +67,7 @@ def render_software_artifacts(
 
             spec = read_yaml_mapping(source_path)
             validate_schema(spec, schema, str(source_path), schema_path)
+            operation = parse_software_operation(spec)
 
             spec_id = spec.get("id")
             if spec_id != ref:
@@ -62,6 +80,20 @@ def render_software_artifacts(
             rendered_path.write_text(
                 yaml.safe_dump(spec, sort_keys=False, default_flow_style=False),
                 encoding="utf-8",
+            )
+            _register_software_artifact(
+                collector,
+                rendered_root,
+                rendered_path,
+                operation_id=ref,
+                operation_type=operation.operation_type,
+                execution_policy=operation.execution_policy,
+                effects=[effect.manifest_value() for effect in operation.effects],
+                kind={
+                    "downloads": "software.download",
+                    "builds": "software.build",
+                    "commands": "software.prerequisite",
+                }[key],
             )
 
 
@@ -104,3 +136,39 @@ def _write_packages_file(packages: list[str], destination: Path) -> None:
     """Write merged package list as a deterministic newline-delimited file."""
     lines = [f"{pkg}\n" for pkg in packages]
     destination.write_text("".join(lines), encoding="utf-8")
+
+
+def _register_software_artifact(
+    collector: ArtifactCollector | None,
+    rendered_root: Path | None,
+    path: Path,
+    *,
+    operation_id: str,
+    operation_type: str,
+    execution_policy: str = "admitted",
+    effects: list[dict[str, object]] | None = None,
+    kind: str,
+) -> None:
+    """Register a typed software plan without authorizing its execution."""
+    if collector is None or rendered_root is None:
+        return
+    render_path = path.relative_to(rendered_root).as_posix()
+    owner_ref = f"software:{operation_id}"
+    collector.register_artifact(
+        render_path=render_path,
+        target_path="",
+        kind=kind,
+        owner_ref=owner_ref,
+        content=path.read_bytes(),
+        apply_hints={
+            "operation_id": operation_id,
+            "operation_type": operation_type,
+            "execution_policy": execution_policy,
+            "effects": effects or [],
+        },
+    )
+    collector.register_owner(
+        owner_ref,
+        description=f"Typed software operation {operation_id}",
+        requires=[] if operation_id == "packages" else ["software:packages"],
+    )

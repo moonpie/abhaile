@@ -64,17 +64,22 @@ No item below authorizes host collection, Ansible delegation, installation, or c
 Deferred from Phase 2: integrate sealed invocation and safety-flag contracts with the completed
 manifest; bind runner update staging to transaction commit evidence.
 
-- [ ] 2026-09-26 Before implementing Phase 3, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
-- [ ] 2026-09-13 Audit every convergence family against the manifest and define its schema version, path trust, owner/action vocabulary, validation ownership, and compatibility rules.
-- [ ] 2026-09-13 Define manifest kinds, completeness rules, and convergence semantics for `software/*`, then prove the selected trusted revision's real renderer produces a complete manifest that can be validated and sealed into one immutable capsule. Scope: real-render and capsule integration; the Phase 1 trust primitives remain independently complete.
-- [ ] 2026-09-13 Make the rendered manifest and artifacts the sole desired-state input to Ansible convergence.
-- [ ] 2026-09-13 Preserve owner ordering, validation hints, rootful and rootless context, and handler boundaries.
-- [ ] 2026-09-13 Implement distinct apply-state and runner last-known-good commit gates and health-failure rollback planning.
+- [x] 2026-09-26 Before implementing Phase 3, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope. Evidence: 2026-09-29 governance audit and Architect/SysAdmin consultations split pure contract, planning, sealing, and commit-gate work from the Phase 4/5 execution and evidence items below.
+- [x] 2026-09-13 Audit every convergence family against the manifest and define its schema version, path trust, owner/action vocabulary, validation ownership, and compatibility rules. Evidence: strict transitional v2 contract in `renderers/convergence_manifest.py`, `trust/manifest.py`, and their tests; legacy v1 remains authoritative for Python apply.
+- [x] 2026-09-13 Define manifest kinds, completeness rules, and convergence semantics for `software/*`, then prove the selected trusted revision's real renderer produces a complete manifest that can be validated and sealed into one immutable capsule. Evidence: shared closed typed parsing in `models/software.py`, effect authority in manifest metadata, privileged payload/effect agreement and global collision checks in `trust/manifest.py`, unsafe-value/collision tests, and deterministic both-host real-render validation. Container-build execution remains explicitly integrity-blocked for Phase 4.
+- [x] 2026-09-13 Make the sealed manifest and artifacts the sole desired-state input to protected Ansible planning. Evidence: `trust/ansible.py` exposes only capsule-internal v2 manifest/rendered paths and an independently validated `ConvergencePlan`; execution remains quarantined and is deferred to Phase 4.
+- [x] 2026-09-13 Preserve owner ordering, validation hints, rootful and rootless context, and handler boundaries in pure planning. Evidence: dependency-preserving contiguous owner blocks in `trust/convergence.py`, lower-phase-dependent regression coverage, deterministic repeated renders, and both-host audits proving every prerequisite owner precedes its dependent; handler execution remains Phase 4.
+- [x] 2026-09-13 Implement distinct apply-state and runner last-known-good commit gates and health-failure rollback planning. Evidence: transaction-bound apply/LKG commit digests in `trust/transaction.py`; exact revision, capsule, manifest, service, timer, recovery-record, and ledger-evidence binding in `trust/runner_update.py`; mismatch/replay/dry-run tests; I/O and publication remain Phase 4/5.
 
 ### Phase 4: Port Convergence Families Incrementally
 
 Deferred from Phase 2: execute flag mappings, publish validated runner updates after commit,
 converge rootless runtime/Vault Agent, and apply secret-safe task boundaries.
+
+Deferred from Phase 3: consume the protected v2 plan in real Ansible tasks; execute typed package,
+download, build, prerequisite, file, identity, unit, network, Quadlet, and Vault operations;
+perform validation/handler effects; atomically write apply state; publish staged runner updates;
+and execute rollback. Keep `--ansible` unavailable until those gates are proven.
 
 - [ ] 2026-09-26 Before implementing Phase 4, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
 - [ ] 2026-09-13 Correct repository, deploy-key, `known_hosts`, entrypoint, virtualenv, runner-unit, and runtime-directory ordering.
@@ -87,6 +92,9 @@ converge rootless runtime/Vault Agent, and apply secret-safe task boundaries.
 
 Deferred from Phase 2: end-to-end task/callback/temp-file/journald secret-leakage proof and
 runner/rootless/Vault failure, reboot, and recovery evidence.
+
+Deferred from Phase 3: isolated evidence for the transaction commit state machine, wider-health
+runner-LKG promotion, rollback execution/failure recovery, and target-account portability.
 
 - [ ] 2026-09-26 Before implementing Phase 5, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
 - [ ] 2026-09-13 Replace Ansible file-existence and keyword tests with syntax, behavior, check-mode, failure, and idempotence tests.

@@ -1,12 +1,16 @@
 id: coral-tpu-udev
-name: "Install Coral TPU udev rules"
-description: "Configure udev rules for Google Coral TPU device access (phobos-specific)"
-commands:
-  - |
-    cat << 'EOF' | sudo tee /etc/udev/rules.d/65-apex.rules >/dev/null
-    # Coral Edge TPU udev rules
-    # Allow apex group members to access the Coral TPU device
-    SUBSYSTEM=="apex", MODE="0660", GROUP="apex"
-    EOF
-  - 'sudo udevadm control --reload-rules'
-  - 'sudo udevadm trigger'
+name: Install Coral TPU udev rule
+description: Declare device access policy and its deferred reload effect.
+operation: udev-rule
+execution_policy: admitted
+parameters:
+  rule_path: /etc/udev/rules.d/65-apex.rules
+  rule: SUBSYSTEM=="apex", MODE="0660", GROUP="apex"
+  reload: true
+effects:
+  - kind: path
+    target: /etc/udev/rules.d/65-apex.rules
+    role: rule
+validation: udev-rule-present
+expected_results:
+  - The apex device rule is published before a deferred udev reload

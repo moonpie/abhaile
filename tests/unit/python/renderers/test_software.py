@@ -19,16 +19,17 @@ def _write_software_schema(repo_root: Path) -> None:
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["id", "name", "commands"],
+  "required": ["id", "name", "description", "operation", "parameters", "effects", "validation", "expected_results", "execution_policy"],
   "properties": {
     "id": {"type": "string"},
     "name": {"type": "string"},
     "description": {"type": "string"},
-    "commands": {
-      "type": "array",
-      "minItems": 1,
-      "items": {"type": "string"}
-    }
+    "operation": {"type": "string"},
+    "parameters": {"type": "object", "minProperties": 1},
+    "effects": {"type": "array", "minItems": 1},
+    "execution_policy": {"type": "string"},
+    "validation": {"type": "string"},
+    "expected_results": {"type": "array", "minItems": 1, "items": {"type": "string"}}
   },
   "additionalProperties": false
 }
@@ -84,8 +85,13 @@ composition:
         """
 id: sops
 name: Install sops
-commands:
-  - echo install sops
+description: Install a verified binary.
+operation: binary-download
+execution_policy: admitted
+parameters: {url: https://example.invalid/sops, sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, destination: /usr/local/bin/sops, mode: "0755"}
+effects: [{kind: path, target: /usr/local/bin/sops, role: primary}]
+validation: binary-version
+expected_results: [binary exists]
 """.strip() + "\n",
     )
     write_file(
@@ -93,8 +99,19 @@ commands:
         """
 id: systemd-networkd
 name: Enable networkd
-commands:
-  - echo networkd
+description: Switch the network backend.
+operation: network-backend
+execution_policy: admitted
+parameters:
+  legacy_path: /etc/network/interfaces
+  backup_path: /etc/network/interfaces.save
+  units: [{name: systemd-networkd.service, enabled: true, state: started}]
+effects:
+  - {kind: path, target: /etc/network/interfaces, role: primary}
+  - {kind: path, target: /etc/network/interfaces.save, role: backup}
+  - {kind: unit, target: systemd-networkd.service, role: activation}
+validation: networkd-enabled
+expected_results: [networkd is active]
 """.strip() + "\n",
     )
     write_file(
@@ -102,8 +119,13 @@ commands:
         """
 id: gasket-dkms
 name: Build gasket
-commands:
-  - echo build gasket
+description: Define a blocked container build.
+operation: container-build
+execution_policy: phase4-integrity-blocked
+parameters: {url: https://example.invalid/gasket.git, source_ref: v1, containerfile_base: example.invalid/debian:test, output_glob: gasket*.deb}
+effects: [{kind: artifact-set, target: /var/lib/abhaile/builds/gasket-dkms, role: output, pattern: gasket*.deb, cardinality: 1}]
+validation: package-artifact
+expected_results: [package exists]
 """.strip() + "\n",
     )
     write_file(
@@ -111,8 +133,14 @@ commands:
         """
 id: ddclient
 name: Enable ddclient
-commands:
-  - echo enable ddclient
+description: Enable the service.
+operation: systemd-units
+execution_policy: admitted
+parameters:
+  units: [{name: ddclient.service, enabled: true, state: started}]
+effects: [{kind: unit, target: ddclient.service, role: activation}]
+validation: units-active
+expected_results: [unit is active]
 """.strip() + "\n",
     )
 

@@ -6,10 +6,55 @@ import pytest
 
 from abhaile.trust.errors import TrustError
 from abhaile.trust.runner_update import (
+    RunnerPublicationEvidence,
     RunnerUpdateStage,
     advance_runner_update,
+    authorize_runner_publication,
+    bind_runner_publication_evidence,
     plan_runner_update,
 )
+from abhaile.trust.transaction import (
+    TransactionPlan,
+    commit_apply_state,
+    commit_runner_lkg,
+    record_local_convergence,
+    record_wider_health,
+)
+
+IDENTITY = {
+    "transaction_id": "tx-1",
+    "candidate_revision": "a" * 40,
+    "candidate_capsule_sha256": "b" * 64,
+    "candidate_manifest_sha256": "c" * 64,
+    "service_sha256": "d" * 64,
+    "timer_sha256": "e" * 64,
+    "recovery_record_sha256": "f" * 64,
+}
+
+
+def runner_plan(**overrides):
+    values: dict[str, Any] = dict(
+        lock_device=2, lock_inode=3, service_changed=True, timer_changed=True, **IDENTITY
+    )
+    values.update(overrides)
+    return plan_runner_update(**values)
+
+
+def committed_transaction(**overrides):
+    values: dict[str, Any] = dict(
+        transaction_id="tx-1",
+        candidate_revision="a" * 40,
+        candidate_capsule_sha256="b" * 64,
+        candidate_manifest_sha256="c" * 64,
+        retained_lkg_revision="1" * 40,
+        retained_lkg_manifest_sha256="2" * 64,
+    )
+    values.update(overrides)
+    transaction = TransactionPlan(**values)
+    transaction = record_local_convergence(transaction, validations_succeeded=True)
+    transaction = commit_apply_state(transaction)
+    transaction = record_wider_health(transaction, succeeded=True)
+    return commit_runner_lkg(transaction)
 
 
 def step(plan, **overrides):
@@ -20,19 +65,21 @@ def step(plan, **overrides):
 
 @pytest.mark.parametrize("timer_changed", [True, False])
 def test_staging_and_commit_precede_publication_reload_and_timer_effects(timer_changed):
-    plan = plan_runner_update(
-        lock_device=2, lock_inode=3, service_changed=True, timer_changed=timer_changed
-    )
+    plan = runner_plan(timer_changed=timer_changed)
     actions = []
     recoveries = []
     while plan.stage is not RunnerUpdateStage.READY:
         actions.append(plan.next_action)
         recoveries.append(plan.recovery)
-        plan = step(plan)
+        if plan.stage is RunnerUpdateStage.STAGED:
+            evidence = bind_runner_publication_evidence(committed_transaction(), plan)
+            plan = authorize_runner_publication(committed_transaction(), plan, evidence)
+        else:
+            plan = step(plan)
     assert actions[:5] == [
         "validate-both-units",
         "stage-both-units-and-recovery-record",
-        "await-apply-and-health-commit",
+        "await-transaction-commit-evidence",
         "publish-staged-unit-pair",
         "reload-system-manager",
     ]
@@ -57,7 +104,7 @@ def test_staging_and_commit_precede_publication_reload_and_timer_effects(timer_c
     ],
 )
 def test_failure_or_replaced_lock_never_advances_plan(overrides):
-    plan = plan_runner_update(lock_device=2, lock_inode=3, service_changed=True, timer_changed=True)
+    plan = runner_plan()
     with pytest.raises(TrustError):
         step(plan, **overrides)
     assert plan.stage is RunnerUpdateStage.PLANNED
@@ -68,7 +115,7 @@ def test_failure_or_replaced_lock_never_advances_plan(overrides):
 )
 def test_invalid_planning_inputs_fail_closed(changes):
     values: dict[str, Any] = dict(
-        lock_device=2, lock_inode=3, service_changed=True, timer_changed=False
+        lock_device=2, lock_inode=3, service_changed=True, timer_changed=False, **IDENTITY
     )
     values.update(changes)
     with pytest.raises(TrustError):
@@ -76,8 +123,34 @@ def test_invalid_planning_inputs_fail_closed(changes):
 
 
 def test_unchanged_units_need_no_reload_or_publication():
-    plan = plan_runner_update(
-        lock_device=2, lock_inode=3, service_changed=False, timer_changed=False
-    )
+    plan = runner_plan(service_changed=False, timer_changed=False)
     assert plan.stage is RunnerUpdateStage.READY
     assert plan.next_action == "release-existing-lock-on-exit"
+
+
+@pytest.mark.parametrize(
+    "transaction_change,evidence_change",
+    [
+        ({"transaction_id": "tx-2"}, {}),
+        ({"candidate_revision": "9" * 40}, {}),
+        ({"candidate_manifest_sha256": "9" * 64}, {}),
+        ({}, {"service_sha256": "9" * 64}),
+        ({}, {"recovery_record_sha256": "9" * 64}),
+    ],
+)
+def test_unrelated_or_tampered_evidence_cannot_authorize_publication(
+    transaction_change, evidence_change
+):
+    plan = step(step(runner_plan()))
+    transaction = committed_transaction(**transaction_change)
+    if transaction_change:
+        with pytest.raises(TrustError):
+            bind_runner_publication_evidence(transaction, plan)
+        return
+    evidence = bind_runner_publication_evidence(transaction, plan)
+    tampered = RunnerPublicationEvidence(**{**evidence.__dict__, **evidence_change})
+    with pytest.raises(TrustError):
+        authorize_runner_publication(transaction, plan, tampered)
+    committed = authorize_runner_publication(transaction, plan, evidence)
+    with pytest.raises(TrustError):
+        authorize_runner_publication(transaction, committed, evidence)

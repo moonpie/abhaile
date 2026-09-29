@@ -273,7 +273,7 @@ def _register_artifact(
 
     collector.register_artifact(
         render_path=render_path,
-        target_path=destination,
+        target_path=destination.rstrip("/") if is_directory else destination,
         kind=kind,
         owner_ref=owner_ref,
         content=content,

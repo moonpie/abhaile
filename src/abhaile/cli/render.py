@@ -14,9 +14,15 @@ from typing import Any, cast
 from abhaile.cli.common import configure_logging
 from abhaile.dns.renderer import render_dns
 from abhaile.models.config import MappingConfig, NetworkConfig, ServiceConfig
+from abhaile.models.artifact import RenderMetadata
 from abhaile.renderers.host import render_host_config
 from abhaile.renderers.ingress import render_ingress_configs
 from abhaile.renderers.manifest import build_manifest, write_manifest
+from abhaile.renderers.convergence_manifest import (
+    CONVERGENCE_MANIFEST_NAME,
+    build_convergence_manifest,
+    write_convergence_manifest,
+)
 from abhaile.renderers.networkd import render_networkd_config, render_networkd_dropins
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.renderers.services import render_service_configs
@@ -233,7 +239,13 @@ def render_host(
     )
 
     LOG.debug("render.phase.software host=%s", host)
-    _render_host_software(host, config_root, software_dir)
+    _render_host_software(
+        host,
+        config_root,
+        software_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
+    )
     LOG.debug("render.phase.users host=%s", host)
     _render_host_users(
         host,
@@ -309,9 +321,22 @@ def _prepare_host_artifact_dirs(
     return system_dir, software_dir, services_output_dir
 
 
-def _render_host_software(host: str, config_root: Path, software_dir: Path) -> None:
+def _render_host_software(
+    host: str,
+    config_root: Path,
+    software_dir: Path,
+    *,
+    collector: ArtifactCollector,
+    rendered_root: Path,
+) -> None:
     """Render software package/install artifacts for a host."""
-    render_software_artifacts(host, config_root, software_dir)
+    render_software_artifacts(
+        host,
+        config_root,
+        software_dir,
+        collector=collector,
+        rendered_root=rendered_root,
+    )
 
 
 def _render_host_users(
@@ -441,9 +466,27 @@ def _write_manifest(
 ) -> Path:
     """Build and write the render manifest into the rendered directory."""
     collector.compute_hashes_and_sizes(rendered_dir)
-    manifest = build_manifest(host, collector.get_metadata())
+    metadata = collector.get_metadata()
+    legacy_metadata = RenderMetadata(
+        artifacts={
+            path: artifact
+            for path, artifact in metadata.artifacts.items()
+            if not artifact.kind.startswith("software.")
+        },
+        owners={
+            name: owner
+            for name, owner in metadata.owners.items()
+            if not name.startswith("software:")
+        },
+    )
+    manifest = build_manifest(host, legacy_metadata)
     manifest_path = rendered_dir / "manifest.json"
     write_manifest(manifest, manifest_path)
+    convergence_manifest = build_convergence_manifest(host, metadata)
+    write_convergence_manifest(
+        convergence_manifest,
+        rendered_dir / CONVERGENCE_MANIFEST_NAME,
+    )
     return manifest_path
 
 

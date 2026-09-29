@@ -268,6 +268,51 @@ the metadata required for packages, users, directories, services, safe pruning, 
 reporting. Missing intent is added through renderer and schema changes, not reconstructed from
 `config/` by Ansible roles.
 
+#### Transitional Manifest v2 Contract
+
+Phase 3 introduces `convergence-manifest.json` with integer `schema_version: 2`. The existing
+`manifest.json` v1 remains unchanged and authoritative for the legacy Python apply path until
+final cutover. Protected Ansible planning accepts only v2; it performs no version coercion or
+v1-to-v2 inference inside the privileged boundary.
+
+The v2 root contains exactly `schema_version`, `host`, `rendered_root`, `entries`, and `owners`.
+`rendered_root` is the capsule-relative value `.`. Each ordinary artifact entry declares canonical
+source and target paths; a closed kind/action pair; a declared owner and system or named-user execution context;
+SHA-256 and byte size; complete file or software-operation metadata; validation ownership;
+sorted lifecycle effects; and a safe-prune class. Owners declare a closed owner kind, context,
+and sorted dependency list. An owner coordinating system publication and user-manager lifecycle
+uses the explicit `orchestrator` context while every entry retains its concrete context.
+
+Software entries have no synthetic `target_path`. Their metadata contains an exact copy of the
+typed operation's explicit effects. Each effect names a collision namespace and effective target:
+canonical allowlisted filesystem paths, systemd units, kernel modules, package/debconf state, or a
+single-cardinality safe artifact set. Primary, backup, link, rule, declaration, activation, and
+output effects participate in global collision detection against other software effects and
+ordinary artifact targets. Root reparses the sealed YAML with the same closed typed parser used at
+render time and requires exact agreement with manifest metadata; schema validation alone is not
+trusted as privileged authorization.
+
+Missing owners or dependencies, cycles, duplicate source or target paths, non-canonical paths,
+unknown fields, versions, kinds, actions, contexts, validations, lifecycle effects, or prune
+classes, incomplete kind-specific metadata, integrity mismatches, and unmanifested output all
+fail closed. The only tree exceptions are the two manifest files and fixed empty software
+category directories created by the renderer.
+
+The action vocabulary is `publish`, `create`, `install`, `fetch`, `build`, and `ensure`. Kind
+families cover systemd/resolved, identities, CoreDNS, Caddy, Vault Agent, networkd, Quadlet,
+service files/directories, and `software.packages`, `software.download`, `software.build`, and
+`software.prerequisite`. Software sources use enumerated operations with explicit parameters,
+validation, and expected results. Free-form `commands` and generic shell or argv actions are not
+part of the contract.
+
+Protected planning topologically orders owners. The ready-owner queue uses the owner's lowest
+entry phase and lexical owner name only as deterministic tie-breakers. Every owner's entries form
+one contiguous block, sorted by typed phase and canonical target/source path within that block.
+Consequently no phase preference can invert a declared dependency. An owner spanning multiple
+phases is an explicit orchestration boundary: all of its steps complete, in internal phase order,
+before a dependent owner begins. Missing dependencies and cycles are unreconcilable and fail
+closed. Lifecycle values remain deferred handler boundaries; Phase 3 executes none of them.
+
 ### 3. Converger Responsibilities
 
 Ansible is responsible for the runtime mechanics of desired state, including the following families where practical:
@@ -383,7 +428,72 @@ changed.
   units, Quadlets, Vault Agent, network-online behavior, the runner timer, and recovery after
   temporary Vault or network unavailability.
 
+## Phase 3 Working-Tree Evidence
+
+Phase 3 implements the compatibility and planning boundary without enabling convergence:
+
+- `src/abhaile/renderers/convergence_manifest.py` emits deterministic v2 beside legacy v1.
+- The software renderer, schema, and host declarations replace command bundles with typed,
+  non-executable plans.
+- `src/abhaile/trust/manifest.py` validates vocabulary, paths, ownership, dependencies,
+  completeness, and integrity before sealing.
+- `src/abhaile/trust/convergence.py` creates dependency-preserving owner blocks with deterministic
+  phase/path ordering inside each block; both-host tests audit every real dependency edge.
+- `src/abhaile/trust/ansible.py` accepts only verified capsule-internal manifest/artifact paths
+  and remains non-executable.
+- `src/abhaile/trust/transaction.py` models separate apply-state and runner-LKG gates, immutable
+  commit evidence, rollback planning, and explicit rollback failure. `runner_update.py` binds the
+  transaction, revision, capsule, manifest, staged unit pair, recovery record, and both ledger
+  commits before publication can become eligible.
+- Focused unit tests and both-host temporary real-render tests provide working-tree validation.
+
+This evidence lacks the commit or PR reference required by governance, so acceptance criteria
+remain open. Phase 4 must implement real Ansible consumption, convergence, local validation,
+handlers, state I/O, publication, and rollback execution. Phase 5 must provide isolated and
+wider-health evidence and workstation-account portability. Host adoption, installation, and
+cutover remain in their existing later phases.
+
 ## Decision Notes
+
+- Decision: Emit a strict deterministic convergence manifest v2 alongside the legacy v1 manifest
+  during migration.
+
+- Rationale: The legacy Python apply path must remain authoritative while protected Ansible
+  planning needs a complete contract that rejects missing intent.
+
+- Impact: v1 behavior is preserved; v2 is the only desired-state input to protected Ansible
+  planning, and final single-manifest authority remains a cutover decision.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Replace software command bundles with typed declarative operations, expose every
+  effective mutation target in manifest effects, and defer all
+  package, network, download, build, service, and device effects.
+
+- Rationale: A generic shell escape hatch cannot provide deterministic validation, ordering,
+  integrity, or least-privilege semantics.
+
+- Impact: Phase 3 renders and independently validates software plans and detects cross-family
+  authority collisions. Phase 4 must implement each enumerated operation with bounded native task
+  semantics before execution can be enabled. The gasket container build is explicitly
+  `phase4-integrity-blocked`: its Git tag and OCI tag are not immutable admission evidence and
+  must be replaced by an admitted commit/archive digest and OCI digest before implementation.
+
+- ADR: null
+
+- Decision: Represent apply state and runner last-known-good as separate transaction gates, with
+  runner publication possible only after both commits and exact immutable publication evidence.
+
+- Rationale: Local convergence records what is applied, while wider health determines recovery
+  authority; neither claim may be falsified by later failure.
+
+- Impact: Wider-health failure after apply commit plans rollback from the actual candidate
+  manifest to the retained LKG manifest. Publication evidence binds the transaction ID, candidate
+  revision, capsule digest, convergence-manifest digest, service/timer/recovery-record digests,
+  apply-state commit evidence, and runner-LKG commit evidence. Mismatched, stale, or replayed
+  evidence fails closed. Dry-run advances neither ledger and publishes nothing.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
 
 - Decision: Validate and hash capsule trees through directory-file-descriptor-anchored,
   no-follow traversal, comparing file identity and metadata before and after each read.

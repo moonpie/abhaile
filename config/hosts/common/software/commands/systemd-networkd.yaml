@@ -1,7 +1,26 @@
 id: systemd-networkd
-name: "Switch host networking to systemd-networkd"
-description: "Disable legacy /etc/network/interfaces and enable systemd-networkd"
-commands:
-  - 'if [ -f /etc/network/interfaces ]; then sudo mv /etc/network/interfaces /etc/network/interfaces.save; fi'
-  - 'sudo systemctl enable systemd-networkd.service'
-  - 'sudo systemctl start systemd-networkd.service'
+name: Switch host networking to systemd-networkd
+description: Declare the network backend transition; execution remains network-gated.
+operation: network-backend
+execution_policy: admitted
+parameters:
+  legacy_path: /etc/network/interfaces
+  backup_path: /etc/network/interfaces.save
+  units:
+    - name: systemd-networkd.service
+      enabled: true
+      state: started
+effects:
+  - kind: path
+    target: /etc/network/interfaces
+    role: primary
+  - kind: path
+    target: /etc/network/interfaces.save
+    role: backup
+  - kind: unit
+    target: systemd-networkd.service
+    role: activation
+validation: networkd-enabled
+expected_results:
+  - Legacy interfaces configuration is preserved before networkd activation
+  - systemd-networkd.service is enabled and active

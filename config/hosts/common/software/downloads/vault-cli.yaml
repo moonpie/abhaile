@@ -1,23 +1,18 @@
 id: vault-cli
-name: "Install Vault CLI"
-description: "Download Vault 1.21.4 from HashiCorp releases, verify checksum, and install it into /usr/local/bin"
-commands:
-  - |
-    sudo bash -euo pipefail -c '
-      VAULT_VER=1.21.4
-      echo "Installing Vault ${VAULT_VER}"
-      vault_zip="vault_${VAULT_VER}_linux_amd64.zip"
-      release_url="https://releases.hashicorp.com/vault/${VAULT_VER}/${vault_zip}"
-      shasums_url="https://releases.hashicorp.com/vault/${VAULT_VER}/vault_${VAULT_VER}_SHA256SUMS"
-      tmpdir=$(mktemp -d)
-      trap '"'"'rm -rf "$tmpdir"'"'"' EXIT
-      curl -fLo "$tmpdir/$vault_zip" "$release_url"
-      curl -fLo "$tmpdir/vault_SHA256SUMS" "$shasums_url"
-      (
-        cd "$tmpdir"
-        grep "$vault_zip" vault_SHA256SUMS | sha256sum -c -
-      )
-      unzip -p "$tmpdir/$vault_zip" vault >"$tmpdir/vault"
-      install -m 0755 "$tmpdir/vault" /usr/local/bin/vault
-    '
-  - '/usr/local/bin/vault version'
+name: Install pinned Vault CLI archive member
+description: Fetch and verify the declared release archive before publication.
+operation: archive-download
+execution_policy: admitted
+parameters:
+  url: https://releases.hashicorp.com/vault/1.21.4/vault_1.21.4_linux_amd64.zip
+  sha256: 889b681990fe221b884b7932fa9c9dd0ee9811b9349554f1aa287ab63c9f3dae
+  archive_member: vault
+  destination: /usr/local/bin/vault
+  mode: "0755"
+effects:
+  - kind: path
+    target: /usr/local/bin/vault
+    role: primary
+validation: binary-version
+expected_results:
+  - /usr/local/bin/vault is a regular executable matching the declared archive member

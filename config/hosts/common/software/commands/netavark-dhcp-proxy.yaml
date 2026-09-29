@@ -1,5 +1,17 @@
 id: netavark-dhcp-proxy
-name: "Enable netavark DHCP proxy"
-description: "Start the Podman netavark DHCP proxy socket for ipvlan networks"
-commands:
-  - 'sudo systemctl enable --now netavark-dhcp-proxy.socket'
+name: Enable netavark DHCP proxy
+description: Declare socket enablement and activation.
+operation: systemd-units
+execution_policy: admitted
+parameters:
+  units:
+    - name: netavark-dhcp-proxy.socket
+      enabled: true
+      state: started
+effects:
+  - kind: unit
+    target: netavark-dhcp-proxy.socket
+    role: activation
+validation: units-active
+expected_results:
+  - netavark-dhcp-proxy.socket is enabled and active

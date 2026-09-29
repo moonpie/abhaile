@@ -1,6 +1,17 @@
 id: ddclient
-name: "Enable ddclient"
-description: "Ensure ddclient is enabled and running so dynamic DNS updates occur"
-commands:
-  - 'sudo systemctl enable ddclient.service'
-  - 'sudo systemctl start ddclient.service'
+name: Enable ddclient
+description: Declare service enablement and activation.
+operation: systemd-units
+execution_policy: admitted
+parameters:
+  units:
+    - name: ddclient.service
+      enabled: true
+      state: started
+effects:
+  - kind: unit
+    target: ddclient.service
+    role: activation
+validation: units-active
+expected_results:
+  - ddclient.service is enabled and active

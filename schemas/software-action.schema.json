@@ -1,9 +1,9 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Abhaile Host Software Action Schema",
-  "description": "Schema for config/hosts/<host>/software/{downloads,builds,commands}/*.yaml",
+  "title": "Abhaile Typed Software Operation",
+  "description": "Fail-closed planning contract; no arbitrary command action is supported.",
   "type": "object",
-  "required": ["id", "name", "commands"],
+  "required": ["id", "name", "description", "operation", "parameters", "effects", "validation", "expected_results", "execution_policy"],
   "properties": {
     "id": {
       "type": "string",
@@ -13,17 +13,98 @@
       "type": "string",
       "minLength": 1
     },
-    "description": {
-      "type": "string"
+    "description": {"type": "string"},
+    "operation": {
+      "enum": [
+        "binary-download", "archive-download", "container-build", "kernel-modules",
+        "systemd-units", "network-backend", "resolver", "unattended-upgrades", "udev-rule"
+      ]
     },
-    "commands": {
+    "execution_policy": {
+      "enum": ["admitted", "phase4-integrity-blocked"]
+    },
+    "parameters": {
+      "type": "object",
+      "minProperties": 1,
+      "properties": {
+        "url": {"type": "string", "pattern": "^https://"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "destination": {"type": "string", "pattern": "^/"},
+        "mode": {"type": "string", "pattern": "^0[0-7]{3}$"},
+        "archive_member": {"type": "string", "minLength": 1},
+        "source_ref": {"type": "string", "minLength": 1},
+        "containerfile_base": {"type": "string", "minLength": 1},
+        "output_glob": {"type": "string", "minLength": 1},
+        "modules": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "required": ["name", "options"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"},
+              "options": {"type": "array", "items": {"type": "string"}}
+            },
+            "additionalProperties": false
+          }
+        },
+        "units": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "required": ["name", "enabled", "state"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[A-Za-z0-9_.@-]+$"},
+              "enabled": {"type": "boolean"},
+              "state": {"enum": ["started", "stopped", "unchanged"]}
+            },
+            "additionalProperties": false
+          }
+        },
+        "legacy_path": {"type": "string", "pattern": "^/"},
+        "backup_path": {"type": "string", "pattern": "^/"},
+        "resolv_conf_target": {"type": "string", "pattern": "^/"},
+        "link_path": {"type": "string", "pattern": "^/"},
+        "enabled": {"type": "boolean"},
+        "rule_path": {"type": "string", "pattern": "^/"},
+        "rule": {"type": "string", "minLength": 1},
+        "reload": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    },
+    "effects": {
       "type": "array",
       "minItems": 1,
       "items": {
-        "type": "string",
-        "minLength": 1
+        "type": "object",
+        "required": ["kind", "target", "role"],
+        "properties": {
+          "kind": {"enum": ["path", "unit", "module", "package", "debconf", "artifact-set"]},
+          "target": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.@+-]*$"},
+          "pattern": {"type": "string", "minLength": 1},
+          "cardinality": {"type": "integer", "minimum": 1, "maximum": 1}
+        },
+        "additionalProperties": false
       }
+    },
+    "validation": {
+      "enum": ["binary-version", "package-artifact", "modules-loadable", "units-active", "networkd-enabled", "resolved-enabled", "debconf-state", "udev-rule-present"]
+    },
+    "expected_results": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "allOf": [
+    {"if": {"properties": {"operation": {"const": "binary-download"}}}, "then": {"properties": {"parameters": {"required": ["url", "sha256", "destination", "mode"]}}}},
+    {"if": {"properties": {"operation": {"const": "archive-download"}}}, "then": {"properties": {"parameters": {"required": ["url", "sha256", "destination", "mode", "archive_member"]}}}},
+    {"if": {"properties": {"operation": {"const": "container-build"}}}, "then": {"properties": {"parameters": {"required": ["url", "source_ref", "containerfile_base", "output_glob"]}}}},
+    {"if": {"properties": {"operation": {"const": "kernel-modules"}}}, "then": {"properties": {"parameters": {"required": ["modules"]}}}},
+    {"if": {"properties": {"operation": {"const": "systemd-units"}}}, "then": {"properties": {"parameters": {"required": ["units"]}}}},
+    {"if": {"properties": {"operation": {"const": "network-backend"}}}, "then": {"properties": {"parameters": {"required": ["units", "legacy_path", "backup_path"]}}}},
+    {"if": {"properties": {"operation": {"const": "resolver"}}}, "then": {"properties": {"parameters": {"required": ["units", "link_path", "resolv_conf_target"]}}}},
+    {"if": {"properties": {"operation": {"const": "unattended-upgrades"}}}, "then": {"properties": {"parameters": {"required": ["enabled"]}}}},
+    {"if": {"properties": {"operation": {"const": "udev-rule"}}}, "then": {"properties": {"parameters": {"required": ["rule_path", "rule", "reload"]}}}}
+  ]
 }

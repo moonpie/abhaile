@@ -20,6 +20,14 @@ KIND_FAMILIES: dict[str, frozenset[str]] = {
         }
     ),
     "service": frozenset({"service.config", "service.env", "service.directory"}),
+    "software": frozenset(
+        {
+            "software.packages",
+            "software.download",
+            "software.build",
+            "software.prerequisite",
+        }
+    ),
 }
 
 ALL_KINDS: frozenset[str] = frozenset().union(*KIND_FAMILIES.values())
@@ -35,4 +43,5 @@ KNOWN_APPLY_HINTS: dict[str, list[str]] = {
     "networkd": [],
     "quadlet": ["rootless", "podman_user", "restart_mode", "shared", "managed_build"],
     "service": ["restart_unit", "rootless", "podman_user", "owner", "group", "mode"],
+    "software": ["operation_id", "operation_type", "expected_results"],
 }

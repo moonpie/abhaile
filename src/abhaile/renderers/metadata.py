@@ -22,11 +22,11 @@ def classify_config_artifact(
     if destination.startswith(_NETWORKD_PREFIX):
         tail = destination[len(_NETWORKD_PREFIX) :]
         tail_no_slash = tail.rstrip("/")
-        if ".network.d/" in tail:
-            iface = _normalize_networkd_iface(tail.split(".network.d/", 1)[0])
-            return ("networkd.dropin", f"iface:{iface}")
         if tail_no_slash.endswith(".network.d"):
             iface = _normalize_networkd_iface(tail_no_slash[: -len(".network.d")])
+            return ("networkd.dropin", f"iface:{iface}")
+        if ".network.d/" in tail:
+            iface = _normalize_networkd_iface(tail.split(".network.d/", 1)[0])
             return ("networkd.dropin", f"iface:{iface}")
 
         name = Path(tail).name

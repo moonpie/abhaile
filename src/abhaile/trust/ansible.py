@@ -12,6 +12,8 @@ from typing import Literal
 from abhaile.trust.capsule import CapsuleStore, SealedCapsule
 from abhaile.trust.errors import TrustError
 from abhaile.trust.model import validate_production_path
+from abhaile.trust.manifest import validate_manifest
+from abhaile.trust.convergence import ConvergencePlan, build_convergence_plan
 
 RUNTIME = Path("/usr/lib/abhaile-ansible-runtime")
 CAPSULES = Path("/var/lib/abhaile/capsules")
@@ -80,6 +82,8 @@ class AnsiblePlan:
     cwd: Path
     source: Path
     rendered: Path
+    manifest: Path
+    convergence: ConvergencePlan
     intent: ApplyIntent
     executable: Literal[False] = False
 
@@ -194,7 +198,7 @@ def _plan_ansible(
     environment["ANSIBLE_LOG_PATH"] = "/dev/null"
     variables = json.dumps(
         {
-            "abhaile_source_root": str(verified.source),
+            "abhaile_manifest": str(verified.rendered / "convergence-manifest.json"),
             "abhaile_rendered_root": str(verified.rendered),
             "ansible_python_interpreter": str(python),
         },
@@ -214,12 +218,16 @@ def _plan_ansible(
     )
     if intent.dry_run:
         argv += ("--check",)
+    convergence_manifest = validate_manifest(verified.rendered, verified.host)
+    convergence = build_convergence_plan(convergence_manifest)
     return AnsiblePlan(
         argv,
         tuple(sorted(environment.items())),
         verified.source,
         verified.source,
         verified.rendered,
+        verified.rendered / "convergence-manifest.json",
+        convergence,
         intent,
     )
 

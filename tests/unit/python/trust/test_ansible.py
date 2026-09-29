@@ -49,6 +49,22 @@ def inputs(tmp_path):
         fixed(RUNTIME) / "bin/python",
     ):
         path.write_text("fixture", encoding="utf-8")
+    (capsule.rendered / "manifest.json").write_text(
+        json.dumps({"version": "1", "host": "phobos", "entries": []}),
+        encoding="utf-8",
+    )
+    (capsule.rendered / "convergence-manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "host": "phobos",
+                "rendered_root": ".",
+                "entries": [],
+                "owners": {},
+            }
+        ),
+        encoding="utf-8",
+    )
     fixed(TEMPORARY).chmod(0o700)
     store = Mock()
     store.policy.host = "phobos"
@@ -71,6 +87,8 @@ def test_deterministic_closed_plan(inputs, monkeypatch):
     inventory_index = plan.argv.index("-i")
     assert plan.argv[inventory_index : inventory_index + 2] == ("-i", "localhost,")
     assert plan.cwd == capsule.source
+    assert plan.manifest == capsule.rendered / "convergence-manifest.json"
+    assert plan.convergence.steps == ()
     assert "/opt/abhaile" not in repr(plan)
     env = dict(plan.environment)
     assert "PYTHONPATH" not in env
@@ -79,6 +97,9 @@ def test_deterministic_closed_plan(inputs, monkeypatch):
     assert env["ANSIBLE_INVENTORY_ENABLED"] == "host_list"
     assert env["ANSIBLE_CONFIG"] == str(capsule.source / "ansible/ansible.cfg")
     assert env["ANSIBLE_NO_LOG"] == "True"
+    variables = json.loads(plan.argv[plan.argv.index("--extra-vars") + 1])
+    assert variables["abhaile_manifest"] == str(plan.manifest)
+    assert "abhaile_source_root" not in variables
     store.verify.assert_called_with(capsule.path, capsule.revision)
     store.mirror.admit.assert_called_with(capsule.revision)
 

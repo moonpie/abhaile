@@ -1,7 +1,23 @@
 id: systemd-resolved
-name: "Enable systemd-resolved"
-description: "Use systemd-resolved stub resolver and manage resolv.conf"
-commands:
-  - 'sudo systemctl enable systemd-resolved.service'
-  - 'sudo systemctl start systemd-resolved.service'
-  - 'sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf'
+name: Enable systemd-resolved
+description: Declare resolver activation and the managed resolv.conf target.
+operation: resolver
+execution_policy: admitted
+parameters:
+  link_path: /etc/resolv.conf
+  resolv_conf_target: /run/systemd/resolve/stub-resolv.conf
+  units:
+    - name: systemd-resolved.service
+      enabled: true
+      state: started
+effects:
+  - kind: path
+    target: /etc/resolv.conf
+    role: link
+  - kind: unit
+    target: systemd-resolved.service
+    role: activation
+validation: resolved-enabled
+expected_results:
+  - systemd-resolved.service is enabled and active
+  - /etc/resolv.conf resolves to the declared stub resolver target

@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 
 from abhaile.trust.errors import TrustError
+from abhaile.trust.transaction import TransactionPlan, TransactionStage
 
 
 class RunnerUpdateStage(str, Enum):
@@ -28,6 +29,13 @@ class RunnerUpdatePlan:
     lock_inode: int
     service_changed: bool
     timer_changed: bool
+    transaction_id: str
+    candidate_revision: str
+    candidate_capsule_sha256: str
+    candidate_manifest_sha256: str
+    service_sha256: str
+    timer_sha256: str
+    recovery_record_sha256: str
     stage: RunnerUpdateStage = RunnerUpdateStage.PLANNED
 
     @property
@@ -36,7 +44,7 @@ class RunnerUpdatePlan:
         return {
             RunnerUpdateStage.PLANNED: "validate-both-units",
             RunnerUpdateStage.VALIDATED: "stage-both-units-and-recovery-record",
-            RunnerUpdateStage.STAGED: "await-apply-and-health-commit",
+            RunnerUpdateStage.STAGED: "await-transaction-commit-evidence",
             RunnerUpdateStage.COMMITTED: "publish-staged-unit-pair",
             RunnerUpdateStage.PUBLISHED: "reload-system-manager",
             RunnerUpdateStage.RELOADED: (
@@ -62,7 +70,18 @@ class RunnerUpdatePlan:
 
 
 def plan_runner_update(
-    *, lock_device: int, lock_inode: int, service_changed: bool, timer_changed: bool
+    *,
+    lock_device: int,
+    lock_inode: int,
+    service_changed: bool,
+    timer_changed: bool,
+    transaction_id: str,
+    candidate_revision: str,
+    candidate_capsule_sha256: str,
+    candidate_manifest_sha256: str,
+    service_sha256: str,
+    timer_sha256: str,
+    recovery_record_sha256: str,
 ) -> RunnerUpdatePlan:
     """Bind a pure plan to the held lock inode rather than a replacement lock."""
     if (
@@ -72,6 +91,18 @@ def plan_runner_update(
         or lock_inode <= 0
         or type(service_changed) is not bool
         or type(timer_changed) is not bool
+        or not transaction_id
+        or not _digest(candidate_revision, 40)
+        or any(
+            not _digest(value, 64)
+            for value in (
+                candidate_capsule_sha256,
+                candidate_manifest_sha256,
+                service_sha256,
+                timer_sha256,
+                recovery_record_sha256,
+            )
+        )
     ):
         raise TrustError("Runner update planning inputs are invalid")
     return RunnerUpdatePlan(
@@ -79,6 +110,13 @@ def plan_runner_update(
         lock_inode,
         service_changed,
         timer_changed,
+        transaction_id,
+        candidate_revision,
+        candidate_capsule_sha256,
+        candidate_manifest_sha256,
+        service_sha256,
+        timer_sha256,
+        recovery_record_sha256,
         RunnerUpdateStage.PLANNED if service_changed or timer_changed else RunnerUpdateStage.READY,
     )
 
@@ -96,8 +134,84 @@ def advance_runner_update(
         lock_held is not True
         or (lock_device, lock_inode) != (plan.lock_device, plan.lock_inode)
         or completed_action != plan.next_action
-        or plan.stage is RunnerUpdateStage.READY
+        or plan.stage in {RunnerUpdateStage.STAGED, RunnerUpdateStage.READY}
     ):
         raise TrustError("Runner update gate or existing lock is invalid")
     stages = list(RunnerUpdateStage)
     return replace(plan, stage=stages[stages.index(plan.stage) + 1])
+
+
+@dataclass(frozen=True)
+class RunnerPublicationEvidence:
+    """Bind staged runner artifacts and both ledger commits to one transaction."""
+
+    transaction_id: str
+    candidate_revision: str
+    candidate_capsule_sha256: str
+    candidate_manifest_sha256: str
+    service_sha256: str
+    timer_sha256: str
+    recovery_record_sha256: str
+    apply_commit_evidence: str
+    runner_lkg_commit_evidence: str
+
+
+def bind_runner_publication_evidence(
+    transaction: TransactionPlan, plan: RunnerUpdatePlan
+) -> RunnerPublicationEvidence:
+    """Create pure publication evidence only after exact transaction commits."""
+    if (
+        transaction.dry_run
+        or transaction.stage is not TransactionStage.RUNNER_COMMITTED
+        or plan.stage is not RunnerUpdateStage.STAGED
+        or transaction.apply_commit_evidence is None
+        or transaction.runner_lkg_commit_evidence is None
+        or _transaction_identity(transaction) != _runner_identity(plan)
+    ):
+        raise TrustError("Runner publication evidence cannot be bound")
+    return RunnerPublicationEvidence(
+        *(_runner_identity(plan)),
+        plan.service_sha256,
+        plan.timer_sha256,
+        plan.recovery_record_sha256,
+        transaction.apply_commit_evidence,
+        transaction.runner_lkg_commit_evidence,
+    )
+
+
+def authorize_runner_publication(
+    transaction: TransactionPlan,
+    plan: RunnerUpdatePlan,
+    evidence: RunnerPublicationEvidence,
+) -> RunnerUpdatePlan:
+    """Authorize only the exact staged pair once both matching ledgers commit."""
+    expected = bind_runner_publication_evidence(transaction, plan)
+    if evidence != expected:
+        raise TrustError("Runner publication evidence is stale, replayed, or mismatched")
+    return replace(plan, stage=RunnerUpdateStage.COMMITTED)
+
+
+def _transaction_identity(plan: TransactionPlan) -> tuple[str, str, str, str]:
+    return (
+        plan.transaction_id,
+        plan.candidate_revision,
+        plan.candidate_capsule_sha256,
+        plan.candidate_manifest_sha256,
+    )
+
+
+def _runner_identity(plan: RunnerUpdatePlan) -> tuple[str, str, str, str]:
+    return (
+        plan.transaction_id,
+        plan.candidate_revision,
+        plan.candidate_capsule_sha256,
+        plan.candidate_manifest_sha256,
+    )
+
+
+def _digest(value: object, length: int) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == length
+        and all(character in "0123456789abcdef" for character in value)
+    )

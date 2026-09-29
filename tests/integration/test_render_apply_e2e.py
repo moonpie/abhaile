@@ -13,12 +13,62 @@ from abhaile.models.kinds import ALL_KINDS
 from abhaile.plan.diff import plan_manifest_drift
 from abhaile.utils.config import clear_config_cache
 from abhaile.utils.paths import load_paths
+from abhaile.trust.manifest import validate_manifest
+from abhaile.trust.convergence import build_convergence_plan
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
 class TestRenderApplyE2E:
     """Render phobos with real config, then plan drift against empty state."""
+
+    @pytest.mark.parametrize("host", ["deimos", "phobos"])
+    def test_real_render_v2_is_complete_valid_and_deterministic(
+        self, host: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cover every real artifact exactly once with deterministic manifest v2."""
+        repo_root = Path(__file__).resolve().parents[2]
+        monkeypatch.setattr("abhaile.cli.render.validate_dns_serials", lambda *a, **kw: None)
+        clear_config_cache()
+        paths = load_paths(repo_root)
+        validated = load_and_validate(repo_root, paths)
+        contents: list[bytes] = []
+        for suffix in ("first", "second"):
+            manifest_path = render_host(
+                host,
+                output_override=tmp_path / suffix,
+                paths=paths,
+                all_mode=False,
+                repo_root=repo_root,
+                mapping=validated.mapping,
+                network=validated.network,
+                host_services=validated.host_services,
+            )
+            rendered = manifest_path.parent
+            contract = validate_manifest(rendered, host)
+            plan = build_convergence_plan(contract)
+            positions = {owner: index for index, owner in enumerate(plan.owner_order)}
+            for owner, metadata in contract["owners"].items():
+                assert all(
+                    positions[required] < positions[owner] for required in metadata["requires"]
+                )
+            referenced = [
+                entry["render_path"]
+                for entry in contract["entries"]
+                if entry["kind"] != "service.directory"
+            ]
+            actual = sorted(
+                path.relative_to(rendered).as_posix()
+                for path in rendered.rglob("*")
+                if path.is_file()
+                and path.name not in {"manifest.json", "convergence-manifest.json"}
+            )
+            assert sorted(referenced) == actual
+            all_references = [entry["render_path"] for entry in contract["entries"]]
+            assert len(all_references) == len(set(all_references))
+            assert any(entry["kind"].startswith("software.") for entry in contract["entries"])
+            contents.append((rendered / "convergence-manifest.json").read_bytes())
+        assert contents[0] == contents[1]
 
     def test_render_phobos_plan_drift(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
