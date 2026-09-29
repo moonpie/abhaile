@@ -8,7 +8,7 @@ title: Target Host Reconciliation Model
 status: active
 owner: moonpie
 created: 2026-09-04
-updated: 2026-09-26
+updated: 2026-09-29
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -504,9 +504,25 @@ changed.
   capsule. A caller-selected checkout or an installed copy of Abhaile cannot satisfy that binding.
 
 - Impact: Capsule preparation keeps the exported source root-owned and read-only, temporarily
-  assigns only the isolated output directory to the configured render UID, verifies that identity
-  after rendering, then returns the output tree to root ownership before validation and sealing.
-  The renderer CLI does not gain a caller-controlled repository-root option.
+  assigns only isolated scratch to the configured render identity, snapshots the validated tree,
+  and materializes fresh root-owned inodes for sealing. Renderer-owned scratch remains quarantined
+  until independently proven quiescent cleanup. The renderer CLI does not gain a caller-controlled
+  repository-root option.
+
+- ADR: null
+
+- Decision: During Phase 2 quarantine, the protected Ansible argv's explicit `-i localhost,`
+  argument is the sole inventory authority. The closed environment enables only the builtin
+  `host_list` inventory plugin, fixes the default stdout callback, and supplies neither an ambient
+  inventory variable nor an enabled-callback list.
+
+- Rationale: An INI `inventory = localhost,` value is interpreted as inventory paths and does not
+  establish the intended inline localhost inventory. The fixed launcher argument is effective,
+  independently testable, and cannot be replaced by caller environment or Ansible defaults.
+
+- Impact: Effective-config and inventory-loader integration tests prove ambient inventory and
+  callback variables are excluded and that the only resolved inventory host is `localhost`.
+  Ansible execution remains disabled until the later manifest and convergence phases.
 
 - ADR: null
 
@@ -620,6 +636,55 @@ changed.
 - Rationale: It is needed for safe prune reporting and recovery diagnostics, but it is not the primary drift engine.
 
 - Impact: The health of the host is judged against desired vs live state, not primarily against an old applied manifest.
+
+- ADR: null
+
+- Decision: Anchor production trust paths to fixed root-owned namespaces: repository and capsule
+  state beneath `/var/lib/abhaile`, Git pins and fetch identity beneath `/etc/abhaile`, and protected
+  runtimes beneath `/usr/lib`. Validate every path component from the filesystem root. Policy may
+  select descendants only within those namespaces; synthetic roots remain constructor-only test
+  seams.
+
+- Rationale: The mirror and credential paths intentionally have different parents. A common
+  policy-selected ancestor either rejects the production layout or turns policy into trust-root
+  authority.
+
+- Impact: Production fetch supports the intended split layout without accepting caller-controlled
+  anchors. Local remotes remain an explicit test injection.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Contain each protected renderer in a root-created, nondelegated cgroup v2 boundary,
+  attach before the PAM-free UID/GID transition, terminate surviving descendants, and require
+  kernel-observed `populated=0` before snapshot validation or sealing.
+
+- Rationale: Callback return, one PID, elapsed time, and process groups cannot prove that the
+  complete renderer process tree released writable access.
+
+- Impact: New scratch receives a root-owned, boot-bound cgroup receipt after quiescence proof.
+  Explicit non-dry-run cleanup removes only canonical receipt-associated scratch and its exact
+  empty cgroup in bounded, retry-safe batches. Retirement intent is durable before kernel evidence
+  is removed; failed renders retain receipt-backed scratch when quiescence is proven. Legacy,
+  reboot-invalidated, malformed, populated, or ambiguous evidence is retained. Debian 13.7 checks
+  on both target hosts confirmed the required kernel operations and ancestor nondelegation; the
+  installed dedicated-identity chain remains a later host-adoption gate. Child creation records
+  its inode before control validation and removes only that exact protected child if validation
+  fails before any process can attach. A proven rollback also removes the associated failed setup
+  scratch; identity or ownership ambiguity preserves the boundary and fails closed.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Active runtime discovery uses only fixed injected observations over an already-existing
+  PAM-free user runtime transport. It does not invoke local Podman while a query could initialize
+  storage or activate a socket.
+
+- Rationale: Existing-host adoption starts with observation, and supposedly read-only client
+  commands may create precisely the runtime state being assessed.
+
+- Impact: Missing user-runtime prerequisites and unavailable Podman transport classify as sanitized
+  conflicts. A typed terminal capability blocker performs no filesystem, socket, process, retry, or
+  initialization fallback. Positive non-initializing Podman transport evidence remains a migration
+  evidence gate; actual host collection remains in Phases 6 and 7 and convergence remains Phase 4.
 
 - ADR: null
 

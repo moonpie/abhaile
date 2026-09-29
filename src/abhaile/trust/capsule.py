@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from abhaile.trust.errors import TrustError
+from abhaile.trust.containment import BoundaryCreationError, RenderBoundary
 from abhaile.trust.git import (
     ACTIVE_REF,
     LKG_REF,
@@ -25,11 +26,17 @@ from abhaile.trust.manifest import (
     validate_manifest,
     validate_manifest_snapshot,
 )
-from abhaile.trust.model import TrustPaths, TrustPolicy, validate_protected_path
+from abhaile.trust.model import (
+    TrustPaths,
+    TrustPolicy,
+    validate_production_path,
+    validate_protected_path,
+)
 from abhaile.trust.securefs import materialize_snapshot, snapshot_tree
+from abhaile.trust.orphans import cleanup_orphans, record_orphan
 
 FailureHook = Callable[[str, Path], None]
-Render = Callable[[Path, Path, str], None]
+Render = Callable[[Path, Path, str, RenderBoundary], None]
 OwnerLookup = Callable[[Path], int]
 ChangeOwner = Callable[[Path, int], None]
 
@@ -73,9 +80,11 @@ class CapsuleStore:
         mirror: TrustedMirror,
         *,
         failure_hook: FailureHook | None = None,
+        boundary: RenderBoundary | None = None,
         owner_lookup: OwnerLookup = _owner_uid,
         change_owner: ChangeOwner = _change_owner,
     ) -> None:
+        self.boundary = boundary
         self.paths = paths
         self.policy = policy
         self.mirror = mirror
@@ -107,6 +116,8 @@ class CapsuleStore:
         if final.exists():
             return self.verify(final, admitted)
         self._validate_roots()
+        if self.boundary is None:
+            raise TrustError("Root-controlled renderer containment is required")
         transaction_name = uuid.uuid4().hex
         transaction_ref = f"refs/abhaile/transactions/{transaction_name}"
         self.mirror.retain_transaction(transaction_name, admitted)
@@ -115,6 +126,7 @@ class CapsuleStore:
         render_scratch = transaction / "render-scratch"
         render_work = render_scratch / "rendered"
         rendered = transaction / "rendered"
+        boundary_created = False
         try:
             transaction.mkdir(mode=0o711)
             self.failure_hook("before-export", transaction)
@@ -123,8 +135,17 @@ class CapsuleStore:
             self._make_read_only(source)
             render_work.mkdir(mode=0o700, parents=True)
             self._change_tree_owner(render_scratch, self.policy.root_uid, self._render_uid())
+            try:
+                self.boundary.create(transaction_name)
+            except BoundaryCreationError as exc:
+                if exc.recovered:
+                    self.discard_quarantine(transaction)
+                    self._sync_directory(self.paths.quarantine)
+                raise
+            boundary_created = True
             self.failure_hook("before-render", transaction)
-            render(source, render_work, self.policy.host)
+            render(source, render_work, self.policy.host, self.boundary)
+            self.boundary.verify_quiescent()
             self.failure_hook("after-render", transaction)
             self._validate_tree_owner(source, self.policy.root_uid)
             self._validate_tree_owner(render_work, self._render_uid())
@@ -148,8 +169,9 @@ class CapsuleStore:
             seal_path.chmod(0o400)
             self._sync_file(seal_path)
             self.failure_hook("before-seal", transaction)
-            orphan = self.paths.quarantine / f".render-orphan.{admitted}.{uuid.uuid4().hex}"
+            orphan = self.paths.quarantine / f".render-orphan.{admitted}.{transaction_name}"
             os.replace(render_scratch, orphan)
+            record_orphan(self.paths.quarantine, orphan, self.boundary)
             self.verify(transaction, admitted)
             final.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             os.replace(transaction, final)
@@ -158,7 +180,22 @@ class CapsuleStore:
             self.failure_hook("after-seal", final)
             return self.verify(final, admitted)
         finally:
-            self.mirror.release_ref(transaction_ref)
+            try:
+                if boundary_created and render_scratch.exists():
+                    # Failed renders keep a receipt only when kernel evidence proves safety.
+                    # Ambiguity preserves the entire transaction for operator investigation.
+                    try:
+                        self.boundary.verify_quiescent()
+                    except TrustError:
+                        pass
+                    else:
+                        orphan = (
+                            self.paths.quarantine / f".render-orphan.{admitted}.{transaction_name}"
+                        )
+                        os.replace(render_scratch, orphan)
+                        record_orphan(self.paths.quarantine, orphan, self.boundary)
+            finally:
+                self.mirror.release_ref(transaction_ref)
 
     def verify(self, path: Path, revision: str) -> SealedCapsule:
         """Revalidate ownership, immutability, manifest, and seal before consumption."""
@@ -316,9 +353,35 @@ class CapsuleStore:
             self._sync_directory(self.paths.quarantine)
         return tuple(collectible)
 
+    def cleanup_render_orphans(self, *, dry_run: bool = True) -> tuple[str, ...]:
+        """Collect only quiescent associated scratch under the protected trust lock."""
+        if dry_run:
+            return ()
+        if self.boundary is None:
+            raise TrustError("Root-controlled renderer containment is required")
+        with self.mirror.trust_lock():
+            self._validate_roots()
+            return cleanup_orphans(
+                self.paths.quarantine,
+                self.boundary,
+                root_uid=self.policy.root_uid,
+                render_uid=self._render_uid(),
+                namespace=Path("/var/lib/abhaile"),
+                filesystem_root=self.mirror.filesystem_root,
+                dry_run=False,
+            )
+
     def _validate_roots(self) -> None:
         for root in (self.paths.quarantine, self.paths.capsules):
-            validate_protected_path(root, owner_uid=self.policy.root_uid)
+            if self.mirror.allow_local_remote:
+                validate_protected_path(root, owner_uid=self.policy.root_uid)
+            else:
+                validate_production_path(
+                    root,
+                    Path("/var/lib/abhaile"),
+                    filesystem_root=self.mirror.filesystem_root,
+                    owner_uid=self.policy.root_uid,
+                )
 
     def _render_uid(self) -> int:
         if self.policy.render_uid is None:

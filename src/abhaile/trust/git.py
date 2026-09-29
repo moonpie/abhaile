@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -15,7 +16,12 @@ from typing import Iterator, Protocol, Sequence
 from urllib.parse import urlsplit
 
 from abhaile.trust.errors import TrustError
-from abhaile.trust.model import TrustPolicy, validate_protected_chain, validate_protected_path
+from abhaile.trust.model import (
+    TrustPolicy,
+    validate_protected_chain,
+    validate_protected_path,
+    validate_production_path,
+)
 
 FULL_OID = re.compile(r"^[0-9a-f]{40}$")
 TRUSTED_REF = "refs/abhaile/trusted"
@@ -75,12 +81,15 @@ class TrustedMirror:
         known_hosts: Path,
         runner: CommandRunner = subprocess_runner,
         allow_local_remote: bool = False,
+        *,
+        filesystem_root: Path = Path("/"),
     ) -> None:
         self.path = path
         self.policy = policy
         self.known_hosts = known_hosts
         self.runner = runner
         self.allow_local_remote = allow_local_remote
+        self.filesystem_root = filesystem_root
 
     def initialize(self) -> None:
         """Create a bare mirror only inside its already-protected parent."""
@@ -89,7 +98,7 @@ class TrustedMirror:
 
     def _initialize_locked(self) -> None:
         """Initialize or validate the mirror while holding the trust lock."""
-        validate_protected_path(self.path.parent, owner_uid=self.policy.root_uid)
+        self._validate_mirror_parent()
         if self.path.exists():
             validate_protected_path(self.path, owner_uid=self.policy.root_uid)
             result = self._git("rev-parse", "--is-bare-repository")
@@ -251,7 +260,7 @@ class TrustedMirror:
     @contextmanager
     def trust_lock(self) -> Iterator[None]:
         """Serialize trust updates, capsule preparation, and garbage collection."""
-        validate_protected_path(self.path.parent, owner_uid=self.policy.root_uid)
+        self._validate_mirror_parent()
         lock_path = self.path.with_name(f".{self.path.name}.lock")
         try:
             descriptor = os.open(
@@ -324,9 +333,42 @@ class TrustedMirror:
             if any(parent in file_paths for parent in path.parents):
                 raise TrustError(f"Trusted archive contains a file/path collision: {path}")
 
+    def _validate_mirror_parent(self) -> None:
+        """Anchor production state before opening the mirror or its lock."""
+        if not self.allow_local_remote:
+            validate_production_path(
+                self.path.parent,
+                Path("/var/lib/abhaile"),
+                filesystem_root=self.filesystem_root,
+                owner_uid=self.policy.root_uid,
+            )
+        else:
+            validate_protected_path(self.path.parent, owner_uid=self.policy.root_uid)
+
     def _validate_fetch_trust(self) -> None:
         validate_protected_path(self.path, owner_uid=self.policy.root_uid)
-        trust_anchor = self.path.parent
+        if not self.allow_local_remote:
+            validate_production_path(
+                self.path,
+                Path("/var/lib/abhaile"),
+                filesystem_root=self.filesystem_root,
+                owner_uid=self.policy.root_uid,
+            )
+            validate_production_path(
+                self.known_hosts,
+                Path("/etc/abhaile"),
+                regular_file=True,
+                filesystem_root=self.filesystem_root,
+                owner_uid=self.policy.root_uid,
+            )
+            validate_production_path(
+                self.policy.fetch_identity,
+                Path("/etc/abhaile"),
+                regular_file=True,
+                filesystem_root=self.filesystem_root,
+                owner_uid=self.policy.root_uid,
+            )
+        trust_anchor = self.path.parent if self.allow_local_remote else self.filesystem_root
         validate_protected_chain(
             self.known_hosts,
             anchor=trust_anchor,
@@ -366,8 +408,8 @@ class TrustedMirror:
     def _ssh_command(self) -> str:
         return (
             "ssh -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes "
-            f"-o IdentityFile={self.policy.fetch_identity} "
-            f"-o UserKnownHostsFile={self.known_hosts} -o GlobalKnownHostsFile=/dev/null"
+            f"-o {shlex.quote(f'IdentityFile={self.policy.fetch_identity}')} "
+            f"-o {shlex.quote(f'UserKnownHostsFile={self.known_hosts}')} -o GlobalKnownHostsFile=/dev/null"
         )
 
     def _resolve(self, ref: str) -> str:

@@ -31,6 +31,7 @@ class TrustPolicy:
     host: str
     root_uid: int = 0
     render_uid: int | None = None
+    render_gid: int | None = None
     rollback_history: int = 2
     known_host_pins: tuple[str, ...] = ()
     remote_host: str | None = None
@@ -89,3 +90,22 @@ def validate_protected_chain(
 def current_uid() -> int:
     """Return the effective identity for production policy construction."""
     return os.geteuid()
+
+
+def validate_production_path(
+    path: Path,
+    namespace: Path,
+    *,
+    regular_file: bool = False,
+    filesystem_root: Path = Path("/"),
+    owner_uid: int = 0,
+) -> None:
+    """Validate a fixed production namespace and every ancestor from filesystem root."""
+    if not path.is_absolute() or ".." in path.parts:
+        raise TrustError("Protected production path is not canonical")
+    namespace = filesystem_root / namespace.relative_to("/")
+    if not path.is_relative_to(namespace):
+        raise TrustError("Protected production path is outside its fixed namespace")
+    validate_protected_chain(
+        path, anchor=filesystem_root, owner_uid=owner_uid, regular_file=regular_file
+    )

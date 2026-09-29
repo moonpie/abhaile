@@ -145,12 +145,14 @@ def test_fetch_rejects_trust_files_outside_mirror_anchor(
 
 def test_fetch_rejects_remote_outside_pinned_ssh_policy(tmp_path: Path) -> None:
     """Reject non-SSH and mismatched SSH endpoints before invoking Git."""
-    protected = tmp_path / "protected"
-    protected.mkdir(mode=0o700)
-    known_hosts = protected / "known_hosts"
+    protected = tmp_path / "var/lib/abhaile"
+    protected.mkdir(parents=True, mode=0o700)
+    trust = tmp_path / "etc/abhaile"
+    trust.mkdir(parents=True)
+    known_hosts = trust / "known_hosts"
     known_hosts.write_text("git.example ssh-ed25519 PIN\n", encoding="utf-8")
     known_hosts.chmod(0o600)
-    identity = protected / "identity"
+    identity = trust / "identity"
     identity.write_text("placeholder\n", encoding="utf-8")
     identity.chmod(0o600)
     calls: list[tuple[str, ...]] = []
@@ -176,7 +178,9 @@ def test_fetch_rejects_remote_outside_pinned_ssh_policy(tmp_path: Path) -> None:
         remote_host="git.example",
         remote_user="git",
     )
-    mirror = TrustedMirror(protected / "mirror.git", policy, known_hosts, runner=runner)
+    mirror = TrustedMirror(
+        protected / "mirror.git", policy, known_hosts, runner=runner, filesystem_root=tmp_path
+    )
     (protected / "mirror.git").mkdir(mode=0o700)
     with pytest.raises(TrustError, match="pinned SSH transport"):
         mirror.fetch()
@@ -185,13 +189,15 @@ def test_fetch_rejects_remote_outside_pinned_ssh_policy(tmp_path: Path) -> None:
 
 def test_fetch_binds_valid_remote_to_strict_pinned_ssh_command(tmp_path: Path) -> None:
     """Pass the protected key and host-key database to an exact SSH endpoint."""
-    protected = tmp_path / "protected"
+    protected = tmp_path / "var/lib/abhaile"
     mirror_path = protected / "mirror.git"
     mirror_path.mkdir(parents=True, mode=0o700)
-    known_hosts = protected / "known_hosts"
+    trust = tmp_path / "etc/abhaile"
+    trust.mkdir(parents=True)
+    known_hosts = trust / "known_hosts"
     known_hosts.write_text("[git.example]:2222 ssh-ed25519 PIN\n", encoding="utf-8")
     known_hosts.chmod(0o600)
-    identity = protected / "identity"
+    identity = trust / "identity"
     identity.write_text("placeholder\n", encoding="utf-8")
     identity.chmod(0o600)
     revision = "a" * 40
@@ -226,7 +232,9 @@ def test_fetch_binds_valid_remote_to_strict_pinned_ssh_command(tmp_path: Path) -
         remote_user="git",
         remote_port=2222,
     )
-    mirror = TrustedMirror(mirror_path, policy, known_hosts, runner=runner)
+    mirror = TrustedMirror(
+        mirror_path, policy, known_hosts, runner=runner, filesystem_root=tmp_path
+    )
     assert mirror.fetch() == revision
     fetch = next(call for call in calls if "fetch" in call[0])
     assert fetch[1] is not None

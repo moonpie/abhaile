@@ -14,13 +14,43 @@ from typing import Any
 import pytest
 
 from abhaile.trust.capsule import CapsuleStore
+from abhaile.trust.containment import BoundaryCreationError
 from abhaile.trust.errors import TrustError
 from abhaile.trust.git import TrustedMirror
 from abhaile.trust.launcher import protected_render
 from abhaile.trust.model import TrustPaths, TrustPolicy
 
 
-def _render(source: Path, output: Path, host: str) -> None:
+class FixtureBoundary:
+    """Model a synchronous fixture renderer without launching host processes."""
+
+    def create(self, transaction: str) -> None:
+        pass
+
+    def run(self, command: object, *, cwd: Path, env: dict[str, str]) -> None:
+        raise AssertionError("Fixture process execution was not configured")
+
+    def verify_quiescent(self) -> None:
+        pass
+
+    def resume(self, transaction: str) -> None:
+        pass
+
+    def identity(self) -> tuple[int, int, str]:
+        return (1, 1, "fixture-boot")
+
+    def retire(self, transaction: str, identity: tuple[int, int, str]) -> None:
+        assert identity == self.identity()
+
+
+class RecoveredCreationFailureBoundary(FixtureBoundary):
+    """Model a failed child cgroup whose exact inode was already removed."""
+
+    def create(self, transaction: str) -> None:
+        raise BoundaryCreationError("injected cgroup creation failure", recovered=True)
+
+
+def _render(source: Path, output: Path, host: str, _boundary: object) -> None:
     assert (source / "trusted.txt").read_text(encoding="utf-8") == "trusted"
     artifact = output / "system" / "unit.service"
     artifact.parent.mkdir()
@@ -93,6 +123,7 @@ def store(tmp_path: Path) -> tuple[CapsuleStore, str]:
         "deimos",
         root_uid=os.geteuid(),
         render_uid=os.geteuid(),
+        render_gid=os.getegid(),
         known_host_pins=("example ssh-ed25519 PIN",),
         fetch_identity=identity,
     )
@@ -108,7 +139,7 @@ def store(tmp_path: Path) -> tuple[CapsuleStore, str]:
     mirror = TrustedMirror(paths.mirror, policy, known_hosts, allow_local_remote=True)
     mirror.initialize()
     revision = mirror.fetch()
-    return CapsuleStore(paths, policy, mirror), revision
+    return CapsuleStore(paths, policy, mirror, boundary=FixtureBoundary()), revision
 
 
 def test_seals_source_manifest_and_artifacts(store: tuple[CapsuleStore, str]) -> None:
@@ -145,7 +176,11 @@ def test_copy_out_ignores_render_tree_changes_after_validation(
             )
 
     attacked = CapsuleStore(
-        capsule_store.paths, capsule_store.policy, capsule_store.mirror, failure_hook=tamper
+        capsule_store.paths,
+        capsule_store.policy,
+        capsule_store.mirror,
+        boundary=FixtureBoundary(),
+        failure_hook=tamper,
     )
     capsule = attacked.prepare(revision, _render)
     assert capsule.rendered.joinpath("system/unit.service").read_text() == "trusted artifact\n"
@@ -158,8 +193,10 @@ def test_renderer_retained_writable_descriptor_cannot_change_capsule(
     capsule_store, revision = store
     handles: list[Any] = []
 
-    def render_with_retained_descriptor(source: Path, output: Path, host: str) -> None:
-        _render(source, output, host)
+    def render_with_retained_descriptor(
+        source: Path, output: Path, host: str, boundary: object
+    ) -> None:
+        _render(source, output, host, boundary)
         handles.append((output / "system/unit.service").open("r+b"))
 
     capsule = capsule_store.prepare(revision, render_with_retained_descriptor)
@@ -196,17 +233,23 @@ def test_capsule_uses_real_protected_render_output_contract(
     real_run = subprocess.run
 
     def run(command: tuple[str, ...], **kwargs: Any) -> Any:
-        if command[0] != "/usr/sbin/runuser":
+        if command[0] != "/usr/bin/setpriv":
             return real_run(command, **kwargs)
         output_root = Path(command[command.index("--output") + 1])
-        _render(Path(kwargs["cwd"]), output_root / "rendered", "deimos")
+        _render(Path(kwargs["cwd"]), output_root / "rendered", "deimos", render_boundary)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr("abhaile.trust.launcher.subprocess.run", run)
-    integrated = CapsuleStore(capsule_store.paths, policy, capsule_store.mirror)
+    monkeypatch.setattr("abhaile.trust.containment.subprocess.run", run)
+    render_boundary = FixtureBoundary()
+    monkeypatch.setattr(render_boundary, "run", lambda command, **kwargs: run(command, **kwargs))
+    integrated = CapsuleStore(
+        capsule_store.paths, policy, capsule_store.mirror, boundary=render_boundary
+    )
     capsule = integrated.prepare(
         revision,
-        lambda source, output, host: protected_render(source, output, host, policy),
+        lambda source, output, host, boundary: protected_render(
+            source, output, host, policy, boundary=boundary
+        ),
     )
     assert capsule.rendered.joinpath("system/unit.service").is_file()
 
@@ -223,7 +266,7 @@ def test_seals_manifest_directory_entries(store: tuple[CapsuleStore, str]) -> No
     """Accept established directory artifacts while retaining strict completeness checks."""
     capsule_store, revision = store
 
-    def render_directory(source: Path, output: Path, host: str) -> None:
+    def render_directory(source: Path, output: Path, host: str, _boundary: object) -> None:
         assert source.joinpath("trusted.txt").is_file()
         directory = output / "services" / "data"
         directory.mkdir(parents=True)
@@ -253,7 +296,7 @@ def test_rejects_directory_entry_with_file_payload(store: tuple[CapsuleStore, st
     """Reject a directory manifest entry whose rendered type is a regular file."""
     capsule_store, revision = store
 
-    def render_wrong_type(_source: Path, output: Path, host: str) -> None:
+    def render_wrong_type(_source: Path, output: Path, host: str, _boundary: object) -> None:
         artifact = output / "services" / "data"
         artifact.parent.mkdir()
         artifact.write_text("not a directory", encoding="utf-8")
@@ -293,6 +336,7 @@ def test_render_ownership_handoff_is_injectable(
         capsule_store.paths,
         capsule_store.policy,
         capsule_store.mirror,
+        boundary=FixtureBoundary(),
         owner_lookup=lambda path: owners[path],
         change_owner=lambda path, uid: owners.__setitem__(path, uid),
     )
@@ -330,12 +374,13 @@ def test_prepare_never_assigns_protected_source_to_render_identity(
         capsule_store.paths,
         policy,
         capsule_store.mirror,
+        boundary=FixtureBoundary(),
         owner_lookup=owner,
         change_owner=change,
     )
 
-    def render_as_restricted(source: Path, output: Path, host: str) -> None:
-        _render(source, output, host)
+    def render_as_restricted(source: Path, output: Path, host: str, boundary: object) -> None:
+        _render(source, output, host, boundary)
         for path in output.rglob("*"):
             owners[path] = render_uid
 
@@ -348,8 +393,8 @@ def test_rejects_unmanifested_directory(store: tuple[CapsuleStore, str]) -> None
     """Reject an extra directory that is not required by any manifest artifact."""
     capsule_store, revision = store
 
-    def render_extra_directory(source: Path, output: Path, host: str) -> None:
-        _render(source, output, host)
+    def render_extra_directory(source: Path, output: Path, host: str, boundary: object) -> None:
+        _render(source, output, host, boundary)
         output.joinpath("unmanifested").mkdir()
 
     with pytest.raises(TrustError, match="completeness"):
@@ -368,7 +413,11 @@ def test_activation_failure_before_commit_preserves_active_state(
             raise TrustError("injected activation failure")
 
     attacked = CapsuleStore(
-        capsule_store.paths, capsule_store.policy, capsule_store.mirror, failure_hook=fail
+        capsule_store.paths,
+        capsule_store.policy,
+        capsule_store.mirror,
+        boundary=FixtureBoundary(),
+        failure_hook=fail,
     )
     with pytest.raises(TrustError, match="injected activation"):
         attacked.activate(capsule)
@@ -444,6 +493,7 @@ def test_capsule_gc_quarantines_then_deletes_unretained_capsule(
         capsule_store.paths,
         capsule_store.policy,
         capsule_store.mirror,
+        boundary=FixtureBoundary(),
         failure_hook=observe,
     )
     assert collector.garbage_collect() == (collectible_revision,)
@@ -503,6 +553,7 @@ def test_capsule_gc_failure_after_quarantine_is_safely_retryable(
         capsule_store.paths,
         capsule_store.policy,
         capsule_store.mirror,
+        boundary=FixtureBoundary(),
         failure_hook=fail,
     )
     with pytest.raises(TrustError, match="injected GC failure"):
@@ -574,7 +625,11 @@ def test_capsule_gc_handles_pending_and_recreated_same_revision(
             raise TrustError("injected transaction failure")
 
     attacked = CapsuleStore(
-        capsule_store.paths, capsule_store.policy, capsule_store.mirror, failure_hook=fail
+        capsule_store.paths,
+        capsule_store.policy,
+        capsule_store.mirror,
+        boundary=FixtureBoundary(),
+        failure_hook=fail,
     )
     other = capsule_store.paths.capsules / "deimos" / revision
     other.chmod(0o700)
@@ -587,3 +642,39 @@ def test_capsule_gc_handles_pending_and_recreated_same_revision(
         ref.startswith("refs/abhaile/transactions/")
         for ref in capsule_store.mirror.protected_revisions()
     )
+
+
+def test_failed_renderer_retains_receipt_for_explicit_retirement(store):
+    """Keep safely quiescent failed scratch associated with its retained cgroup."""
+    capsule_store, revision = store
+
+    def fail(source, output, host, boundary):
+        raise TrustError("injected renderer failure")
+
+    with pytest.raises(TrustError, match="renderer failure"):
+        capsule_store.prepare(revision, fail)
+    receipts = list(capsule_store.paths.quarantine.glob(".render-orphan.*.receipt"))
+    assert len(receipts) == 1
+    assert receipts[0].with_suffix("").is_dir()
+    assert capsule_store.cleanup_render_orphans(dry_run=True) == ()
+    assert receipts[0].exists()
+
+
+def test_recovered_boundary_creation_failure_removes_scratch_for_retry(store):
+    """Do not accumulate untracked scratch after an atomic cgroup rollback."""
+    capsule_store, revision = store
+    attacked = CapsuleStore(
+        capsule_store.paths,
+        capsule_store.policy,
+        capsule_store.mirror,
+        boundary=RecoveredCreationFailureBoundary(),
+    )
+    for _attempt in range(2):
+        with pytest.raises(BoundaryCreationError) as error:
+            attacked.prepare(revision, _render)
+        assert error.value.recovered is True
+        assert list(capsule_store.paths.quarantine.iterdir()) == []
+        assert not any(
+            ref.startswith("refs/abhaile/transactions/")
+            for ref in capsule_store.mirror.protected_revisions()
+        )

@@ -43,17 +43,26 @@ passed. Complete the phases in order.
 
 ### Phase 2: Repair the Compatibility Entry Point and Runtime Foundations
 
-- [ ] 2026-09-26 Before implementing Phase 2, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
-- [ ] 2026-09-26 Establish a root-created renderer process-containment boundary, prove the complete process tree is quiescent, and only then implement bounded cleanup of isolated `.render-orphan.*` scratch. Scope: process-group or cgroup supervision and root-verifiable completion; do not delete retained scratch based only on callback return, elapsed time, or PID disappearance.
-- [ ] 2026-09-26 Define and test a strictly observational transport for active rootless Podman, user-manager, system-unit, user-unit, and generated Quadlet state without initializing runtime or storage. Scope: fixed injectable collectors and parsers that build on Phase 1 metadata discovery; actual host collection remains in Phases 6 and 7.
-- [ ] 2026-09-13 Make Ansible configuration, role discovery, working directory, inventory, and callback selection deterministic.
-- [ ] 2026-09-13 Map every supported apply safety flag into Ansible and reject unsupported combinations explicitly.
-- [ ] 2026-09-13 Replace ad hoc host and SOPS checks with the repository's structured validation semantics.
-- [ ] 2026-09-13 Prevent Ansible output, diffs, facts, temporary files, JSON, errors, and journald from exposing secret material.
-- [ ] 2026-09-13 Define and test safe self-management for the active runner service, timer, locking, and next invocation.
-- [ ] 2026-09-13 Establish correct rootless user-manager, Podman environment, runtime-directory, and Vault Agent behavior.
+Phase 2 implements local, injected foundations only. Spec 0028 remains the durable authority.
+No item below authorizes host collection, Ansible delegation, installation, or convergence.
+
+- [x] 2026-09-26 Review every Phase 2 task against prerequisites and evidence. Evidence: inspection of `fed6bfc`, trust modules, CLI, scaffold, canonical account config, and Architect/SysAdmin consultations on 2026-09-27. In-scope and deferred work is recorded below; no implementation completion is implied.
+- [x] 2026-09-27 Repair inherited split trust-root validation for `/var/lib/abhaile/mirror.git` and `/etc/abhaile/{known_hosts,git-fetch-identity}`. Evidence: fixed production namespaces with full ancestor validation and a constructor-only synthetic filesystem seam in `model.py`, `git.py`, and `launcher.py`; split-layout and caller-root rejection tests in `test_git.py` and `test_launcher.py`.
+- [x] 2026-09-27 Repair inherited discovery presence/conformance conflation. Evidence: `AccountIdentity`, distinct presence/conformance parsing, unambiguous exit-2 absence, `Linger=yes/no`, bounded numeric fields, and sanitized malformed/relationship failure coverage in `discovery.py` and `test_discovery.py`.
+- [x] 2026-09-28 Repair inherited privileged-launcher import isolation. Evidence: the root-owned wrapper invokes only the protected trust runtime with Python isolated mode, and the layout regression rejects loss of `-I`; host installation remains a later explicit adoption gate.
+- [x] 2026-09-26 Establish root-created renderer containment and independently prove complete process-tree quiescence before sealing or bounded orphan cleanup. Evidence: root-created cgroup-v2 supervision, pre-exec attachment, PAM-free identity transition, protected runtime dependency closure, kernel `populated=0` proof, ancestor migration-control validation, store-owned boundary binding, boot/inode-bound receipts, failed-render retention, and bounded retry-safe scratch plus cgroup retirement in `containment.py`, `orphans.py`, and capsule tests. Creation records the new child's inode before validating controls, removes only that exact protected child on validation failure, and tells the capsule store when rollback is proven so failed setup scratch is removed; failure injection and repeated-retry tests prevent untracked accumulation. Operator-provided checks on both Debian 13.7 hosts confirmed cgroup-v2 transaction creation, descendant population, subtree kill, `populated=0`, empty-group removal, and rejection of unprivileged ancestor migration on 2026-09-28. Dry-run never collects. The installed dedicated-identity chain remains an explicit Phase 6/7 adoption proof.
+- [x] 2026-09-26 Define and test strictly observational active Podman, user-manager, system-unit, user-unit, and generated Quadlet collectors. Evidence: fixed bounded system/user-unit collectors, generated Vault Agent provenance, and a typed terminal Podman capability blocker in `active_discovery.py`. Tests prove unavailable Podman observation performs no filesystem, socket, subprocess, retry, or initialization activity and classifies as a sanitized conflict rather than false absence. Positive Podman platform proof is assigned to Phase 5; actual reports remain Phases 6/7.
+- [x] 2026-09-13 Make Ansible configuration, roles/collections, working directory, inventory, callbacks, interpreter, and sealed paths deterministic. Evidence: independently admitted and verified non-executable plan, fixed protected runtime/capsule/temp namespaces, and a closed environment in `ansible.py`. The protected argv's `-i localhost,` is the sole inventory authority, only the builtin `host_list` inventory plugin is enabled, ambient inventory and callback variables are absent, and the fixed default callback is used without an empty callback list. A real isolated `ansible-core` 2.20.9 integration test verifies the effective config dump, resolves exactly the inline localhost inventory and builtin assert/debug modules, and passes `converge.yml --syntax-check`; manifest execution remains Phases 3/4.
+- [x] 2026-09-13 Inventory and define every apply safety/behavior flag, reject unsupported/conflicting combinations, and test the compatibility contract. Evidence: `FLAG_CONTRACT`, typed `ApplyIntent`, complete parser inventory, table-driven conflict tests, and unchanged unconditional `--ansible` rejection. Manifest-dependent execution remains Phases 3/4.
+- [x] 2026-09-13 Replace ad hoc Ansible-era host and SOPS checks with structured Python/schema validation. Evidence: `config_validation.py` reuses canonical schemas, mapping, network, and composed-user validation; preserves first-match/catch-all behavior for the repository's supported age-only creation-rule subset; validates encrypted-bundle metadata without reading payloads; unsupported SOPS features fail closed. The dormant Ansible role now only asserts quarantine.
+- [x] 2026-09-13 Establish reusable secret-safe execution, temporary-path, no_log, diff, and report boundaries. Evidence: protected temporary namespace/mode checks, explicit plugin/report suppression, `SecretTaskPolicy`, sanitized exception chains, and placeholder leakage tests in `ansible.py` and `test_ansible.py`. Complete task/callback/journald leakage proof remains Phases 4/5.
+- [x] 2026-09-13 Define and test runner service/timer self-management planning, existing lock preservation, validation before publication, deferred effects, and failure recovery. Evidence: pure ordered state machine and recovery contract in `runner_update.py` and `test_runner_update.py`. Publication and transaction integration remain Phases 3/4; cutover remains Phase 7.
+- [x] 2026-09-13 Establish rootless identity, linger, HOME, runtime-directory ownership/lifecycle, Podman environment, and rootless Vault Agent contracts. Evidence: typed prerequisite metadata, closed environment, PAM-free `setpriv` transport, ownership/mode fail-closed tests, and rootless generated-unit observation in `runtime.py`, `active_discovery.py`, and their tests. Service mutation remains Phase 4 and boot/recovery evidence Phase 5.
 
 ### Phase 3: Define and Implement the Manifest Contract
+
+Deferred from Phase 2: integrate sealed invocation and safety-flag contracts with the completed
+manifest; bind runner update staging to transaction commit evidence.
 
 - [ ] 2026-09-26 Before implementing Phase 3, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
 - [ ] 2026-09-13 Audit every convergence family against the manifest and define its schema version, path trust, owner/action vocabulary, validation ownership, and compatibility rules.
@@ -64,6 +73,9 @@ passed. Complete the phases in order.
 
 ### Phase 4: Port Convergence Families Incrementally
 
+Deferred from Phase 2: execute flag mappings, publish validated runner updates after commit,
+converge rootless runtime/Vault Agent, and apply secret-safe task boundaries.
+
 - [ ] 2026-09-26 Before implementing Phase 4, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
 - [ ] 2026-09-13 Correct repository, deploy-key, `known_hosts`, entrypoint, virtualenv, runner-unit, and runtime-directory ordering.
 - [ ] 2026-09-13 Port directories, files, identities, system units, rootless units, services, packages, downloads, and builds with Python-backend parity evidence.
@@ -73,9 +85,13 @@ passed. Complete the phases in order.
 
 ### Phase 5: Build Migration Evidence
 
+Deferred from Phase 2: end-to-end task/callback/temp-file/journald secret-leakage proof and
+runner/rootless/Vault failure, reboot, and recovery evidence.
+
 - [ ] 2026-09-26 Before implementing Phase 5, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope.
 - [ ] 2026-09-13 Replace Ansible file-existence and keyword tests with syntax, behavior, check-mode, failure, and idempotence tests.
 - [ ] 2026-09-13 Make the full test suite independent of a workstation-local `abhaile` account.
+- [ ] 2026-09-28 In a disposable rootless Podman environment, prove a candidate observation transport does not create files, refresh storage, initialize a user manager, or activate a socket. If no such transport exists, preserve the Phase 2 terminal conflict and document that active Podman state requires separately authorized operator evidence during host adoption.
 - [ ] 2026-09-13 Prove manifest convergence, failed-state preservation, safe pruning, health gating, and rollback in an isolated environment.
 - [ ] 2026-09-13 Prove actual offline manifest-only convergence from an already-admitted sealed last-known-good capsule in an isolated environment, with GitHub and other network access unavailable and no Git fetch or checkout invocation. Scope: end-to-end convergence evidence after the manifest-only non-mutating integration gate exists; do not weaken the Phase 1 quarantine to obtain it.
 - [ ] 2026-09-13 Prove cold-boot and degraded Vault, network, rootless user-manager, Quadlet, and runner recovery without Git or Ansible availability.
@@ -83,17 +99,25 @@ passed. Complete the phases in order.
 
 ### Phase 6: Assess and Migrate `deimos`
 
+Deferred from Phase 2: provision the protected trust, render, and Ansible validation foundations
+on the first host without changing the active legacy runner or enabling Ansible convergence.
+
 - [ ] 2026-09-26 Before implementing Phase 6, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope. Treat live-host access and every mutation as separately authorized gates.
 - [ ] 2026-09-13 Inventory `deimos` live state without mutation; classify prerequisites, adopted legacy state, drift, conflicts, and gated removals; and record the reviewed discovery report. Scope: explicitly authorized read-only collection from `deimos`, using the Phase 1 metadata collectors and classification model plus the Phase 2 active runtime and unit collectors.
 - [ ] 2026-09-13 Confirm the age identity, deploy key, `known_hosts`, sealed Vault Agent bundle, SOPS recipient rule, runner state, and last-known-good revision without exposing secret material.
+- [ ] 2026-09-28 With explicit host-mutation approval, provision and validate the dedicated non-login renderer identity, protected trust/render/Ansible runtimes, fixed trust policy and stores, private temporary paths, and root-owned nondelegated cgroup parent on `deimos`. Keep the legacy timer and Python apply path authoritative; do not activate a capsule, install the constrained sudo policy, or enable Ansible convergence in this step.
 - [ ] 2026-09-13 Run the supported Ansible syntax, offline, wrapper preflight, and dry-run checks for `deimos` and review the complete plan.
 - [ ] 2026-09-13 Install and validate the root-owned launcher and constrained sudo policy on `deimos` alongside the legacy policy. Syntax-check both artifacts, run the root self-test, and prove the exact `runuser` to `sudo -n` offline dry-run command and recovery path before relying on it; do not remove the legacy policy in this phase.
 - [ ] 2026-09-13 With explicit live-apply approval, converge `deimos` in staged non-network and network gates, then prove idempotence, health, and rollback.
 
 ### Phase 7: Migrate `phobos` and Cut Over
 
+Deferred from Phase 2: repeat the approved protected-runtime provisioning on the second host before
+runner integration or cutover.
+
 - [ ] 2026-09-26 Before implementing Phase 7, review every task against its prerequisites and current evidence; confirm it is completable within this phase or split and move each later-phase dependency, with explicit in-scope and deferred scope. Treat live-host access, cutover, and every mutation as separately authorized gates.
 - [ ] 2026-09-13 Repeat the read-only assessment and staged proof on `phobos`, including its VLAN, Coral TPU, Vault, and infrastructure-specific state, and record the reviewed discovery and classification report. Scope: explicitly authorized read-only collection from `phobos`.
+- [ ] 2026-09-28 With explicit host-mutation approval, provision and validate on `phobos` the same dedicated renderer identity, protected runtimes, fixed trust policy and stores, private temporary paths, and cgroup-parent contract proven on `deimos`. Keep the legacy timer and Python apply path authoritative until the later cutover gate.
 - [ ] 2026-09-13 Install and validate the root-owned launcher and constrained sudo policy on `phobos` alongside the legacy policy, repeating the exact-command and recovery gates used for `deimos`; do not remove the legacy policy in this phase.
 - [ ] 2026-09-13 Enable Ansible in the runner behind an explicit feature flag and observe timer-driven convergence on both hosts.
 - [ ] 2026-09-13 Confirm both hosts track runner-selected revisions and retain working health-gate and rollback behavior.

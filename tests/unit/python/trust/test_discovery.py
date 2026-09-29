@@ -6,6 +6,10 @@ from pathlib import Path
 import os
 from typing import Mapping, Sequence
 
+import pytest
+
+from abhaile.trust.runtime import AccountIdentity
+
 from abhaile.trust.discovery import (
     Classification,
     DiscoveryBackend,
@@ -255,7 +259,7 @@ def test_fixed_collectors_cover_catalog_with_bounded_shell_free_inputs(tmp_path:
     probes = fixed_discovery_probes()
     command_results = {
         ("/usr/bin/getent", "passwd", "abhaile"): DiscoveryCommandResult(
-            0, "abhaile:x:1000:1000::/home/abhaile:/usr/sbin/nologin\n"
+            0, "abhaile:x:1001:1001::/home/abhaile:/bin/bash\n"
         ),
         (
             "/usr/bin/sudo",
@@ -294,7 +298,12 @@ def test_fixed_collectors_cover_catalog_with_bounded_shell_free_inputs(tmp_path:
         paths.append((path, expected_kind, expected_mode))
         return MetadataObservation(True, True, True)
 
-    backend = FixedDiscoveryBackend(runner, metadata, filesystem_root=tmp_path)
+    backend = FixedDiscoveryBackend(
+        runner,
+        metadata,
+        filesystem_root=tmp_path,
+        expected_account=AccountIdentity(1001, 1001, "/home/abhaile", "/bin/bash"),
+    )
     records = discover_typed_host(probes, backend)
 
     assert {record.kind for record in records} == set(ProbeKind)
@@ -415,3 +424,119 @@ def test_fixed_sudo_parser_rejects_broad_or_additional_authorization() -> None:
 
     assert record.classification is Classification.CONFLICT
     assert "secret-token" not in record.reason
+
+
+@pytest.mark.parametrize(
+    "result,expected",
+    [
+        (
+            DiscoveryCommandResult(0, "abhaile:x:1001:1001::/home/abhaile:/bin/bash\n"),
+            Classification.LEGACY_MANAGED,
+        ),
+        (
+            DiscoveryCommandResult(0, "abhaile:x:1002:1001::/home/abhaile:/bin/bash\n"),
+            Classification.CONFLICT,
+        ),
+        (
+            DiscoveryCommandResult(0, "abhaile:x:1001:1002::/home/abhaile:/bin/bash\n"),
+            Classification.CONFLICT,
+        ),
+        (
+            DiscoveryCommandResult(0, "abhaile:x:1001:1001::/wrong:/bin/bash\n"),
+            Classification.CONFLICT,
+        ),
+        (
+            DiscoveryCommandResult(0, "abhaile:x:1001:1001::/home/abhaile:/bin/false\n"),
+            Classification.CONFLICT,
+        ),
+        (
+            DiscoveryCommandResult(0, "other:x:1001:1001::/home/abhaile:/bin/bash\n"),
+            Classification.CONFLICT,
+        ),
+        (
+            DiscoveryCommandResult(0, "abhaile:x:x:1001::/home/abhaile:/bin/bash\n"),
+            Classification.CONFLICT,
+        ),
+        (
+            DiscoveryCommandResult(0, "abhaile:x:1001:x::/home/abhaile:/bin/bash\n"),
+            Classification.CONFLICT,
+        ),
+        (DiscoveryCommandResult(2), Classification.DESIRED_DRIFT),
+        (DiscoveryCommandResult(2, "secret-marker"), Classification.CONFLICT),
+        (DiscoveryCommandResult(2, stderr="secret-marker"), Classification.CONFLICT),
+        (DiscoveryCommandResult(0), Classification.CONFLICT),
+    ],
+)
+def test_account_presence_and_conformance_are_separate(result, expected):
+    probe = fixed_discovery_probes()[0]
+    runner = SyntheticCommandRunner({("/usr/bin/getent", "passwd", "abhaile"): result})
+    backend = FixedDiscoveryBackend(
+        runner,
+        lambda *args, **kwargs: MetadataObservation(True, True, True),
+        expected_account=AccountIdentity(1001, 1001, "/home/abhaile", "/bin/bash"),
+    )
+    record = discover_typed_host([probe], backend)[0]
+    assert record.classification is expected
+    assert "secret-marker" not in repr(record)
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("yes\n", Classification.LEGACY_MANAGED),
+        ("no\n", Classification.CONFLICT),
+        ("secret-marker\n", Classification.CONFLICT),
+    ],
+)
+def test_linger_no_is_not_matching_state(value, expected):
+    probe = next(probe for probe in fixed_discovery_probes() if probe.name == "user manager")
+    command = ("/usr/bin/loginctl", "show-user", "abhaile", "--property=Linger", "--value")
+    backend = FixedDiscoveryBackend(
+        SyntheticCommandRunner({command: DiscoveryCommandResult(0, value)}),
+        lambda *args, **kwargs: MetadataObservation(True, True, True),
+    )
+    record = discover_typed_host([probe], backend)[0]
+    assert record.classification is expected
+    assert "secret-marker" not in repr(record)
+
+
+def test_account_without_canonical_intent_is_unavailable():
+    backend = FixedDiscoveryBackend(
+        SyntheticCommandRunner(
+            {
+                ("/usr/bin/getent", "passwd", "abhaile"): DiscoveryCommandResult(
+                    0, "abhaile:x:1001:1001::/home/abhaile:/bin/bash\n"
+                )
+            }
+        ),
+        lambda *args, **kwargs: MetadataObservation(True, True, True),
+    )
+    assert not backend.observe(fixed_discovery_probes()[0]).valid
+
+
+def test_non_utf8_evidence_is_a_sanitized_conflict():
+    backend = FixedDiscoveryBackend(
+        SyntheticCommandRunner(
+            {("/usr/bin/getent", "passwd", "abhaile"): DiscoveryCommandResult(0, "\ud800")}
+        ),
+        lambda *args, **kwargs: MetadataObservation(True, True, True),
+    )
+    assert not backend.observe(fixed_discovery_probes()[0]).valid
+
+
+@pytest.mark.parametrize(
+    "uid,gid", [("1" * 5000, "1001"), ("1001", "1" * 5000), ("4294967295", "1001")]
+)
+def test_account_numeric_fields_are_bounded_before_integer_conversion(uid, gid):
+    backend = FixedDiscoveryBackend(
+        SyntheticCommandRunner(
+            {
+                ("/usr/bin/getent", "passwd", "abhaile"): DiscoveryCommandResult(
+                    0, f"abhaile:x:{uid}:{gid}::/home/abhaile:/bin/bash\n"
+                )
+            }
+        ),
+        lambda *args, **kwargs: MetadataObservation(True, True, True),
+        expected_account=AccountIdentity(1001, 1001, "/home/abhaile", "/bin/bash"),
+    )
+    assert not backend.observe(fixed_discovery_probes()[0]).valid

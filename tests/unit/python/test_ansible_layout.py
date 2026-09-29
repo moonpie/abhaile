@@ -52,3 +52,30 @@ def test_sudo_policy_is_non_installed_constrained_candidate() -> None:
     assert "NOPASSWD:ALL" not in text
     assert "--dry-run" in text
     assert "/opt/abhaile/.venv/bin/abhaile-apply" in live_role.read_text(encoding="utf-8")
+
+
+def test_scaffold_uses_protected_runtime_and_suppresses_payload_channels() -> None:
+    """Keep mutable checkout discovery and secret reporting out of defaults."""
+    from configparser import ConfigParser
+
+    config = ConfigParser()
+    config.read(REPO_ROOT / "ansible/ansible.cfg")
+    defaults = config["defaults"]
+    assert "/opt/abhaile" not in str(dict(defaults))
+    assert defaults["stdout_callback"] == "default"
+    assert "inventory" not in defaults
+    assert "callbacks_enabled" not in defaults
+    assert defaults["gathering"] == "explicit"
+    assert defaults.getboolean("no_log")
+    assert not defaults.getboolean("keep_remote_files")
+    assert not defaults.getboolean("collections_scan_sys_path")
+    assert not config["diff"].getboolean("always")
+    assert defaults["interpreter_python"].startswith("/usr/lib/abhaile-ansible-runtime/")
+
+
+def test_privileged_launcher_uses_isolated_protected_python() -> None:
+    """Exclude caller-controlled import paths from privileged launcher execution."""
+    launcher = (REPO_ROOT / "scripts/abhaile-converge-launcher").read_text(encoding="utf-8")
+    assert (
+        "exec /usr/lib/abhaile-trust-runtime/bin/python -I " '-m abhaile.trust.launcher "$@"'
+    ) in launcher

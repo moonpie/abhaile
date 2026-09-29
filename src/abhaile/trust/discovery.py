@@ -8,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Mapping, Protocol, Sequence
 
+from abhaile.trust.runtime import AccountIdentity
+
 
 class Classification(str, Enum):
     """Describe how observed existing-host state may be handled."""
@@ -262,10 +264,13 @@ class FixedDiscoveryBackend:
         runner: DiscoveryCommandRunner,
         metadata_reader: DiscoveryMetadataReader,
         filesystem_root: Path = Path("/"),
+        *,
+        expected_account: AccountIdentity | None = None,
     ) -> None:
         self.runner = runner
         self.metadata_reader = metadata_reader
         self.filesystem_root = filesystem_root
+        self.expected_account = expected_account
 
     def observe(self, probe: Probe) -> Observation:
         """Observe one catalog probe without accepting caller commands or paths."""
@@ -293,17 +298,30 @@ class FixedDiscoveryBackend:
             )
         except (OSError, TimeoutError, ValueError):
             return _invalid_observation(probe.kind)
-        if (
-            result.returncode != 0
-            or result.truncated
-            or len(result.stdout.encode("utf-8")) > _DISCOVERY_MAX_OUTPUT
-            or len(result.stderr.encode("utf-8")) > _DISCOVERY_MAX_OUTPUT
-        ):
+        try:
+            oversized = (
+                len(result.stdout.encode("utf-8")) > _DISCOVERY_MAX_OUTPUT
+                or len(result.stderr.encode("utf-8")) > _DISCOVERY_MAX_OUTPUT
+            )
+        except UnicodeError:
             return _invalid_observation(probe.kind)
-        parsed = _parse_command_observation(entry.parser, result.stdout)
+        if result.truncated or oversized:
+            return _invalid_observation(probe.kind)
+        if (
+            entry.parser == "account"
+            and result.returncode == 2
+            and not result.stdout
+            and not result.stderr
+        ):
+            return Observation(True, False, True, "account absent", _provenance(probe.kind))
+        if result.returncode != 0 or result.stderr:
+            return _invalid_observation(probe.kind)
+        parsed = _parse_command_observation(entry.parser, result.stdout, self.expected_account)
         if parsed is None:
             return _invalid_observation(probe.kind)
-        return Observation(True, parsed, True, "catalog probe completed", _provenance(probe.kind))
+        return Observation(
+            True, parsed[0], parsed[1], "catalog probe completed", _provenance(probe.kind)
+        )
 
     def _observe_metadata(self, kind: ProbeKind, entry: _CatalogEntry) -> Observation:
         """Convert sanitized fixed-path metadata to an observation."""
@@ -336,16 +354,31 @@ class FixedDiscoveryBackend:
         return self.filesystem_root.joinpath(*path.relative_to("/").parts)
 
 
-def _parse_command_observation(parser: str, output: str) -> bool | None:
-    """Parse only bounded structural or enum output into a boolean."""
+def _parse_command_observation(
+    parser: str, output: str, account: AccountIdentity | None = None
+) -> tuple[bool, bool] | None:
+    """Separate observed presence from conformance without returning raw evidence."""
     value = output.strip()
     if parser == "account":
         fields = value.split(":")
-        if len(fields) != 7 or fields[0] != "abhaile":
+        if len(fields) != 7 or fields[0] != "abhaile" or "\n" in value:
             return None
-        if not fields[2].isdecimal() or not fields[3].isdecimal():
+        if not fields[2].isascii() or not fields[2].isdecimal():
             return None
-        return fields[5] == "/home/abhaile" and fields[6] in {"/usr/sbin/nologin", "/bin/false"}
+        if not fields[3].isascii() or not fields[3].isdecimal():
+            return None
+        if account is None or len(fields[2]) > 10 or len(fields[3]) > 10:
+            return None
+        uid, gid = int(fields[2]), int(fields[3])
+        if uid >= 2**32 - 1 or gid >= 2**32 - 1:
+            return None
+        matches = (
+            uid == account.uid
+            and gid == account.gid
+            and fields[5] == account.home
+            and fields[6] == account.shell
+        )
+        return True, matches
     if parser == "sudo":
         rules = [line.strip() for line in value.splitlines() if line.lstrip().startswith("(")]
         expected = (
@@ -353,14 +386,14 @@ def _parse_command_observation(parser: str, output: str) -> bool | None:
             "^--runner --host (deimos|phobos) --revision [0-9a-f]{40} "
             "--dry-run( --offline)?$"
         )
-        return True if rules == [expected] else None
+        return (True, True) if rules == [expected] else None
     if parser == "refs":
         lines = value.splitlines()
         if not lines:
-            return False
-        return True if all(_valid_ref_line(line) for line in lines) else None
+            return False, True
+        return (True, True) if all(_valid_ref_line(line) for line in lines) else None
     if parser == "yes-no":
-        return True if value in {"yes", "no"} else None
+        return (True, value == "yes") if value in {"yes", "no"} else None
     return None
 
 

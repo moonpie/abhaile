@@ -150,7 +150,7 @@ def parse_apply_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--ansible",
         action="store_true",
-        help="Delegate local convergence to ansible-playbook using the local Ansible compatibility wrapper",
+        help="Experimental selector; unavailable until trusted convergence gates are complete",
     )
     parser.add_argument(
         "-v",
