@@ -299,6 +299,18 @@ def test_last_known_good_rotation_is_atomic_bounded_and_distinct(
     mirror.garbage_collect()
 
 
+def test_last_known_good_compare_and_swap_rejects_stale_expected_revision(
+    repositories: tuple[Path, Path, TrustedMirror],
+) -> None:
+    """Refuse coordinator advancement when protected LKG authority changed."""
+    _remote, _work, mirror = repositories
+    revision = mirror.fetch()
+    mirror.mark_last_known_good(revision)
+    with pytest.raises(TrustError, match="changed before protected advancement"):
+        mirror.advance_last_known_good(revision, expected="f" * 40)
+    assert mirror.last_known_good() == revision
+
+
 def test_trust_lock_serializes_concurrent_transactions(
     repositories: tuple[Path, Path, TrustedMirror],
 ) -> None:

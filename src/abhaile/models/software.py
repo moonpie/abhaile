@@ -33,8 +33,28 @@ EFFECT_ROLES = frozenset(
 )
 
 OPERATION_PARAMETERS = {
-    "binary-download": {"url", "sha256", "destination", "mode"},
-    "archive-download": {"url", "sha256", "destination", "mode", "archive_member"},
+    "binary-download": {
+        "url",
+        "sha256",
+        "destination",
+        "mode",
+        "max_bytes",
+        "redirect_origins",
+        "max_redirects",
+    },
+    "archive-download": {
+        "url",
+        "sha256",
+        "output_sha256",
+        "destination",
+        "mode",
+        "archive_member",
+        "max_bytes",
+        "max_member_bytes",
+        "max_compression_ratio",
+        "redirect_origins",
+        "max_redirects",
+    },
     "container-build": {"url", "source_ref", "containerfile_base", "output_glob"},
     "kernel-modules": {"modules"},
     "systemd-units": {"units"},
@@ -139,6 +159,18 @@ def _validate_parameters(operation: str, value: dict[str, Any]) -> None:
         _path(value["destination"])
         if not isinstance(value["mode"], str) or MODE.fullmatch(value["mode"]) is None:
             raise RenderError("Software download mode is invalid")
+        if (
+            type(value["max_bytes"]) is not int
+            or not 1 <= value["max_bytes"] <= 512 * 1024 * 1024
+            or type(value["max_redirects"]) is not int
+            or not 0 <= value["max_redirects"] <= 5
+        ):
+            raise RenderError("Software download bounds are invalid")
+        origins = value["redirect_origins"]
+        if not isinstance(origins, list) or len(origins) != len(set(origins)):
+            raise RenderError("Software redirect authority is invalid")
+        for origin in origins:
+            _https_origin(origin)
         if operation == "archive-download":
             member = value["archive_member"]
             if (
@@ -147,6 +179,18 @@ def _validate_parameters(operation: str, value: dict[str, Any]) -> None:
                 or member in {".", ".."}
             ):
                 raise RenderError("Software archive member is unsafe")
+            if (
+                not isinstance(value["output_sha256"], str)
+                or SHA256.fullmatch(value["output_sha256"]) is None
+            ):
+                raise RenderError("Software archive output digest is invalid")
+            if (
+                type(value["max_member_bytes"]) is not int
+                or not 1 <= value["max_member_bytes"] <= 512 * 1024 * 1024
+                or type(value["max_compression_ratio"]) is not int
+                or not 1 <= value["max_compression_ratio"] <= 100
+            ):
+                raise RenderError("Software archive bounds are invalid")
     elif operation == "container-build":
         _https(value["url"])
         if (
@@ -339,6 +383,23 @@ def _https(value: object) -> None:
         or parsed.fragment
     ):
         raise RenderError("Software source URL must be canonical HTTPS")
+
+
+def _https_origin(value: object) -> None:
+    """Validate one exact HTTPS origin without a path or credentials."""
+    if not isinstance(value, str):
+        raise RenderError("Software redirect origin is invalid")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RenderError("Software redirect origin is invalid")
 
 
 def _path(value: object, *, mutation: bool = True) -> None:

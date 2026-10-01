@@ -1,0 +1,13 @@
+- name: Validate udev prerequisite operation
+  ansible.builtin.assert:
+    that:
+      - abhaile_host_global_isolated | default(false) | bool
+      - operation.kind == 'software.prerequisite'
+      - operation.action == 'ensure'
+      - operation.parameters.keys() | sort == ['reload', 'rule', 'rule_path']
+      - operation.parameters.rule_path is match('^/etc/udev/rules.d/[A-Za-z0-9_.-]+\.rules$')
+      - operation.parameters.rule is string
+      - operation.parameters.reload is boolean
+    fail_msg: "Udev rule authority is invalid or not isolated."
+  no_log: true
+  diff: false

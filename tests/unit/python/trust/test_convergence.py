@@ -26,6 +26,7 @@ def test_orders_dependencies_phases_and_equal_peers_deterministically() -> None:
                 "execution_context": "system",
                 "validation": "structural",
                 "lifecycle": ["service-restart"],
+                "lifecycle_metadata": {"service-restart": {"unit": "z.service", "mode": "restart"}},
             },
             {
                 "owner_ref": "software:packages",
@@ -36,6 +37,7 @@ def test_orders_dependencies_phases_and_equal_peers_deterministically() -> None:
                 "execution_context": "system",
                 "validation": "software-result",
                 "lifecycle": [],
+                "lifecycle_metadata": {},
             },
             {
                 "owner_ref": "service:a",
@@ -46,6 +48,7 @@ def test_orders_dependencies_phases_and_equal_peers_deterministically() -> None:
                 "execution_context": "system",
                 "validation": "structural",
                 "lifecycle": [],
+                "lifecycle_metadata": {},
             },
         ],
     }
@@ -89,6 +92,7 @@ def test_dependency_edge_overrides_phase_preference_and_keeps_owner_contiguous()
                 "execution_context": "system",
                 "validation": "structural",
                 "lifecycle": [],
+                "lifecycle_metadata": {},
             },
             {
                 "owner_ref": "iface:parent",
@@ -99,6 +103,7 @@ def test_dependency_edge_overrides_phase_preference_and_keeps_owner_contiguous()
                 "execution_context": "system",
                 "validation": "structural",
                 "lifecycle": [],
+                "lifecycle_metadata": {},
             },
             {
                 "owner_ref": "iface:parent",
@@ -109,6 +114,7 @@ def test_dependency_edge_overrides_phase_preference_and_keeps_owner_contiguous()
                 "execution_context": "system",
                 "validation": "structural",
                 "lifecycle": [],
+                "lifecycle_metadata": {},
             },
         ],
     }

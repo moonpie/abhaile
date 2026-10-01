@@ -1,0 +1,13 @@
+- name: Validate system unit prerequisite operation
+  ansible.builtin.assert:
+    that:
+      - abhaile_host_global_isolated | default(false) | bool
+      - operation.kind == 'software.prerequisite'
+      - operation.action == 'ensure'
+      - operation.parameters.keys() | list == ['units']
+      - operation.parameters.units is sequence
+      - operation.parameters.units | length > 0
+      - operation.effects | length == operation.parameters.units | length
+    fail_msg: "System unit prerequisite authority is invalid or not isolated."
+  no_log: true
+  diff: false

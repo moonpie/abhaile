@@ -156,31 +156,41 @@ class TrustedMirror:
     def mark_last_known_good(self, revision: str) -> None:
         """Retain an admitted revision as last-known-good after an external health gate."""
         with self.trust_lock():
-            self.admit(revision)
             current = self._optional_resolve(LKG_REF)
-            rollback = self._rollback_refs()
-            history = [item for item in (current, *rollback.values()) if item and item != revision]
-            history = list(dict.fromkeys(history))[: self.policy.rollback_history]
-            commands = ["start"]
-            current_refs = {
-                f"{ROLLBACK_REF_PREFIX}{slot:04d}": oid for slot, oid in rollback.items()
-            }
-            desired_refs = {
-                f"{ROLLBACK_REF_PREFIX}{slot:04d}": oid for slot, oid in enumerate(history)
-            }
-            for ref in sorted(current_refs.keys() | desired_refs.keys()):
-                old = current_refs.get(ref)
-                new = desired_refs.get(ref)
-                if new is None and old is not None:
-                    commands.append(f"delete {ref} {old}")
-                elif new is not None:
-                    commands.append(f"update {ref} {new} {old or '0' * 40}")
-            commands.append(f"update {LKG_REF} {revision} {current or '0' * 40}")
-            commands.extend(("prepare", "commit"))
-            self._require(
-                self._git("update-ref", "--stdin", input_text="\n".join(commands) + "\n"),
-                "rotate last-known-good refs",
-            )
+            self._advance_last_known_good_locked(revision, expected=current)
+
+    def advance_last_known_good(self, revision: str, *, expected: str | None) -> None:
+        """Compare-and-swap the protected LKG ref and verify its durable value."""
+        with self.trust_lock():
+            self._advance_last_known_good_locked(revision, expected=expected)
+
+    def _advance_last_known_good_locked(self, revision: str, *, expected: str | None) -> None:
+        """Rotate the protected LKG refs while the caller holds the trust lock."""
+        self.admit(revision)
+        current = self._optional_resolve(LKG_REF)
+        if current != expected:
+            raise TrustError("Last-known-good ref changed before protected advancement")
+        rollback = self._rollback_refs()
+        history = [item for item in (current, *rollback.values()) if item and item != revision]
+        history = list(dict.fromkeys(history))[: self.policy.rollback_history]
+        commands = ["start"]
+        current_refs = {f"{ROLLBACK_REF_PREFIX}{slot:04d}": oid for slot, oid in rollback.items()}
+        desired_refs = {f"{ROLLBACK_REF_PREFIX}{slot:04d}": oid for slot, oid in enumerate(history)}
+        for ref in sorted(current_refs.keys() | desired_refs.keys()):
+            old = current_refs.get(ref)
+            new = desired_refs.get(ref)
+            if new is None and old is not None:
+                commands.append(f"delete {ref} {old}")
+            elif new is not None:
+                commands.append(f"update {ref} {new} {old or '0' * 40}")
+        commands.append(f"update {LKG_REF} {revision} {current or '0' * 40}")
+        commands.extend(("prepare", "commit"))
+        self._require(
+            self._git("update-ref", "--stdin", input_text="\n".join(commands) + "\n"),
+            "rotate last-known-good refs",
+        )
+        if self._resolve(LKG_REF) != revision:
+            raise TrustError("Last-known-good ref did not retain the admitted revision")
 
     def last_known_good(self) -> str:
         """Return the retained last-known-good commit without network access."""

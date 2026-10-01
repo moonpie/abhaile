@@ -1,0 +1,16 @@
+- name: Validate sudo candidate-only publication
+  ansible.builtin.assert:
+    that:
+      - operation.kind == 'host.sudoers'
+      - operation.action == 'publish'
+      - operation.validation == 'sudoers'
+      - operation.target == '/var/lib/abhaile/sudo-candidates/abhaile'
+      - operation.owner == '0'
+      - operation.group == '0'
+      - operation.mode == '0440'
+      - operation.parameters | length == 0
+      - abhaile_source_stat.stat.isreg
+      - abhaile_source_stat.stat.checksum == operation.source_sha256
+    fail_msg: "Sudo candidate publication authority is invalid."
+  no_log: true
+  diff: false

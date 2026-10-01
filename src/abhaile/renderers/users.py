@@ -31,6 +31,20 @@ def render_users_artifacts(
     sudoers = merged["sudoers"]
 
     _validate_user_group_references(users, groups)
+    if collector is not None:
+        identities = collector.get_metadata().execution_identities
+        for name, user in sorted(users.items()):
+            group_name = user.get("primary_group") or name
+            group = groups.get(group_name, {})
+            identity = {
+                "name": name,
+                "uid": user.get("uid"),
+                "gid": group.get("gid"),
+                "home": user.get("home"),
+                "shell": user.get("shell"),
+            }
+            if all(value is not None for value in identity.values()):
+                identities[f"user:{name}"] = identity
 
     sysusers_path = output_dir / "etc" / "sysusers.d" / "abhaile.conf"
     sudoers_path = output_dir / "etc" / "sudoers.d" / "abhaile"

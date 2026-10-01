@@ -1,0 +1,14 @@
+- name: Publish one admitted kernel module option declaration
+  abhaile_publish:
+    root: "{{ abhaile_execution_root }}"
+    target: "/etc/modprobe.d/abhaile-{{ kernel_module.name }}.conf"
+    state: file
+    content: >-
+      {{ 'options ' ~ kernel_module.name ~ ' ' ~ (kernel_module.options | join(' ')) ~ '\n' }}
+    sha256: >-
+      {{ ('options ' ~ kernel_module.name ~ ' ' ~ (kernel_module.options | join(' ')) ~ '\n') | hash('sha256') }}
+    uid: 0
+    gid: 0
+    mode: "0644"
+  no_log: true
+  diff: false

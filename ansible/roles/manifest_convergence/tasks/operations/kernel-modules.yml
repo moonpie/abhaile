@@ -1,0 +1,31 @@
+- name: Publish admitted kernel module declaration
+  abhaile_publish:
+    root: "{{ abhaile_execution_root }}"
+    target: >-
+      {{ operation.effects | selectattr('role', 'equalto', 'declaration') | map(attribute='target') | first }}
+    state: file
+    content: >-
+      {{ (operation.parameters.modules | map(attribute='name') | join('\n')) ~ '\n' }}
+    sha256: >-
+      {{ ((operation.parameters.modules | map(attribute='name') | join('\n')) ~ '\n') | hash('sha256') }}
+    uid: 0
+    gid: 0
+    mode: "0644"
+  register: abhaile_kernel_declaration
+  no_log: true
+  diff: false
+- name: Publish admitted kernel module options
+  ansible.builtin.include_tasks: kernel-module-options.yml
+  loop: "{{ operation.parameters.modules }}"
+  loop_control:
+    loop_var: kernel_module
+    label: "suppressed"
+  when: kernel_module.options | length > 0
+  no_log: true
+- name: Converge each admitted kernel module
+  ansible.builtin.include_tasks: kernel-module-one.yml
+  loop: "{{ operation.parameters.modules }}"
+  loop_control:
+    loop_var: kernel_module
+    label: "suppressed"
+  no_log: true

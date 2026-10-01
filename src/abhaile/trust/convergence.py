@@ -20,6 +20,7 @@ class ConvergenceStep:
     execution_context: str
     validation: str
     lifecycle: tuple[str, ...]
+    lifecycle_metadata: tuple[tuple[str, object], ...]
     phase: int
 
 
@@ -50,6 +51,7 @@ def build_convergence_plan(manifest: dict[str, Any]) -> ConvergencePlan:
             entry["execution_context"],
             entry["validation"],
             tuple(entry["lifecycle"]),
+            tuple(sorted(entry["lifecycle_metadata"].items())),
             _phase(entry["kind"], entry["action"]),
         )
         for entry in entries

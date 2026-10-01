@@ -1,0 +1,21 @@
+- name: Validate directory operation
+  ansible.builtin.assert:
+    that:
+      - operation.target is string
+      - operation.target is match('^/')
+      - "'..' not in operation.target.split('/')"
+      - operation.owner is string
+      - operation.group is string
+      - operation.mode is match('^0[0-7]{3}$')
+      - operation.validation == 'structural'
+      - operation.kind == 'service.directory'
+      - operation.action == 'create'
+      - operation.parameters | length == 0
+      - operation.lifecycle | length == 0
+      - operation.lifecycle_metadata | length == 0
+      - abhaile_source_stat.stat.exists
+      - abhaile_source_stat.stat.isdir
+      - not abhaile_source_stat.stat.islnk
+    fail_msg: "Directory operation data shape is invalid."
+  no_log: true
+  diff: false

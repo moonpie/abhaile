@@ -1,0 +1,14 @@
+- name: Validate and stage sudo policy candidate without installation
+  abhaile_publish:
+    root: "{{ abhaile_execution_root }}"
+    target: "{{ operation.target }}"
+    state: file
+    source: "{{ operation.source }}"
+    sha256: "{{ operation.source_sha256 }}"
+    uid: 0
+    gid: 0
+    mode: "0440"
+    validation: sudoers
+  register: abhaile_sudo_candidate
+  no_log: true
+  diff: false

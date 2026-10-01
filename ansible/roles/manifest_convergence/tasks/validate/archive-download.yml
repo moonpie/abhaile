@@ -1,0 +1,21 @@
+- name: Validate immutable archive download operation
+  ansible.builtin.assert:
+    that:
+      - operation.kind == 'software.download'
+      - operation.action == 'fetch'
+      - operation.validation == 'software-result'
+      - >-
+        operation.parameters.keys() | sort == ['archive_member', 'destination', 'max_bytes', 'max_compression_ratio',
+        'max_member_bytes', 'max_redirects', 'mode', 'output_sha256', 'redirect_origins', 'sha256', 'url']
+      - operation.parameters.url is match('^https://')
+      - operation.parameters.sha256 is match('^[0-9a-f]{64}$')
+      - operation.parameters.output_sha256 is match('^[0-9a-f]{64}$')
+      - operation.parameters.archive_member is match('^[^/]+$')
+      - operation.parameters.destination is match('^/')
+      - operation.parameters.mode is match('^0[0-7]{3}$')
+      - operation.effects | length == 1
+      - abhaile_source_stat.stat.isreg
+      - abhaile_source_stat.stat.checksum == operation.source_sha256
+    fail_msg: "Archive download operation data shape is invalid."
+  no_log: true
+  diff: false

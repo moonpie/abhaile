@@ -16,6 +16,7 @@ class AccountIdentity:
     gid: int
     home: str
     shell: str
+    name: str = "abhaile"
 
     def __post_init__(self) -> None:
         """Reject unsupported service identities before building any command."""
@@ -24,7 +25,8 @@ class AccountIdentity:
             or type(self.gid) is not int
             or not 0 < self.uid < 2**32 - 1
             or not 0 < self.gid < 2**32 - 1
-            or self.home != "/home/abhaile"
+            or self.home != f"/home/{self.name}"
+            or not self.name.replace("_", "a").replace("-", "a").isalnum()
             or self.shell not in {"/bin/bash", "/usr/sbin/nologin", "/bin/false"}
         ):
             raise TrustError("Rootless account intent is invalid")
@@ -84,8 +86,8 @@ def rootless_environment(
     runtime_path = f"/run/user/{account.uid}"
     return {
         "HOME": account.home,
-        "USER": "abhaile",
-        "LOGNAME": "abhaile",
+        "USER": account.name,
+        "LOGNAME": account.name,
         "XDG_RUNTIME_DIR": runtime_path,
         "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime_path}/bus",
         "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",

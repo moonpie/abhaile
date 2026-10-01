@@ -33,7 +33,9 @@ ENTRY_KEYS = frozenset(
 OWNER_KEYS = frozenset({"name", "description", "requires", "apply_hints"})
 MANIFEST_KEYS = frozenset({"version", "host", "rendered_at", "entries", "owners"})
 CONVERGENCE_MANIFEST = "convergence-manifest.json"
-V2_KEYS = frozenset({"schema_version", "host", "rendered_root", "entries", "owners"})
+V2_KEYS = frozenset(
+    {"schema_version", "host", "rendered_root", "entries", "owners", "execution_identities"}
+)
 V2_ENTRY_KEYS = frozenset(
     {
         "render_path",
@@ -47,13 +49,28 @@ V2_ENTRY_KEYS = frozenset(
         "metadata",
         "validation",
         "lifecycle",
+        "lifecycle_metadata",
         "safe_prune",
     }
 )
-V2_OWNER_KEYS = frozenset({"name", "owner_kind", "execution_context", "requires"})
+V2_OWNER_KEYS = frozenset(
+    {"name", "owner_kind", "execution_context", "requires", "restart_authorities"}
+)
 V2_ACTIONS = frozenset({"publish", "create", "install", "fetch", "build", "ensure"})
 V2_VALIDATIONS = frozenset(
-    {"structural", "sudoers", "sysusers", "systemd", "coredns-zone", "software-result"}
+    {
+        "structural",
+        "sudoers",
+        "sysusers",
+        "systemd",
+        "resolved",
+        "caddy",
+        "coredns",
+        "coredns-zone",
+        "quadlet",
+        "vault-agent",
+        "software-result",
+    }
 )
 V2_LIFECYCLE = frozenset({"manager-reload", "service-restart", "network-reconfigure"})
 V2_PRUNE = frozenset({"safe-if-unchanged", "report-only"})
@@ -195,6 +212,7 @@ def validate_convergence_manifest_snapshot(
     if manifest.get("host") != host or manifest.get("rendered_root") != ".":
         raise TrustError("Convergence manifest identity is invalid")
     owners = _validate_v2_owners(manifest.get("owners"))
+    identities = _validate_execution_identities(manifest.get("execution_identities"))
     entries = manifest.get("entries")
     if not isinstance(entries, list):
         raise TrustError("Convergence manifest entries must be a list")
@@ -243,6 +261,9 @@ def validate_convergence_manifest_snapshot(
             raise TrustError("Convergence manifest owner or context is invalid")
         if not _valid_context(context):
             raise TrustError("Convergence manifest execution context is invalid")
+        if isinstance(context, str) and context.startswith("user:"):
+            if context not in identities:
+                raise TrustError("Convergence named-user identity authority is missing")
         if raw["validation"] not in V2_VALIDATIONS:
             raise TrustError("Convergence manifest validation is unsupported")
         if raw["validation"] != _v2_validation(kind):
@@ -258,6 +279,7 @@ def validate_convergence_manifest_snapshot(
             raise TrustError("Convergence manifest prune class is invalid")
         if not _valid_lifecycle(kind, lifecycle):
             raise TrustError("Convergence manifest kind and lifecycle disagree")
+        _validate_lifecycle_metadata(lifecycle, raw["lifecycle_metadata"], context)
         _validate_v2_metadata(kind, raw["metadata"])
         size, digest = raw["size"], raw["sha256"]
         if isinstance(size, bool) or not isinstance(size, int) or size < 0:
@@ -301,7 +323,43 @@ def validate_convergence_manifest_snapshot(
             parent = parent.parent
     if actual_files != expected_files or actual_directories != required_directories:
         raise TrustError("Convergence manifest completeness check failed")
+    used_identities = {
+        entry["execution_context"]
+        for entry in entries
+        if isinstance(entry.get("execution_context"), str)
+        and entry["execution_context"].startswith("user:")
+    }
+    if set(identities) != used_identities:
+        raise TrustError("Convergence manifest contains unused execution identity authority")
+    _validate_restart_authorities(entries, owners, identities)
     return manifest
+
+
+def _validate_execution_identities(value: object) -> dict[str, dict[str, object]]:
+    if not isinstance(value, dict):
+        raise TrustError("Convergence execution identities must be an object")
+    identities: dict[str, dict[str, object]] = {}
+    for context, raw in value.items():
+        if (
+            not isinstance(context, str)
+            or re.fullmatch(r"user:[A-Za-z_][A-Za-z0-9_-]*", context) is None
+            or not isinstance(raw, dict)
+            or set(raw) != {"name", "uid", "gid", "home", "shell"}
+        ):
+            raise TrustError("Convergence execution identity is invalid")
+        name = context.removeprefix("user:")
+        if (
+            raw["name"] != name
+            or type(raw["uid"]) is not int
+            or type(raw["gid"]) is not int
+            or not 0 < raw["uid"] < 2**32 - 1
+            or not 0 < raw["gid"] < 2**32 - 1
+            or raw["home"] != f"/home/{name}"
+            or raw["shell"] not in {"/bin/bash", "/usr/sbin/nologin", "/bin/false"}
+        ):
+            raise TrustError("Convergence execution identity is invalid")
+        identities[context] = raw
+    return identities
 
 
 def _validate_v2_owners(value: object) -> dict[str, dict[str, Any]]:
@@ -314,7 +372,12 @@ def _validate_v2_owners(value: object) -> dict[str, dict[str, Any]]:
             raise TrustError("Convergence manifest owner is invalid")
         if re.fullmatch(r"[A-Za-z0-9_.@/-]+:[A-Za-z0-9_.@/-]+", name) is None:
             raise TrustError("Convergence manifest owner reference is invalid")
-        if set(payload) != V2_OWNER_KEYS or payload.get("name") != name:
+        required_owner_keys = V2_OWNER_KEYS - {"restart_authorities"}
+        if (
+            not set(payload).issubset(V2_OWNER_KEYS)
+            or not required_owner_keys.issubset(payload)
+            or payload.get("name") != name
+        ):
             raise TrustError("Convergence manifest owner is incomplete")
         requires = payload.get("requires")
         if (
@@ -323,6 +386,22 @@ def _validate_v2_owners(value: object) -> dict[str, dict[str, Any]]:
             or any(not isinstance(item, str) or not item for item in requires)
         ):
             raise TrustError("Convergence manifest owner dependencies are invalid")
+        restart_authorities = payload.get("restart_authorities", [])
+        if not isinstance(restart_authorities, list):
+            raise TrustError("Convergence restart authorities are invalid")
+        seen_units: set[str] = set()
+        for authority in restart_authorities:
+            if (
+                not isinstance(authority, dict)
+                or set(authority) != {"unit", "execution_context", "authority_owner"}
+                or not isinstance(authority["unit"], str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]*", authority["unit"]) is None
+                or not _valid_context(authority["execution_context"])
+                or not isinstance(authority["authority_owner"], str)
+                or authority["unit"] in seen_units
+            ):
+                raise TrustError("Convergence restart authorities are invalid")
+            seen_units.add(authority["unit"])
         context = payload.get("execution_context")
         owner_kind = payload.get("owner_kind")
         if not _valid_context(context) or owner_kind not in {
@@ -339,6 +418,7 @@ def _validate_v2_owners(value: object) -> dict[str, dict[str, Any]]:
         if owner_kind != _v2_owner_kind(name):
             raise TrustError("Convergence manifest owner kind disagrees with its reference")
         owners[name] = payload
+        owners[name]["restart_authorities"] = restart_authorities
         dependencies[name] = requires
     for name, requires in dependencies.items():
         if any(required not in owners for required in requires):
@@ -392,10 +472,20 @@ def _v2_validation(kind: str) -> str:
         return "sudoers"
     if kind == "host.sysusers":
         return "sysusers"
-    if kind.startswith(("systemd.", "resolved.")):
+    if kind.startswith("systemd."):
         return "systemd"
+    if kind.startswith("resolved."):
+        return "resolved"
+    if kind == "caddy.config":
+        return "caddy"
+    if kind == "coredns.config":
+        return "coredns"
     if kind == "coredns.zone":
         return "coredns-zone"
+    if kind.startswith("quadlet."):
+        return "quadlet"
+    if kind == "vault.config":
+        return "vault-agent"
     if kind.startswith("software."):
         return "software-result"
     return "structural"
@@ -410,6 +500,91 @@ def _valid_lifecycle(kind: str, lifecycle: list[object]) -> bool:
         if effect == "service-restart" and kind.startswith("software."):
             return False
     return True
+
+
+def _validate_lifecycle_metadata(
+    lifecycle: list[object], metadata: object, context: object
+) -> None:
+    if not isinstance(metadata, dict) or set(metadata) != (
+        {"service-restart"} if "service-restart" in lifecycle else set()
+    ):
+        raise TrustError("Convergence lifecycle metadata is incomplete")
+    if "service-restart" not in metadata:
+        return
+    restart = metadata["service-restart"]
+    if (
+        not isinstance(restart, dict)
+        or set(restart) != {"unit", "mode", "authority_owner"}
+        or not isinstance(restart["unit"], str)
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@+-]*", restart["unit"]) is None
+        or restart["mode"] not in {"restart", "try-restart"}
+        or not isinstance(restart["authority_owner"], str)
+        or not _valid_context(context)
+    ):
+        raise TrustError("Convergence service restart metadata is invalid")
+
+
+def _validate_restart_authorities(
+    entries: list[dict[str, Any]],
+    owners: dict[str, dict[str, Any]],
+    identities: dict[str, dict[str, object]],
+) -> None:
+    """Bind every automatic restart to exact owner and unit authority."""
+    managed: dict[tuple[str, str], str] = {}
+    for entry in entries:
+        unit = _managed_unit_name(entry)
+        if unit is None:
+            continue
+        key = (str(entry["execution_context"]), unit)
+        if key in managed:
+            raise TrustError("Convergence managed unit authority is ambiguous")
+        managed[key] = str(entry["owner_ref"])
+    for entry in entries:
+        metadata = entry["lifecycle_metadata"]
+        if "service-restart" not in metadata:
+            continue
+        restart = metadata["service-restart"]
+        unit = restart["unit"]
+        if unit in {"abhaile-runner.service", "abhaile-runner.timer"}:
+            raise TrustError("The active runner cannot authorize its own restart")
+        owner_ref = str(entry["owner_ref"])
+        context = str(entry["execution_context"])
+        declarations = owners[owner_ref]["restart_authorities"]
+        matches = [value for value in declarations if value["unit"] == unit]
+        if len(matches) != 1 or matches[0] != {
+            "unit": unit,
+            "execution_context": context,
+            "authority_owner": restart["authority_owner"],
+        }:
+            raise TrustError("Convergence restart authority is unrelated to its owner")
+        authority_owner = str(restart["authority_owner"])
+        managed_owner = managed.get((context, unit))
+        if managed_owner is not None:
+            if authority_owner != managed_owner:
+                raise TrustError("Convergence restart authority has the wrong managed owner")
+            authority = owners.get(authority_owner)
+            if authority is None or authority["execution_context"] not in {context, "orchestrator"}:
+                raise TrustError("Convergence restart authority crosses execution context")
+        elif authority_owner != owner_ref:
+            raise TrustError("Convergence unmanaged restart lacks explicit owner authority")
+        if context.startswith("user:") and context not in identities:
+            raise TrustError("Convergence restart authority lacks sealed user identity")
+
+
+def _managed_unit_name(entry: dict[str, Any]) -> str | None:
+    """Resolve the exact unit name represented by one managed entry."""
+    kind = entry["kind"]
+    if kind == "systemd.unit":
+        target = entry["target_path"]
+        return PurePosixPath(target).name if isinstance(target, str) else None
+    if isinstance(kind, str) and kind.startswith("quadlet."):
+        owner = entry["owner_ref"]
+        return (
+            owner.removeprefix("unit:")
+            if isinstance(owner, str) and owner.startswith("unit:")
+            else None
+        )
+    return None
 
 
 def _v2_owner_kind(name: str) -> str:

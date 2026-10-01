@@ -51,7 +51,7 @@ def committed_transaction(**overrides):
     )
     values.update(overrides)
     transaction = TransactionPlan(**values)
-    transaction = record_local_convergence(transaction, validations_succeeded=True)
+    transaction = record_local_convergence(transaction, validations_succeeded=True, changed=True)
     transaction = commit_apply_state(transaction)
     transaction = record_wider_health(transaction, succeeded=True)
     return commit_runner_lkg(transaction)
@@ -72,7 +72,11 @@ def test_staging_and_commit_precede_publication_reload_and_timer_effects(timer_c
         actions.append(plan.next_action)
         recoveries.append(plan.recovery)
         if plan.stage is RunnerUpdateStage.STAGED:
-            evidence = bind_runner_publication_evidence(committed_transaction(), plan)
+            evidence = bind_runner_publication_evidence(
+                committed_transaction(),
+                plan,
+                durable_runner_lkg_receipt_sha256="e" * 64,
+            )
             plan = authorize_runner_publication(committed_transaction(), plan, evidence)
         else:
             plan = step(plan)
@@ -145,9 +149,13 @@ def test_unrelated_or_tampered_evidence_cannot_authorize_publication(
     transaction = committed_transaction(**transaction_change)
     if transaction_change:
         with pytest.raises(TrustError):
-            bind_runner_publication_evidence(transaction, plan)
+            bind_runner_publication_evidence(
+                transaction, plan, durable_runner_lkg_receipt_sha256="e" * 64
+            )
         return
-    evidence = bind_runner_publication_evidence(transaction, plan)
+    evidence = bind_runner_publication_evidence(
+        transaction, plan, durable_runner_lkg_receipt_sha256="e" * 64
+    )
     tampered = RunnerPublicationEvidence(**{**evidence.__dict__, **evidence_change})
     with pytest.raises(TrustError):
         authorize_runner_publication(transaction, plan, tampered)

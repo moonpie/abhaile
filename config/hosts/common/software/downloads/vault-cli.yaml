@@ -6,9 +6,15 @@ execution_policy: admitted
 parameters:
   url: https://releases.hashicorp.com/vault/1.21.4/vault_1.21.4_linux_amd64.zip
   sha256: 889b681990fe221b884b7932fa9c9dd0ee9811b9349554f1aa287ab63c9f3dae
+  output_sha256: 86fe97e5d039cb6fd5a8d880ac3df366395d83a082bc509621c8388d23300329
   archive_member: vault
   destination: /usr/local/bin/vault
   mode: "0755"
+  max_bytes: 268435456
+  max_member_bytes: 536870912
+  max_compression_ratio: 20
+  redirect_origins: []
+  max_redirects: 0
 effects:
   - kind: path
     target: /usr/local/bin/vault

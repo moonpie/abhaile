@@ -8,7 +8,7 @@ title: Target Host Reconciliation Model
 status: active
 owner: moonpie
 created: 2026-09-04
-updated: 2026-09-29
+updated: 2026-10-01
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -797,6 +797,235 @@ cutover remain in their existing later phases.
   evidence gate; actual host collection remains in Phases 6 and 7 and convergence remains Phase 4.
 
 - ADR: null
+
+## Phase 4 Repository Evidence
+
+Phase 4 implements production convergence mechanics; Phase 5 proves those same mechanics in
+authorized disposable environments. The protected planner turns an independently validated sealed
+v2 manifest into a dependency-ordered data-only operation list. One production role performs a
+complete validation pass before its mutation pass. There is no test-only convergence copy. Its
+temporary execution gate admits only the explicit `isolated-disposable-v1` scope beneath a
+canonical `/tmp` root. The protected production plan does not emit that scope, `--ansible` remains
+rejected, and the privileged launcher remains non-executable for convergence.
+
+The current closed mapping is:
+
+| Manifest family | Admitted operation | Phase 4 status |
+| --- | --- | --- |
+| `service.directory` / `create` | `directory` | Capsule-shipped descriptor-bound publisher maps the absolute manifest namespace beneath an injected root, retains no-follow ancestry, and applies exact numeric ownership/mode with truthful check and idempotence behavior |
+| ordinary and validated file families / `publish` | `publish` | Sealed source digest/type is preflighted; a fixed validator vocabulary runs before descriptor-bound atomic publication; Caddy and CoreDNS Corefile use the closed offline structural validators described below |
+| `systemd.unit`, Quadlet, and lifecycle-bearing publication | `publish`, `lifecycle` | Effects are coalesced once per owner and execution context; only changed owner-context pairs reload/restart; named-user effects require exact protected observations and use PAM-free `setpriv` transport |
+| `software.packages` and host-global prerequisites | `packages`, `systemd-units`, `unattended-upgrades`, `udev-rule` | Native modules or fixed argv are defined behind a separate protected host-global-isolation gate; Phase 5 must prove package availability/check-mode and real platform behavior |
+| sysusers and sudoers | `publish`, `sudo-candidate` | Sysusers validates, publishes, and activates through fixed root-aware argv; sudoers validates and stages only at the protected candidate path, never the live policy target |
+| resolved, Quadlet, Vault Agent, CoreDNS zone | `publish`, `lifecycle` | Fixed validation/publication mechanics are present; named-user variants require exact protected observation authority before PAM-free execution |
+| Caddy and CoreDNS Corefile | `publish`, `lifecycle` | Capsule-internal bytes first pass closed renderer grammars covering UTF-8, nesting, directive placement, arity, bounded values, blocks, and safe named imports without starting a service; publication and changed-owner effects then use the same descriptor-safe path. Phase 5 proves compatibility with exact installed binaries/plugins and fails adoption rather than broadening the grammar |
+| immutable binary/archive download / `fetch` | `binary-download`, `archive-download` | HTTPS origin/redirect/byte/archive-digest/extracted-output-digest authority and archive member/count/type/traversal/encryption/expansion bounds precede descriptor-safe atomic publication; an exact local target skips acquisition and check mode never acquires |
+| kernel modules / `ensure` | `kernel-modules` | Modules-load and modprobe fragments publish descriptor-safely; absent modules load only through fixed `/usr/sbin/modprobe --` argv behind host-global isolation |
+| resolver/network backend / `ensure` | none | Rejected as network-affecting operations |
+| container build / `build` | none | Fails closed because the current source ref and OCI base tag are not immutable root-verifiable inputs |
+| networkd publication/effects | none | Fails closed before mutation; only the separate repository recovery state machine exists |
+| named-user operations | lifecycle only with sealed `execution_identity` | The exact common envelope contains no derived identity flag: `context` and `execution_identity` are a biconditional authority. Manifest v2 supplies exact name, UID, GID, HOME, and shell values; manager effects require matching protected linger, manager, runtime-directory, and bus observations plus fixed PAM-free transport. Rootless Quadlets publish as root beneath `/etc/containers/systemd/users/<sealed-uid>/`; other publication beneath named-user-writable ancestry remains rejected. |
+
+Repository-safe slices additionally cover a versioned transaction-derived apply-state rotation
+journal, no-follow identity-aware prune classification and authorized descriptor-relative removal,
+distinct prune/destructive/network/volume gates, transaction-gated runner pair publication with
+retained prior bytes and metadata, and a transaction- and digest-bound network snapshot/candidate
+journal.
+Private runner evidence metadata and content are validated through the same no-follow descriptor.
+State interruption recovery deterministically completes the authorized current/previous/history
+tuple under injected roots. Runner recovery reauthorizes exact apply/LKG and lock evidence,
+restores the prior pair on pre-reload ambiguity, and permits a repeated timer rearm only through an
+explicit idempotence contract. Initial runner candidate staging writes transaction-bound
+initialization authority first, assembles and fsyncs the exact candidate pair, recovery record, and
+staging identity in a private sibling, then atomically publishes the complete directory. Exact
+retries finish forward; malformed, linked, unsafe, or transaction-mismatched retained state fails
+closed without deletion. None of this invokes a real system manager or networking.
+All sealed candidate content and fixed external validators run in the first pass before the first
+mutation. The protected production coordinator persists network recovery authority before any separate
+network executor, executes only exactly authorized prunes before local apply-state commit,
+advances runner LKG only after wider health, binds rollback convergence to the protected prior
+revision/capsule/manifest before rotating apply state, and publishes runner units only after both
+ledger commits. One protected coordinator entry point holds a descriptor-safe process lock across
+network-recovery preparation, convergence, apply-state commit, protected health-result
+verification, runner-LKG promotion, and optional runner publication. Health success is derived
+from a no-follow ownership/mode-checked persisted result whose closed observations are bound to an
+unpredictable challenge created only after apply-state commit and to the exact transaction and apply
+evidence, not from a caller boolean, callback, or predated result. The current apply-state record,
+protected retained applied state, and mirror LKG ref are re-read under the same lock immediately
+before promotion or rollback planning. Runner-LKG
+advancement persists a protected promotion journal, compare-and-swap rotates and verifies the
+admitted mirror ref, atomically persists a candidate/retained-revision/manifest/health-bound
+receipt, and removes the journal only after directory fsync. Recovery finishes forward only when
+the ref is the exact prior or candidate revision. Runner publication and recovery require a
+verifier-issued in-process authority after re-reading the receipt and ref, and bind its receipt
+digest into publication evidence. Phase 5 is reserved for proving this integrated path in an
+authorized disposable environment.
+
+Focused tests exercise production role gate rejection, complete preflight, ordinary publication
+check mode, first change, unchanged rerun, path/symlink rejection, compiler exhaustiveness, bounded
+download/archive behavior, and the repository state/recovery mechanics. This is proportionate
+Phase 4 implementation testing, not the broad isolated evidence assigned to Phase 5. Phase 5 owns
+installed-binary compatibility and broad behavioral proof only after a family is admitted. Phases
+6 and 7 own installed runtime, sudo-policy installation, host adoption, canary, live network proof,
+publication activation, and cutover.
+
+## Phase 4 Decision Notes
+
+- Decision: A restart lifecycle is executable authority only when manifest v2 carries an exact
+  renderer-owned unit, authority owner, execution context, and bounded `restart` or `try-restart`
+  mode. The requesting owner must declare the same authority, and a corresponding managed unit or
+  explicit owner-level external-unit authority must resolve without ambiguity.
+
+- Rationale: A bare `service-restart` effect would require the privileged converger to infer a
+  target from an owner, task name, or path. `manual` Quadlet policy means no immediate restart and
+  must not be translated into a restart request.
+
+- Impact: Unknown, unmanaged, cross-owner, cross-context, identity-mismatched, or runner-self
+  restart targets fail before mutation. `manual` authorizes no automatic action. The strict v2
+  shape was completed in place because it has no adopted executable consumer; no new ADR is
+  required under ADR 0010's existing trust boundary.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Rootless Quadlet publication uses Podman's root-owned per-UID search path
+  `/etc/containers/systemd/users/<sealed-uid>/`, while activation still occurs through the sealed
+  named-user manager context.
+
+- Rationale: Publishing through a directory writable by the target user creates an unavoidable
+  pathname replacement race for a privileged publisher. Podman's system-wide per-UID Quadlet
+  search path separates root-owned publication from user-manager activation.
+
+- Impact: Manifest v2 rewrites only rootless Quadlet targets and ownership; legacy manifest v1 is
+  unchanged. Bootstrap/adoption must establish and verify the root-owned ancestry. Any other
+  named-user-writable publication target remains fail closed.
+
+- ADR: null
+
+- Decision: Caddy, CoreDNS Corefile, and resolved candidates use sealed-input project parsers for
+  the complete renderer-owned grammar, including bounded size, UTF-8 and NUL checks, nesting,
+  directive placement and arity, bounded values, and safe Caddy named imports. Every content and
+  fixed external validator runs during the global pre-mutation pass.
+
+- Rationale: CoreDNS exposes no accepted non-starting configuration-check interface, and invoking
+  a service merely to validate a candidate violates the pre-publication boundary. The checked-in
+  configuration vocabulary is finite and renderer-owned.
+
+- Impact: Unknown or misplaced directives, invalid arity/values, and unsafe imports fail before
+  any publication or handler. Phase 5 must
+  prove the closed parser accepts the exact rendered configurations and agrees with installed
+  Caddy/CoreDNS/plugin behavior in a disposable environment; installed incompatibility blocks
+  adoption rather than weakening validation.
+
+- ADR: null
+
+- Decision: Desired-state identity is not transaction replay identity. A fresh transaction may
+  reconcile the same revision, capsule, and manifest; only a reused transaction ID, reused apply
+  commit evidence, fabricated evidence, or mismatched interrupted transaction is replay.
+
+- Rationale: Current-revision drift repair, post-reboot repair, and retry after interruption must
+  not require a false desired revision change.
+
+- Impact: A successful no-op and a successful same-revision drift repair each append one truthful,
+  bounded chronological transaction record while retaining the same desired-state identity and
+  recording `no-op` or `changed` convergence outcome. Non-expiring opaque replay markers are
+  independent of bounded diagnostic history. Dry-run advances nothing. Apply state remains
+  distinct from runner LKG.
+
+- ADR: null
+
+- Decision: Initial network recovery state is assembled and fsynced in a private transaction
+  directory, binding transaction, snapshot, candidate, deletion approval, and recovery token,
+  then atomically published beneath an already protected parent.
+
+- Rationale: Publishing the final directory before its journal makes both retry and recovery
+  ambiguous after interruption.
+
+- Impact: Failure injection around every durable initialization transition permits deterministic
+  retry or finish-forward. Existing links, malformed state, unsafe metadata, and identity mismatch
+  fail closed without deletion. No network command, timer, or reachability test is implemented by
+  this repository state machine.
+
+- ADR: null
+
+- Decision: Bootstrap and adoption own credentials, trust runtimes, identities, linger, runtime
+  namespaces, and sudo installation; ordinary convergence verifies these prerequisites and does
+  not recreate or overwrite them opportunistically.
+
+- Rationale: Both hosts contain existing state, and credential or identity replacement cannot be
+  made safe by treating adoption as fresh enrollment.
+
+- Impact: The deterministic prerequisite graph records preservation and later live-proof phases.
+  Sudo publication, installed runtime proof, and credential handling remain Phases 6 and 7.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Applied-state, safe-prune, runner publication, and network recovery must use closed,
+  transaction-bound repository mechanics before any executable integration is admitted.
+
+- Rationale: Crash recovery and destructive authority must be testable independently of Ansible
+  task execution and cannot be reconstructed after a partial mutation.
+
+- Impact: The repository slices now implement crash-coherent finish-forward state rotation,
+  descriptor-relative prune identity, exact apply/LKG/lock-bound runner pair recovery, and a
+  protected transaction-bound network snapshot/candidate journal. They do not prove actual
+  rollback convergence, real system-manager reload/rearm behavior, an independently armed network
+  revert, typed affected-network reachability, or reboot recovery. Those behavioral gates remain
+  Phase 5; irreversible package/build/external effects are not claimed reversible.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
+
+- Decision: Named-user execution authority is renderer-owned manifest data, not a value inferred
+  from task names, target paths, or the executor account database.
+
+- Rationale: UID, GID, HOME, and shell are security-relevant inputs, while linger, runtime
+  directory, user bus, and manager availability are protected runtime observations.
+
+- Impact: Manifest v2 seals exact name/UID/GID/HOME/shell values and the compiler carries them
+  unchanged. The common operation envelope deliberately omits the redundant
+  `runtime_identity_required` flag: named-user context exists if and only if the exact sealed
+  execution identity exists. Production-role preflight compares it with protected linger,
+  manager, UID-bound runtime-directory, and UID-bound bus observations before any mutation.
+  Phase 5 proves the integrated observation transport; installed proof remains Phases 6/7.
+
+- ADR: null
+
+- Decision: Runner last-known-good promotion is a separate durable commit protocol rather than an
+  in-memory transaction-stage transition.
+
+- Rationale: Runner-unit publication must not be authorized by a caller assertion or by evidence
+  derived before the protected mirror and runner ledger durably agree.
+
+- Impact: Under one protected coordinator lock, the coordinator verifies exact durable apply
+  state, creates and fsyncs an unpredictable post-apply challenge, boundedly awaits and validates a
+  protected challenge/transaction/apply-bound health result, re-verifies candidate apply state and
+  the retained mirror/applied-state authority, writes and fsyncs a promotion journal,
+  compare-and-swap
+  advances and verifies the protected mirror LKG ref, and atomically writes a separate
+  candidate/retained/health-bound runner-LKG receipt before returning commit evidence. Apply and
+  runner evidence also bind the retained revision and manifest. Interruption retries finish
+  forward from the exact prior/candidate states; third-state, mismatched, stale, fabricated, or
+  caller-boolean authority fails closed. Health failure retains the prior LKG and plans recovery
+  from the actual applied candidate. When candidate and retained desired identities are equal, the
+  result is an explicit same-desired-state recovery plan rather than a fictitious revision
+  rollback. Same-revision promotion treats the already-equal ref as satisfied and never repeats CAS
+  during recovery. Publication and recovery require verifier-issued durable authority and include
+  the receipt digest in their evidence.
+
+  Wider-health evidence has an explicit protected lifecycle. A single active journal binds the
+  unpredictable challenge and exact transaction/revision/capsule/manifest/apply identity. Its
+  result is immutable once published. A successful result remains active until the runner-LKG
+  receipt and admitted mirror ref are both durable and re-verified; only then is a
+  transaction-scoped `promoted` terminal record written and fsynced before active evidence is
+  cleared. A failed result advances to `failed-awaiting-rollback` and blocks every unrelated
+  transaction until the exact retained-state rollback apply record is durable. The rollback
+  coordinator then writes a transaction-scoped `rollback-completed` terminal record before
+  clearing active evidence. If interrupted after either terminal write, recovery re-verifies the
+  runner receipt/ref or rollback apply record and finishes cleanup; terminal presence alone is not
+  authority. Exact retries are idempotent, while a fresh transaction at the same desired revision
+  remains distinct through transaction and apply evidence. Stale, mismatched, malformed, or
+  unowned challenge/result/terminal state fails closed and is not blindly deleted.
+
+- ADR: [docs/adr/0010-ansible-reconciliation-model.md](../../adr/0010-ansible-reconciliation-model.md)
 
 ## Acceptance Criteria
 

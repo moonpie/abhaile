@@ -1,0 +1,16 @@
+- name: Converge admitted package presence
+  ansible.builtin.apt:
+    name: "{{ operation.parameters.packages }}"
+    state: present
+    update_cache: false
+  register: abhaile_packages
+  no_log: true
+  diff: false
+- name: Record changed package owner
+  ansible.builtin.set_fact:
+    abhaile_changed_owners: >-
+      {{ abhaile_changed_owners | combine({operation.owner_ref ~ '|' ~ operation.context: true}) }}
+  when: abhaile_packages.changed
+  changed_when: false
+  no_log: true
+  diff: false

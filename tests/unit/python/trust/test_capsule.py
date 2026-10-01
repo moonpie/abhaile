@@ -170,6 +170,7 @@ def test_seals_complete_convergence_manifest_v2(store: tuple[CapsuleStore, str])
                     "schema_version": 2,
                     "host": host,
                     "rendered_root": ".",
+                    "execution_identities": {},
                     "entries": [
                         {
                             "render_path": "system/unit.service",
@@ -183,6 +184,7 @@ def test_seals_complete_convergence_manifest_v2(store: tuple[CapsuleStore, str])
                             "metadata": {"owner": "root", "group": "root", "mode": "0644"},
                             "validation": "systemd",
                             "lifecycle": ["manager-reload"],
+                            "lifecycle_metadata": {},
                             "safe_prune": "safe-if-unchanged",
                         }
                     ],

@@ -1,0 +1,12 @@
+- name: Validate kernel module prerequisite operation
+  ansible.builtin.assert:
+    that:
+      - abhaile_host_global_isolated | default(false) | bool
+      - operation.kind == 'software.prerequisite'
+      - operation.action == 'ensure'
+      - operation.parameters.keys() | list == ['modules']
+      - operation.parameters.modules is sequence
+      - operation.parameters.modules | length > 0
+    fail_msg: "Kernel module authority is invalid or not isolated."
+  no_log: true
+  diff: false

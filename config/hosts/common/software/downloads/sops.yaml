@@ -8,6 +8,10 @@ parameters:
   sha256: 620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a
   destination: /usr/local/bin/sops
   mode: "0755"
+  max_bytes: 134217728
+  redirect_origins:
+    - https://release-assets.githubusercontent.com
+  max_redirects: 3
 effects:
   - kind: path
     target: /usr/local/bin/sops

@@ -1,0 +1,84 @@
+- name: Validate compiled operation envelope
+  ansible.builtin.assert:
+    that:
+      - >-
+        operation.keys() | sort == ['action', 'context', 'diff', 'effects', 'execution_identity', 'group', 'kind',
+        'lifecycle', 'lifecycle_metadata', 'mode', 'no_log', 'operation', 'owner', 'owner_ref', 'parameters', 'source',
+        'source_sha256', 'target', 'validation']
+      - >-
+        operation.operation in ['archive-download', 'binary-download', 'directory', 'kernel-modules', 'lifecycle',
+        'packages', 'publish', 'sudo-candidate', 'systemd-units', 'udev-rule', 'unattended-upgrades']
+      - operation.owner_ref is string
+      - operation.owner_ref | length > 0
+      - operation.kind is string
+      - operation.action in ['build', 'create', 'ensure', 'fetch', 'install', 'publish']
+      - operation.source is string
+      - operation.source.startswith(abhaile_rendered_root + '/')
+      - operation.source == (operation.source | realpath)
+      - operation.source_sha256 is match('^[0-9a-f]{64}$')
+      - >-
+        operation.context in ['system', 'orchestrator'] or operation.context is match('^user:[A-Za-z_][A-Za-z0-9_-]*$')
+      - >-
+        ((operation.context is match('^user:')) and (operation.execution_identity is mapping)) or ((operation.context
+        is not match('^user:')) and (operation.execution_identity is none))
+      - >-
+        operation.validation in ['caddy', 'coredns', 'coredns-zone', 'quadlet', 'resolved', 'software-result', 'structural',
+        'sudoers', 'sysusers', 'systemd', 'vault-agent']
+      - operation.lifecycle is sequence
+      - operation.lifecycle is not string
+      - >-
+        operation.lifecycle | difference(['manager-reload', 'service-restart']) | length == 0
+      - operation.lifecycle_metadata is mapping
+      - operation.no_log | bool
+      - not (operation.diff | bool)
+      - operation.parameters is mapping
+      - operation.effects is sequence
+      - operation.effects is not string
+    fail_msg: "Unsupported compiled convergence operation envelope."
+  no_log: true
+  diff: false
+- name: Bind every named-user operation to protected runtime observations
+  ansible.builtin.assert:
+    that:
+      - >-
+        operation.execution_identity.keys() | sort == ['gid', 'home', 'name', 'shell', 'uid']
+      - operation.execution_identity.name == operation.context | regex_replace('^user:', '')
+      - operation.execution_identity.uid is integer
+      - operation.execution_identity.uid is not boolean
+      - operation.execution_identity.uid > 0
+      - operation.execution_identity.uid < 4294967295
+      - operation.execution_identity.gid is integer
+      - operation.execution_identity.gid is not boolean
+      - operation.execution_identity.gid > 0
+      - operation.execution_identity.gid < 4294967295
+      - >-
+        operation.execution_identity.home == '/home/' ~ operation.execution_identity.name
+      - >-
+        operation.execution_identity.shell in ['/bin/bash', '/usr/sbin/nologin', '/bin/false']
+      - abhaile_rootless_observations_verified | default(false) | bool
+      - operation.context in (abhaile_rootless_observations | default({}))
+      - abhaile_rootless_observations[operation.context].identity == operation.execution_identity
+      - abhaile_rootless_observations[operation.context].linger == true
+      - abhaile_rootless_observations[operation.context].manager_active == true
+      - >-
+        abhaile_rootless_observations[operation.context].runtime_uid == operation.execution_identity.uid
+      - abhaile_rootless_observations[operation.context].runtime_mode == '0700'
+      - >-
+        abhaile_rootless_observations[operation.context].bus_uid == operation.execution_identity.uid
+    fail_msg: "Named-user operation lacks exact protected runtime observations."
+  when: operation.context is match('^user:')
+  no_log: true
+  diff: false
+- name: Inspect sealed source without following links
+  ansible.builtin.stat:
+    path: "{{ operation.source }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: abhaile_source_stat
+  changed_when: false
+  no_log: true
+  diff: false
+- name: Validate operation-specific data shape
+  ansible.builtin.include_tasks: "validate/{{ operation.operation }}.yml"
+  no_log: true

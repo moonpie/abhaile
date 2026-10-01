@@ -2,36 +2,12 @@
 
 from __future__ import annotations
 
+from configparser import ConfigParser
 from pathlib import Path
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-
-
-def test_convergence_play_is_preflight_only_and_fail_closed() -> None:
-    """Allow only read-only reporting and assertion modules in the quarantine play."""
-    playbook_path = REPO_ROOT / "ansible/playbooks/converge.yml"
-    plays = yaml.safe_load(playbook_path.read_text(encoding="utf-8"))
-    assert isinstance(plays, list) and len(plays) == 1
-    play = plays[0]
-    assert play["connection"] == "local"
-    assert play["gather_facts"] is False
-    assert play["become"] is False
-    tasks = play["tasks"]
-    modules = {key for task in tasks for key in task if key.startswith("ansible.builtin.")}
-    assert modules <= {"ansible.builtin.assert", "ansible.builtin.debug", "ansible.builtin.stat"}
-    assertions = [
-        task["ansible.builtin.assert"] for task in tasks if "ansible.builtin.assert" in task
-    ]
-    assert assertions and any(assertion.get("that") is False for assertion in assertions)
-
-
-def test_convergence_play_cannot_invoke_git_or_roles() -> None:
-    """Keep fetch, checkout, role inclusion, and mutation out of convergence."""
-    text = (REPO_ROOT / "ansible/playbooks/converge.yml").read_text(encoding="utf-8")
-    forbidden = ("git", "checkout", "fetch", "include_role", "command:", "shell:", "file:")
-    assert all(value not in text for value in forbidden)
 
 
 def test_ansible_enables_host_key_validation() -> None:
@@ -56,8 +32,6 @@ def test_sudo_policy_is_non_installed_constrained_candidate() -> None:
 
 def test_scaffold_uses_protected_runtime_and_suppresses_payload_channels() -> None:
     """Keep mutable checkout discovery and secret reporting out of defaults."""
-    from configparser import ConfigParser
-
     config = ConfigParser()
     config.read(REPO_ROOT / "ansible/ansible.cfg")
     defaults = config["defaults"]
@@ -79,3 +53,35 @@ def test_privileged_launcher_uses_isolated_protected_python() -> None:
     assert (
         "exec /usr/lib/abhaile-trust-runtime/bin/python -I " '-m abhaile.trust.launcher "$@"'
     ) in launcher
+
+
+def test_convergence_play_invokes_only_bounded_quarantined_role() -> None:
+    """Keep bootstrap roles and mutation tasks out of protected convergence."""
+    playbook = yaml.safe_load(
+        (REPO_ROOT / "ansible/playbooks/converge.yml").read_text(encoding="utf-8")
+    )
+    assert playbook[0]["hosts"] == "localhost"
+    assert playbook[0]["connection"] == "local"
+    assert playbook[0]["gather_facts"] is False
+    assert playbook[0]["become"] is False
+    assert playbook[0]["roles"] == [{"role": "manifest_convergence"}]
+
+
+def test_bounded_role_requires_gate_before_two_pass_dispatch() -> None:
+    """Validate every operation before the production mutation pass begins."""
+    tasks = yaml.safe_load(
+        (REPO_ROOT / "ansible/roles/manifest_convergence/tasks/main.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        "abhaile_execution_scope | default('disabled') == 'isolated-disposable-v1'"
+        in tasks[0]["ansible.builtin.assert"]["that"]
+    )
+    assert tasks[1]["ansible.builtin.include_tasks"] == "validate_operation.yml"
+    execute = next(
+        task
+        for task in tasks
+        if task.get("ansible.builtin.include_tasks") == "execute_operation.yml"
+    )
+    assert execute["ansible.builtin.include_tasks"] == "execute_operation.yml"

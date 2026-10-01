@@ -1,0 +1,37 @@
+- name: Publish validated file through protected ancestry
+  abhaile_publish:
+    root: "{{ abhaile_execution_root }}"
+    target: "{{ operation.target }}"
+    state: file
+    source: "{{ operation.source }}"
+    sha256: "{{ operation.source_sha256 }}"
+    uid: "{{ operation.owner }}"
+    gid: "{{ operation.group }}"
+    mode: "{{ operation.mode }}"
+    validation: "{{ operation.validation }}"
+    zone: "{{ operation.parameters.zone | default(omit) }}"
+  register: abhaile_publish_structural
+  no_log: true
+  diff: false
+- name: Activate changed sysusers declaration through fixed argv
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemd-sysusers
+      - "--root={{ abhaile_execution_root }}"
+      - "{{ operation.source }}"
+  when:
+    - operation.kind == 'host.sysusers'
+    - abhaile_publish_structural.changed
+  register: abhaile_sysusers
+  changed_when: abhaile_sysusers.rc == 0
+  failed_when: abhaile_sysusers.rc != 0
+  no_log: true
+  diff: false
+- name: Record changed publication owner
+  ansible.builtin.set_fact:
+    abhaile_changed_owners: >-
+      {{ abhaile_changed_owners | combine({operation.owner_ref ~ '|' ~ operation.context: true}) }}
+  when: abhaile_publish_structural.changed
+  changed_when: false
+  no_log: true
+  diff: false

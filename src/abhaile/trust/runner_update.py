@@ -154,10 +154,14 @@ class RunnerPublicationEvidence:
     recovery_record_sha256: str
     apply_commit_evidence: str
     runner_lkg_commit_evidence: str
+    durable_runner_lkg_receipt_sha256: str
 
 
 def bind_runner_publication_evidence(
-    transaction: TransactionPlan, plan: RunnerUpdatePlan
+    transaction: TransactionPlan,
+    plan: RunnerUpdatePlan,
+    *,
+    durable_runner_lkg_receipt_sha256: str,
 ) -> RunnerPublicationEvidence:
     """Create pure publication evidence only after exact transaction commits."""
     if (
@@ -166,6 +170,7 @@ def bind_runner_publication_evidence(
         or plan.stage is not RunnerUpdateStage.STAGED
         or transaction.apply_commit_evidence is None
         or transaction.runner_lkg_commit_evidence is None
+        or not _digest(durable_runner_lkg_receipt_sha256, 64)
         or _transaction_identity(transaction) != _runner_identity(plan)
     ):
         raise TrustError("Runner publication evidence cannot be bound")
@@ -176,6 +181,7 @@ def bind_runner_publication_evidence(
         plan.recovery_record_sha256,
         transaction.apply_commit_evidence,
         transaction.runner_lkg_commit_evidence,
+        durable_runner_lkg_receipt_sha256,
     )
 
 
@@ -185,7 +191,11 @@ def authorize_runner_publication(
     evidence: RunnerPublicationEvidence,
 ) -> RunnerUpdatePlan:
     """Authorize only the exact staged pair once both matching ledgers commit."""
-    expected = bind_runner_publication_evidence(transaction, plan)
+    expected = bind_runner_publication_evidence(
+        transaction,
+        plan,
+        durable_runner_lkg_receipt_sha256=evidence.durable_runner_lkg_receipt_sha256,
+    )
     if evidence != expected:
         raise TrustError("Runner publication evidence is stale, replayed, or mismatched")
     return replace(plan, stage=RunnerUpdateStage.COMMITTED)

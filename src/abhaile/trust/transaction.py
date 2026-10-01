@@ -37,6 +37,7 @@ class TransactionPlan:
     stage: TransactionStage = TransactionStage.PLANNED
     apply_commit_evidence: str | None = None
     runner_lkg_commit_evidence: str | None = None
+    local_changes: bool | None = None
 
     def __post_init__(self) -> None:
         """Reject transaction identities that cannot be bound unambiguously."""
@@ -53,6 +54,7 @@ class TransactionPlan:
                 )
             )
             or type(self.dry_run) is not bool
+            or (self.local_changes is not None and type(self.local_changes) is not bool)
         ):
             raise TrustError("Transaction identity is invalid")
 
@@ -85,17 +87,19 @@ class RollbackPlan:
 
 
 def record_local_convergence(
-    plan: TransactionPlan, *, validations_succeeded: bool
+    plan: TransactionPlan, *, validations_succeeded: bool, changed: bool
 ) -> TransactionPlan:
     """Record local convergence only when every local validation succeeds."""
     if plan.dry_run or plan.stage is not TransactionStage.PLANNED or not validations_succeeded:
         raise TrustError("Local convergence evidence does not satisfy the apply gate")
-    return replace(plan, stage=TransactionStage.CONVERGED)
+    if type(changed) is not bool:
+        raise TrustError("Local convergence change evidence is invalid")
+    return replace(plan, stage=TransactionStage.CONVERGED, local_changes=changed)
 
 
 def commit_apply_state(plan: TransactionPlan) -> TransactionPlan:
     """Advance only the apply ledger after local success."""
-    if not plan.apply_state_eligible:
+    if not plan.apply_state_eligible or type(plan.local_changes) is not bool:
         raise TrustError("Apply-state commit gate is not satisfied")
     return replace(
         plan,
@@ -133,15 +137,21 @@ def plan_rollback(plan: TransactionPlan) -> RollbackPlan:
     """Plan rollback from the actual applied manifest to retained LKG."""
     if plan.stage is not TransactionStage.ROLLBACK_PLANNED:
         raise TrustError("Rollback requires post-apply wider-health failure")
-    if plan.candidate_manifest_sha256 == plan.retained_lkg_manifest_sha256:
-        raise TrustError("Rollback manifests must identify distinct desired states")
+    same_desired_state = (
+        plan.candidate_revision == plan.retained_lkg_revision
+        and plan.candidate_manifest_sha256 == plan.retained_lkg_manifest_sha256
+    )
     return RollbackPlan(
         plan.transaction_id,
         plan.candidate_revision,
         plan.candidate_manifest_sha256,
         plan.retained_lkg_revision,
         plan.retained_lkg_manifest_sha256,
-        "wider-health-failed-after-apply-commit",
+        (
+            "wider-health-failed-same-desired-state-recovery"
+            if same_desired_state
+            else "wider-health-failed-after-apply-commit"
+        ),
     )
 
 
@@ -165,6 +175,25 @@ def commit_rollback_apply_state(
     return replace(plan, stage=TransactionStage.ROLLBACK_COMMITTED)
 
 
+def validate_transaction_commit_evidence(plan: TransactionPlan) -> None:
+    """Verify that ledger evidence is derivable from the transaction identity."""
+    if plan.dry_run or plan.stage not in {
+        TransactionStage.APPLY_COMMITTED,
+        TransactionStage.HEALTHY,
+        TransactionStage.RUNNER_COMMITTED,
+    }:
+        raise TrustError("Transaction stage cannot authorize durable state")
+    expected_apply = _commit_digest(plan, "apply-state", plan.candidate_manifest_sha256)
+    if plan.apply_commit_evidence != expected_apply:
+        raise TrustError("Apply-state commit evidence is fabricated or mismatched")
+    if plan.stage is TransactionStage.RUNNER_COMMITTED:
+        expected_runner = _commit_digest(plan, "runner-lkg", plan.candidate_manifest_sha256)
+        if plan.runner_lkg_commit_evidence != expected_runner:
+            raise TrustError("Runner-LKG commit evidence is fabricated or mismatched")
+    elif plan.runner_lkg_commit_evidence is not None:
+        raise TrustError("Runner-LKG evidence is premature")
+
+
 def _commit_digest(plan: TransactionPlan, ledger: str, manifest_sha256: str) -> str:
     """Bind injected commit evidence to one immutable transaction identity."""
     identity = "\0".join(
@@ -174,6 +203,9 @@ def _commit_digest(plan: TransactionPlan, ledger: str, manifest_sha256: str) -> 
             plan.candidate_revision,
             plan.candidate_capsule_sha256,
             manifest_sha256,
+            plan.retained_lkg_revision,
+            plan.retained_lkg_manifest_sha256,
+            "unknown" if plan.local_changes is None else str(plan.local_changes).lower(),
         )
     )
     return hashlib.sha256(identity.encode("utf-8")).hexdigest()

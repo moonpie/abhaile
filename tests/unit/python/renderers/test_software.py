@@ -88,7 +88,14 @@ name: Install sops
 description: Install a verified binary.
 operation: binary-download
 execution_policy: admitted
-parameters: {url: https://example.invalid/sops, sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, destination: /usr/local/bin/sops, mode: "0755"}
+parameters:
+  url: https://example.invalid/sops
+  sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  destination: /usr/local/bin/sops
+  mode: "0755"
+  max_bytes: 1048576
+  redirect_origins: []
+  max_redirects: 0
 effects: [{kind: path, target: /usr/local/bin/sops, role: primary}]
 validation: binary-version
 expected_results: [binary exists]

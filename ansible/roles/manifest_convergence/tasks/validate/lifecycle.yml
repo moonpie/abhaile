@@ -1,0 +1,29 @@
+- name: Validate owner-boundary lifecycle operation
+  ansible.builtin.assert:
+    that:
+      - operation.kind == 'owner.lifecycle'
+      - operation.action == 'ensure'
+      - operation.target is none
+      - operation.owner is none
+      - operation.group is none
+      - operation.mode is none
+      - operation.parameters | length == 0
+      - operation.effects | length == 0
+      - operation.lifecycle | length > 0
+      - operation.lifecycle_metadata.keys() | sort == operation.lifecycle | sort
+      - >-
+        'service-restart' not in operation.lifecycle or (operation.lifecycle_metadata['service-restart'].keys()
+        | sort == ['authority_owner', 'mode', 'unit'] and operation.lifecycle_metadata['service-restart'].mode in
+        ['restart', 'try-restart'])
+      - >-
+        (operation.context is not match('^user:')) or (abhaile_rootless_observations_verified | default(false) |
+        bool)
+      - >-
+        (operation.context is not match('^user:')) or (abhaile_rootless_observations[operation.context].identity
+        == operation.execution_identity and abhaile_rootless_observations[operation.context].linger == true and
+        abhaile_rootless_observations[operation.context].manager_active == true and abhaile_rootless_observations[operation.context].runtime_uid
+        == operation.execution_identity.uid and abhaile_rootless_observations[operation.context].runtime_mode ==
+        '0700' and abhaile_rootless_observations[operation.context].bus_uid == operation.execution_identity.uid)
+    fail_msg: "Owner lifecycle operation data shape is invalid."
+  no_log: true
+  diff: false

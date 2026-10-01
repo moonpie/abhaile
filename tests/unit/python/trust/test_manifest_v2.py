@@ -10,8 +10,68 @@ from typing import Any
 import pytest
 import yaml
 
+from abhaile.models.artifact import RenderedArtifact
+from abhaile.renderers.convergence_manifest import _entry, _restart_authority
 from abhaile.trust.errors import TrustError
 from abhaile.trust.manifest import validate_manifest
+from abhaile.utils.errors import RenderError
+
+
+def test_renderer_rejects_circular_unmanaged_restart_authority() -> None:
+    """Do not let an entry manufacture authority over an unrelated system unit."""
+    with pytest.raises(RenderError, match="no reviewed authority"):
+        _restart_authority("service:example", "system", "sshd.service", [])
+    assert (
+        _restart_authority("service:chrony-a", "system", "chrony.service", []) == "service:chrony-a"
+    )
+    with pytest.raises(RenderError, match="no reviewed authority"):
+        _restart_authority("service:chrony-lookalike", "system", "chrony.service", [])
+
+
+def test_renderer_rejects_cross_owner_managed_restart_authority() -> None:
+    """Do not turn another service's managed unit into restart authority."""
+    managed = RenderedArtifact(
+        "services/vault/vault.service",
+        "/etc/systemd/system/vault.service",
+        "systemd.unit",
+        "unit:vault.service",
+        b"[Service]\n",
+    )
+    with pytest.raises(RenderError, match="unrelated owner"):
+        _restart_authority("service:example", "system", "vault.service", [managed])
+    assert (
+        _restart_authority("service:vault", "system", "vault.service", [managed])
+        == "unit:vault.service"
+    )
+
+
+def test_rootless_quadlet_uses_root_owned_per_uid_publication_authority() -> None:
+    """Keep rootless unit publication outside user-writable ancestry."""
+    content = b"[Container]\nImage=example.invalid/example@sha256:" + b"1" * 64 + b"\n"
+    artifact = RenderedArtifact(
+        "services/example/example.container",
+        "/home/abhaile/.config/containers/systemd/example.container",
+        "quadlet.container",
+        "service:example",
+        content,
+        hash=hashlib.sha256(content).hexdigest(),
+        size=len(content),
+        apply_hints={"rootless": True, "podman_user": "abhaile", "mode": "0644"},
+    )
+    entry = _entry(
+        artifact,
+        [artifact],
+        {
+            "user:abhaile": {
+                "uid": 1001,
+                "gid": 1001,
+                "home": "/home/abhaile",
+                "runtime_dir": "/run/user/1001",
+            }
+        },
+    )
+    assert entry["target_path"] == "/etc/containers/systemd/users/1001/example.container"
+    assert entry["metadata"] == {"owner": "root", "group": "root", "mode": "0644"}
 
 
 def _software_payload() -> dict[str, Any]:
@@ -26,6 +86,9 @@ def _software_payload() -> dict[str, Any]:
             "sha256": "a" * 64,
             "destination": "/usr/local/bin/example",
             "mode": "0755",
+            "max_bytes": 1048576,
+            "redirect_origins": [],
+            "max_redirects": 0,
         },
         "effects": [{"kind": "path", "target": "/usr/local/bin/example", "role": "primary"}],
         "validation": "binary-version",
@@ -70,6 +133,7 @@ def _write_software_v2(root: Path, payload: dict[str, Any], *, extra_entry: bool
             },
             "validation": "software-result",
             "lifecycle": [],
+            "lifecycle_metadata": {},
             "safe_prune": "report-only",
         }
     ]
@@ -98,6 +162,7 @@ def _write_software_v2(root: Path, payload: dict[str, Any], *, extra_entry: bool
                 "metadata": {"owner": "root", "group": "root", "mode": "0644"},
                 "validation": "structural",
                 "lifecycle": [],
+                "lifecycle_metadata": {},
                 "safe_prune": "safe-if-unchanged",
             }
         )
@@ -111,6 +176,7 @@ def _write_software_v2(root: Path, payload: dict[str, Any], *, extra_entry: bool
         "schema_version": 2,
         "host": "deimos",
         "rendered_root": ".",
+        "execution_identities": {},
         "entries": entries,
         "owners": owners,
     }
@@ -128,6 +194,7 @@ def _write_v2(root: Path, mutate: Any = None) -> None:
         "schema_version": 2,
         "host": "deimos",
         "rendered_root": ".",
+        "execution_identities": {},
         "entries": [
             {
                 "render_path": "system/unit.service",
@@ -141,6 +208,7 @@ def _write_v2(root: Path, mutate: Any = None) -> None:
                 "metadata": {"owner": "root", "group": "root", "mode": "0644"},
                 "validation": "systemd",
                 "lifecycle": ["manager-reload"],
+                "lifecycle_metadata": {},
                 "safe_prune": "safe-if-unchanged",
             }
         ],
@@ -174,6 +242,7 @@ def test_accepts_complete_v2_and_rejects_unmanifested_output(tmp_path: Path) -> 
         (lambda value: value["entries"][0].update(kind="unknown"), "unsupported"),
         (lambda value: value["entries"][0].update(action="run"), "unsupported"),
         (lambda value: value["entries"][0].pop("metadata"), "incomplete"),
+        (lambda value: value["entries"][0].pop("lifecycle_metadata"), "incomplete"),
         (lambda value: value["entries"][0].update(target_path="../escape"), "unsafe target"),
         (
             lambda value: value["entries"][0].update(target_path="/root/escape"),
@@ -187,6 +256,147 @@ def test_rejects_unknown_or_incomplete_authority(tmp_path: Path, mutate: Any, ma
     _write_v2(tmp_path, mutate)
     with pytest.raises(TrustError, match=match):
         validate_manifest(tmp_path, "deimos")
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"service-restart": {"unit": "bad/name.service", "mode": "restart"}},
+        {"service-restart": {"unit": "unit.service", "mode": "reload"}},
+        {"service-restart": {"unit": "unit.service", "mode": "restart", "extra": True}},
+    ],
+)
+def test_rejects_missing_or_malformed_restart_authority(
+    tmp_path: Path, metadata: dict[str, object]
+) -> None:
+    """Require exact unit and bounded mode authority for every restart effect."""
+
+    def mutate(value: dict[str, Any]) -> None:
+        value["entries"][0]["lifecycle"] = ["manager-reload", "service-restart"]
+        value["entries"][0]["lifecycle_metadata"] = metadata
+
+    _write_v2(tmp_path, mutate)
+    with pytest.raises(TrustError, match="lifecycle|restart"):
+        validate_manifest(tmp_path, "deimos")
+
+
+def test_accepts_same_owner_system_and_named_user_restart_authority(tmp_path: Path) -> None:
+    """Bind automatic restarts to the exact managed owner and execution identity."""
+
+    def system_restart(value: dict[str, Any]) -> None:
+        owner = value["owners"]["unit:unit.service"]
+        owner["restart_authorities"] = [
+            {
+                "unit": "unit.service",
+                "execution_context": "system",
+                "authority_owner": "unit:unit.service",
+            }
+        ]
+        entry = value["entries"][0]
+        entry["lifecycle"] = ["manager-reload", "service-restart"]
+        entry["lifecycle_metadata"] = {
+            "service-restart": {
+                "unit": "unit.service",
+                "mode": "restart",
+                "authority_owner": "unit:unit.service",
+            }
+        }
+
+    _write_v2(tmp_path, system_restart)
+    assert validate_manifest(tmp_path, "deimos")["schema_version"] == 2
+
+    user_root = tmp_path / "user"
+
+    def user_restart(value: dict[str, Any]) -> None:
+        identity = {
+            "name": "svc",
+            "uid": 1200,
+            "gid": 1200,
+            "home": "/home/svc",
+            "shell": "/bin/bash",
+        }
+        value["execution_identities"] = {"user:svc": identity}
+        owner = value["owners"]["unit:unit.service"]
+        owner["execution_context"] = "user:svc"
+        owner["restart_authorities"] = [
+            {
+                "unit": "unit.service",
+                "execution_context": "user:svc",
+                "authority_owner": "unit:unit.service",
+            }
+        ]
+        entry = value["entries"][0]
+        entry["execution_context"] = "user:svc"
+        entry["lifecycle"] = ["manager-reload", "service-restart"]
+        entry["lifecycle_metadata"] = {
+            "service-restart": {
+                "unit": "unit.service",
+                "mode": "try-restart",
+                "authority_owner": "unit:unit.service",
+            }
+        }
+
+    _write_v2(user_root, user_restart)
+    assert validate_manifest(user_root, "deimos")["schema_version"] == 2
+
+
+@pytest.mark.parametrize("case", ["missing", "unrelated", "cross-owner", "cross-context", "runner"])
+def test_rejects_unowned_or_cross_context_restart_authority(tmp_path: Path, case: str) -> None:
+    """Reject restart authority that is absent, unrelated, or crosses trust context."""
+
+    def mutate(value: dict[str, Any]) -> None:
+        owner = value["owners"]["unit:unit.service"]
+        authority_owner = "unit:unit.service"
+        unit = "unit.service"
+        context = "system"
+        if case == "unrelated":
+            unit = "sshd.service"
+        elif case == "cross-owner":
+            authority_owner = "unit:other.service"
+        elif case == "cross-context":
+            context = "user:svc"
+            value["execution_identities"] = {
+                "user:svc": {
+                    "name": "svc",
+                    "uid": 1200,
+                    "gid": 1200,
+                    "home": "/home/svc",
+                    "shell": "/bin/bash",
+                }
+            }
+        elif case == "runner":
+            unit = "abhaile-runner.service"
+        declared_unit = "unit.service" if case == "unrelated" else unit
+        if case != "missing":
+            owner["restart_authorities"] = [
+                {
+                    "unit": declared_unit,
+                    "execution_context": context,
+                    "authority_owner": authority_owner,
+                }
+            ]
+        entry = value["entries"][0]
+        entry["lifecycle"] = ["manager-reload", "service-restart"]
+        entry["lifecycle_metadata"] = {
+            "service-restart": {
+                "unit": unit,
+                "mode": "restart",
+                "authority_owner": authority_owner,
+            }
+        }
+
+    _write_v2(tmp_path, mutate)
+    with pytest.raises(TrustError, match="restart|context|runner|identity"):
+        validate_manifest(tmp_path, "deimos")
+
+
+def test_manual_restart_policy_emits_no_automatic_authority(tmp_path: Path) -> None:
+    """Keep manual policy represented by the absence of automatic lifecycle authority."""
+    _write_v2(tmp_path)
+    manifest = validate_manifest(tmp_path, "deimos")
+    assert manifest["entries"][0]["lifecycle"] == ["manager-reload"]
+    assert manifest["entries"][0]["lifecycle_metadata"] == {}
 
 
 def test_rejects_duplicate_target_and_owner_cycle(tmp_path: Path) -> None:

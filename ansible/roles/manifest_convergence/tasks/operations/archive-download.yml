@@ -1,0 +1,27 @@
+- name: Acquire and extract one bounded immutable archive member
+  abhaile_download:
+    root: "{{ abhaile_execution_root }}"
+    url: "{{ operation.parameters.url }}"
+    sha256: "{{ operation.parameters.sha256 }}"
+    destination: "{{ operation.parameters.destination }}"
+    mode: "{{ operation.parameters.mode }}"
+    uid: "{{ operation.owner }}"
+    gid: "{{ operation.group }}"
+    max_bytes: "{{ operation.parameters.max_bytes }}"
+    redirect_origins: "{{ operation.parameters.redirect_origins }}"
+    max_redirects: "{{ operation.parameters.max_redirects }}"
+    archive_member: "{{ operation.parameters.archive_member }}"
+    output_sha256: "{{ operation.parameters.output_sha256 }}"
+    max_member_bytes: "{{ operation.parameters.max_member_bytes }}"
+    max_compression_ratio: "{{ operation.parameters.max_compression_ratio }}"
+  register: abhaile_archive_download
+  no_log: true
+  diff: false
+- name: Record changed archive owner
+  ansible.builtin.set_fact:
+    abhaile_changed_owners: >-
+      {{ abhaile_changed_owners | combine({operation.owner_ref ~ '|' ~ operation.context: true}) }}
+  when: abhaile_archive_download.changed
+  changed_when: false
+  no_log: true
+  diff: false

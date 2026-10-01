@@ -1,0 +1,39 @@
+- name: Require protected capsule operation input and execution gate
+  ansible.builtin.assert:
+    that:
+      - abhaile_capsule_verified | default(false) | bool
+      - abhaile_execution_scope | default('disabled') == 'isolated-disposable-v1'
+      - abhaile_expected_host in ['phobos', 'deimos']
+      - abhaile_manifest == abhaile_rendered_root + '/convergence-manifest.json'
+      - abhaile_rendered_root is string
+      - abhaile_rendered_root is match('^/')
+      - abhaile_rendered_root == (abhaile_rendered_root | realpath)
+      - abhaile_execution_root is string
+      - abhaile_execution_root is match('^/')
+      - abhaile_execution_root == (abhaile_execution_root | realpath)
+      - abhaile_execution_root.startswith('/tmp/')
+      - abhaile_operations is sequence
+      - abhaile_operations is not string
+    fail_msg: "Protected capsule operation input and execution authorization are required."
+  no_log: true
+  diff: false
+- name: Validate every compiled operation before mutation
+  ansible.builtin.include_tasks: validate_operation.yml
+  loop: "{{ abhaile_operations }}"
+  loop_control:
+    loop_var: operation
+    label: "{{ operation.owner_ref | default('invalid') }}"
+  no_log: true
+- name: Initialize owner change aggregation
+  ansible.builtin.set_fact:
+    abhaile_changed_owners: {}
+  changed_when: false
+  no_log: true
+  diff: false
+- name: Execute each validated operation in manifest order
+  ansible.builtin.include_tasks: execute_operation.yml
+  loop: "{{ abhaile_operations }}"
+  loop_control:
+    loop_var: operation
+    label: "{{ operation.owner_ref }}"
+  no_log: true

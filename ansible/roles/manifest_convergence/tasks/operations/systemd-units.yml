@@ -1,0 +1,20 @@
+- name: Converge admitted system unit prerequisites
+  ansible.builtin.systemd_service:
+    name: "{{ unit.name }}"
+    enabled: "{{ unit.enabled }}"
+    state: "{{ unit.state if unit.state != 'unchanged' else omit }}"
+  loop: "{{ operation.parameters.units }}"
+  loop_control:
+    loop_var: unit
+    label: "suppressed"
+  register: abhaile_systemd_units
+  no_log: true
+  diff: false
+- name: Record changed system unit owner
+  ansible.builtin.set_fact:
+    abhaile_changed_owners: >-
+      {{ abhaile_changed_owners | combine({operation.owner_ref ~ '|' ~ operation.context: true}) }}
+  when: abhaile_systemd_units.changed
+  changed_when: false
+  no_log: true
+  diff: false

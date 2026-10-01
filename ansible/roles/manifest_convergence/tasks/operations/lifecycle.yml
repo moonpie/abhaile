@@ -1,0 +1,176 @@
+- name: Reload manager once at changed owner boundary
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: "{{ 'user' if operation.context is match('^user:') else 'system' }}"
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - "'manager-reload' in operation.lifecycle"
+    - operation.context == 'system'
+  no_log: true
+  diff: false
+- name: Apply authorized restart once at changed owner boundary
+  ansible.builtin.systemd_service:
+    name: "{{ operation.lifecycle_metadata['service-restart'].unit }}"
+    state: restarted
+    scope: "{{ 'user' if operation.context is match('^user:') else 'system' }}"
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - "'service-restart' in operation.lifecycle"
+    - operation.lifecycle_metadata['service-restart'].mode == 'restart'
+    - operation.context == 'system'
+  no_log: true
+  diff: false
+- name: Observe whether try-restart target is active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - "{{ '--user' if operation.context is match('^user:') else '--system' }}"
+      - is-active
+      - "{{ operation.lifecycle_metadata['service-restart'].unit }}"
+  register: abhaile_restart_active
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - "'service-restart' in operation.lifecycle"
+    - operation.lifecycle_metadata['service-restart'].mode == 'try-restart'
+    - operation.context == 'system'
+  changed_when: false
+  failed_when: abhaile_restart_active.rc not in [0, 3]
+  no_log: true
+  diff: false
+- name: Restart active authorized try-restart target
+  ansible.builtin.systemd_service:
+    name: "{{ operation.lifecycle_metadata['service-restart'].unit }}"
+    state: restarted
+    scope: "{{ 'user' if operation.context is match('^user:') else 'system' }}"
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - "'service-restart' in operation.lifecycle"
+    - operation.lifecycle_metadata['service-restart'].mode == 'try-restart'
+    - abhaile_restart_active.rc == 0
+    - operation.context == 'system'
+  no_log: true
+  diff: false
+- name: Reload changed named-user manager through PAM-free transport
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/setpriv', '--reuid=' ~ operation.execution_identity.uid, '--regid=' ~ operation.execution_identity.gid,
+      '--clear-groups', '--no-new-privs', '--', '/usr/bin/systemctl', '--user'] + ['daemon-reload'] }}
+  environment:
+    HOME: "{{ operation.execution_identity.home }}"
+    USER: "{{ operation.execution_identity.name }}"
+    LOGNAME: "{{ operation.execution_identity.name }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ operation.execution_identity.uid }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ operation.execution_identity.uid }}/bus
+    PATH: /usr/sbin:/usr/bin:/sbin:/bin
+    LANG: C.UTF-8
+    LC_ALL: C.UTF-8
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - operation.context is match('^user:')
+    - "'manager-reload' in operation.lifecycle"
+  register: abhaile_user_lifecycle
+  changed_when: abhaile_user_lifecycle.rc == 0
+  failed_when: abhaile_user_lifecycle.rc != 0
+  no_log: true
+  diff: false
+- name: Restart changed named-user target through PAM-free transport
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/setpriv
+      - "--reuid={{ operation.execution_identity.uid }}"
+      - "--regid={{ operation.execution_identity.gid }}"
+      - --clear-groups
+      - --no-new-privs
+      - --
+      - /usr/bin/systemctl
+      - --user
+      - restart
+      - "{{ operation.lifecycle_metadata['service-restart'].unit }}"
+  environment:
+    HOME: "{{ operation.execution_identity.home }}"
+    USER: "{{ operation.execution_identity.name }}"
+    LOGNAME: "{{ operation.execution_identity.name }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ operation.execution_identity.uid }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ operation.execution_identity.uid }}/bus
+    PATH: /usr/sbin:/usr/bin:/sbin:/bin
+    LANG: C.UTF-8
+    LC_ALL: C.UTF-8
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - operation.context is match('^user:')
+    - "'service-restart' in operation.lifecycle"
+    - operation.lifecycle_metadata['service-restart'].mode == 'restart'
+  register: abhaile_user_restart
+  changed_when: abhaile_user_restart.rc == 0
+  failed_when: abhaile_user_restart.rc != 0
+  no_log: true
+  diff: false
+- name: Observe named-user try-restart target through PAM-free transport
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/setpriv
+      - "--reuid={{ operation.execution_identity.uid }}"
+      - "--regid={{ operation.execution_identity.gid }}"
+      - --clear-groups
+      - --no-new-privs
+      - --
+      - /usr/bin/systemctl
+      - --user
+      - is-active
+      - "{{ operation.lifecycle_metadata['service-restart'].unit }}"
+  environment:
+    HOME: "{{ operation.execution_identity.home }}"
+    USER: "{{ operation.execution_identity.name }}"
+    LOGNAME: "{{ operation.execution_identity.name }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ operation.execution_identity.uid }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ operation.execution_identity.uid }}/bus
+    PATH: /usr/sbin:/usr/bin:/sbin:/bin
+    LANG: C.UTF-8
+    LC_ALL: C.UTF-8
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - operation.context is match('^user:')
+    - "'service-restart' in operation.lifecycle"
+    - operation.lifecycle_metadata['service-restart'].mode == 'try-restart'
+  register: abhaile_user_restart_active
+  changed_when: false
+  failed_when: abhaile_user_restart_active.rc not in [0, 3]
+  no_log: true
+  diff: false
+- name: Restart active named-user target through PAM-free transport
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/setpriv
+      - "--reuid={{ operation.execution_identity.uid }}"
+      - "--regid={{ operation.execution_identity.gid }}"
+      - --clear-groups
+      - --no-new-privs
+      - --
+      - /usr/bin/systemctl
+      - --user
+      - restart
+      - "{{ operation.lifecycle_metadata['service-restart'].unit }}"
+  environment:
+    HOME: "{{ operation.execution_identity.home }}"
+    USER: "{{ operation.execution_identity.name }}"
+    LOGNAME: "{{ operation.execution_identity.name }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ operation.execution_identity.uid }}"
+    DBUS_SESSION_BUS_ADDRESS: >-
+      unix:path=/run/user/{{ operation.execution_identity.uid }}/bus
+    PATH: /usr/sbin:/usr/bin:/sbin:/bin
+    LANG: C.UTF-8
+    LC_ALL: C.UTF-8
+  when:
+    - abhaile_changed_owners.get(operation.owner_ref ~ '|' ~ operation.context, false)
+    - operation.context is match('^user:')
+    - "'service-restart' in operation.lifecycle"
+    - operation.lifecycle_metadata['service-restart'].mode == 'try-restart'
+    - abhaile_user_restart_active.rc == 0
+  register: abhaile_user_restart
+  changed_when: abhaile_user_restart.rc == 0
+  failed_when: abhaile_user_restart.rc != 0
+  no_log: true
+  diff: false

@@ -1,0 +1,20 @@
+- name: Inspect admitted kernel module state
+  ansible.builtin.stat:
+    path: "/sys/module/{{ kernel_module.name | replace('-', '_') }}"
+    follow: false
+  register: abhaile_kernel_module_state
+  changed_when: false
+  no_log: true
+  diff: false
+- name: Load absent admitted kernel module with fixed argv
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/modprobe
+      - --
+      - "{{ kernel_module.name }}"
+  when: not abhaile_kernel_module_state.stat.exists
+  register: abhaile_kernel_load
+  changed_when: abhaile_kernel_load.rc == 0
+  failed_when: abhaile_kernel_load.rc != 0
+  no_log: true
+  diff: false

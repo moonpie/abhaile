@@ -1,0 +1,17 @@
+- name: Converge unattended upgrades debconf authority
+  ansible.builtin.debconf:
+    name: unattended-upgrades
+    question: unattended-upgrades/enable_auto_updates
+    value: "{{ operation.parameters.enabled | ternary('true', 'false') }}"
+    vtype: boolean
+  register: abhaile_unattended
+  no_log: true
+  diff: false
+- name: Record changed unattended upgrades owner
+  ansible.builtin.set_fact:
+    abhaile_changed_owners: >-
+      {{ abhaile_changed_owners | combine({operation.owner_ref ~ '|' ~ operation.context: true}) }}
+  when: abhaile_unattended.changed
+  changed_when: false
+  no_log: true
+  diff: false

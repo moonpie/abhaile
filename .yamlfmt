@@ -1,0 +1,5 @@
+formatter:
+  type: basic
+  # Leave room for indentation so physical YAML lines remain below yamllint's
+  # repository-wide 180-character ceiling.
+  max_line_length: 110

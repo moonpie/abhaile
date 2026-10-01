@@ -2,6 +2,7 @@
   ansible.builtin.assert:
     that: false
     fail_msg: >-
-      Configuration validation belongs to the admitted Python preflight. This role remains quarantined until manifest integration is complete.
+      Configuration validation belongs to the admitted Python preflight. This role remains quarantined until manifest
+      integration is complete.
   no_log: true
   diff: false

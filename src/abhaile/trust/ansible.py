@@ -14,6 +14,7 @@ from abhaile.trust.errors import TrustError
 from abhaile.trust.model import validate_production_path
 from abhaile.trust.manifest import validate_manifest
 from abhaile.trust.convergence import ConvergencePlan, build_convergence_plan
+from abhaile.trust.convergence_engine import compile_ansible_operations
 
 RUNTIME = Path("/usr/lib/abhaile-ansible-runtime")
 CAPSULES = Path("/var/lib/abhaile/capsules")
@@ -196,10 +197,16 @@ def _plan_ansible(
     environment["ANSIBLE_LIBRARY"] = str(runtime / "modules")
     environment["ANSIBLE_MODULE_UTILS"] = str(runtime / "module_utils")
     environment["ANSIBLE_LOG_PATH"] = "/dev/null"
+    convergence_manifest = validate_manifest(verified.rendered, verified.host)
+    convergence = build_convergence_plan(convergence_manifest)
+    operations = compile_ansible_operations(convergence, convergence_manifest, verified.rendered)
     variables = json.dumps(
         {
+            "abhaile_capsule_verified": True,
+            "abhaile_expected_host": verified.host,
             "abhaile_manifest": str(verified.rendered / "convergence-manifest.json"),
             "abhaile_rendered_root": str(verified.rendered),
+            "abhaile_operations": [operation.ansible_value() for operation in operations],
             "ansible_python_interpreter": str(python),
         },
         sort_keys=True,
@@ -218,8 +225,6 @@ def _plan_ansible(
     )
     if intent.dry_run:
         argv += ("--check",)
-    convergence_manifest = validate_manifest(verified.rendered, verified.host)
-    convergence = build_convergence_plan(convergence_manifest)
     return AnsiblePlan(
         argv,
         tuple(sorted(environment.items())),

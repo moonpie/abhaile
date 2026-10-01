@@ -59,6 +59,7 @@ def inputs(tmp_path):
                 "schema_version": 2,
                 "host": "phobos",
                 "rendered_root": ".",
+                "execution_identities": {},
                 "entries": [],
                 "owners": {},
             }

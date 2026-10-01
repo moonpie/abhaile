@@ -1,14 +1,7 @@
-- name: Quarantined local convergence preflight
+- name: Quarantined bounded manifest convergence
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
-  tasks:
-    - name: Report experimental quarantine
-      ansible.builtin.debug:
-        msg: >-
-          Ansible convergence is experimental and unavailable until trusted capsule and manifest convergence gates are complete.
-    - name: Refuse host mutation
-      ansible.builtin.assert:
-        that: false
-        fail_msg: "Ansible convergence is quarantined; use the legacy Python apply path."
+  roles:
+    - role: manifest_convergence

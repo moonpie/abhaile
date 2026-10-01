@@ -44,6 +44,7 @@ class RenderMetadata:
 
     artifacts: dict[str, RenderedArtifact] = field(default_factory=dict)
     owners: dict[str, OwnerMetadata] = field(default_factory=dict)
+    execution_identities: dict[str, dict[str, object]] = field(default_factory=dict)
 
     def register_artifact(self, artifact: RenderedArtifact) -> None:
         """Register a single artifact.

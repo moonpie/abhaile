@@ -1,0 +1,27 @@
+- name: Publish admitted udev rule
+  abhaile_publish:
+    root: "{{ abhaile_execution_root }}"
+    target: "{{ operation.parameters.rule_path }}"
+    state: file
+    content: "{{ operation.parameters.rule ~ '\n' }}"
+    sha256: "{{ (operation.parameters.rule ~ '\n') | hash('sha256') }}"
+    uid: 0
+    gid: 0
+    mode: "0644"
+  register: abhaile_udev_rule
+  no_log: true
+  diff: false
+- name: Reload udev rules only after a changed publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/udevadm
+      - control
+      - --reload-rules
+  when:
+    - abhaile_udev_rule.changed
+    - operation.parameters.reload
+  register: abhaile_udev_reload
+  changed_when: abhaile_udev_reload.rc == 0
+  failed_when: abhaile_udev_reload.rc != 0
+  no_log: true
+  diff: false
