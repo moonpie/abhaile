@@ -1,0 +1,452 @@
+- name: Require a non-empty rootful Quadlet operation
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootful_quadlet_entries is sequence
+      - abhaile_rootful_quadlet_entries is not string
+      - abhaile_rootful_quadlet_cleanup_entries | default([]) is sequence
+      - abhaile_rootful_quadlet_cleanup_entries | default([]) is not string
+      - >-
+        (abhaile_rootful_quadlet_entries | length) + (abhaile_rootful_quadlet_cleanup_entries | default([]) | length)
+        > 0
+    fail_msg: Rootful Quadlet operation requires desired or cleanup entries
+    quiet: true
+  tags: [quadlet_preflight]
+- name: Validate candidate-only rootful Quadlet cleanup contracts
+  ansible.builtin.assert:
+    that:
+      - item.keys() | difference(['apply_hints', 'candidate_sha256', 'kind', 'live_sha256', 'owner_ref', 'render_path',
+        'target_path']) | length == 0
+      - item.kind in quadlet_suffixes
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is sameas false
+      - item.target_path.startswith('/etc/containers/systemd/')
+      - item.target_path | dirname == '/etc/containers/systemd'
+      - item.owner_ref == 'unit:' ~ quadlet_stem ~ quadlet_suffixes[item.kind]
+      - item.candidate_sha256 is match('^[0-9a-f]{64}$')
+      - item.live_sha256 == item.candidate_sha256
+      - item.target_path not in desired_quadlet_targets
+    fail_msg: Candidate-only rootful Quadlet cleanup violates its closed identity contract
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid cleanup Quadlet entry') }}"
+  vars:
+    desired_quadlet_targets: "{{ abhaile_rootful_quadlet_entries | map(attribute='target_path') | list }}"
+    quadlet_stem: "{{ item.target_path | basename | splitext | first }}"
+    quadlet_suffixes:
+      quadlet.build: -build.service
+      quadlet.container: .service
+      quadlet.image: -image.service
+      quadlet.network: -network.service
+      quadlet.pod: -pod.service
+      quadlet.volume: -volume.service
+  tags: [quadlet_preflight]
+- name: Require unique candidate-only rootful Quadlet cleanup targets
+  ansible.builtin.assert:
+    that:
+      - cleanup_targets | unique | length == cleanup_targets | length
+    fail_msg: Candidate-only rootful Quadlet cleanup targets must be unique
+    quiet: true
+  vars:
+    cleanup_targets: >-
+      {{ abhaile_rootful_quadlet_cleanup_entries | default([]) | map(attribute='target_path') | list }}
+  tags: [quadlet_preflight]
+- name: Validate common rootful Quadlet manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+    apply:
+      tags: [quadlet_preflight]
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_rootful_quadlet_entries }}"
+  tags: [quadlet_preflight]
+- name: Validate the rootful Quadlet file contract
+  ansible.builtin.assert:
+    that:
+      - item.kind in quadlet_suffixes
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is sameas false
+      - item.target_path.startswith('/etc/containers/systemd/')
+      - item.target_path | dirname == '/etc/containers/systemd'
+      - item.owner_ref == 'unit:' ~ quadlet_stem ~ quadlet_suffixes[item.kind]
+      - >-
+        item.apply_hints.restart_mode is not defined or item.apply_hints.restart_mode in ['try-restart', 'manual']
+      - >-
+        item.apply_hints.restart_mode | default('try-restart') != 'manual' or item.kind == 'quadlet.container'
+    fail_msg: Rootful Quadlet entry violates its closed file contract
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid rootful Quadlet entry') }}"
+  vars:
+    quadlet_stem: "{{ item.target_path | basename | splitext | first }}"
+    quadlet_suffixes:
+      quadlet.build: -build.service
+      quadlet.container: .service
+      quadlet.image: -image.service
+      quadlet.network: -network.service
+      quadlet.pod: -pod.service
+      quadlet.volume: -volume.service
+  tags: [quadlet_preflight]
+- name: Validate managed rootful build contracts
+  ansible.builtin.assert:
+    that:
+      - item.apply_hints.managed_build is mapping
+      - item.apply_hints.managed_build.output_image is string
+      - item.apply_hints.managed_build.output_image | length > 0
+      - item.apply_hints.managed_build.service is string
+      - item.apply_hints.managed_build.service is match('^[a-z0-9][a-z0-9-]*$')
+      - item.apply_hints.managed_build.consumers is sequence
+      - item.apply_hints.managed_build.consumers is not string
+      - item.apply_hints.managed_build.consumers | length > 0
+      - >-
+        item.apply_hints.managed_build.consumers | reject('match', '^[A-Za-z0-9_.@:-]+\\.service$') | list | length
+        == 0
+      - >-
+        item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build is
+        mapping
+      - >-
+        item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build.keys()
+        | difference(['install_unit', 'verify_binary']) | length == 0
+      - >-
+        item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build.install_unit
+        is match('^[A-Za-z0-9_.@:-]+\\.service$')
+      - >-
+        item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build.verify_binary
+        is string
+      - >-
+        item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build.verify_binary.startswith('/')
+    fail_msg: Rootful managed build entry violates its closed lifecycle contract
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when: item.kind == 'quadlet.build'
+  tags: [quadlet_preflight]
+- name: Inspect deferred-lifecycle rootful Quadlet targets
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  when: >-
+    item.kind not in ['quadlet.build', 'quadlet.container', 'quadlet.pod']
+  register: abhaile_deferred_quadlet_targets
+  tags: [quadlet_preflight]
+- name: Validate manual rootful container pod relationships
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootful_quadlet_owners | default({}) is mapping
+      - item.owner_ref in abhaile_rootful_quadlet_owners | default({})
+      - abhaile_rootful_quadlet_owners[item.owner_ref].requires is sequence
+      - abhaile_rootful_quadlet_owners[item.owner_ref].requires is not string
+      - >-
+        abhaile_rootful_quadlet_owners[item.owner_ref].requires | intersect(rootful_quadlet_pod_owner_refs) | length
+        == 1
+    fail_msg: Manual rootful container must require exactly one selected rootful pod
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when:
+    - item.kind == 'quadlet.container'
+    - item.apply_hints.restart_mode | default('try-restart') == 'manual'
+  vars:
+    rootful_quadlet_pod_owner_refs: "{{ abhaile_rootful_quadlet_entries | selectattr('kind', 'equalto', 'quadlet.pod')
+      | map(attribute='owner_ref') | list }}"
+  tags: [quadlet_preflight]
+- name: Refuse deferred rootful Quadlet lifecycle changes
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum == item.item.sha256
+    fail_msg: Rootful Quadlet change requires a later family-specific lifecycle slice
+    quiet: true
+  loop: "{{ abhaile_deferred_quadlet_targets.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when: not item.skipped | default(false)
+  tags: [quadlet_preflight]
+- name: Validate the complete rootful Quadlet selection in isolation
+  block:
+    - name: Create disposable Quadlet validation directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: abhaile-quadlet-verify-
+      check_mode: false
+      changed_when: false
+      register: abhaile_quadlet_validation_root
+    - name: Stage rootful Quadlet validation sources
+      ansible.builtin.copy:
+        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+        dest: "{{ abhaile_quadlet_validation_root.path }}/{{ item.target_path | basename }}"
+        remote_src: true
+        mode: "0600"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_rootful_quadlet_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+    - name: Run the rootful Quadlet generator dry-run
+      ansible.builtin.command:
+        argv:
+          - /usr/lib/systemd/system-generators/podman-system-generator
+          - -dryrun
+      environment:
+        QUADLET_UNIT_DIRS: "{{ abhaile_quadlet_validation_root.path }}"
+      check_mode: false
+      changed_when: false
+  always:
+    - name: Remove disposable Quadlet validation directory
+      ansible.builtin.file:
+        path: "{{ abhaile_quadlet_validation_root.path }}"
+        state: absent
+      check_mode: false
+      changed_when: false
+      when: abhaile_quadlet_validation_root.path is defined
+  when: abhaile_rootful_quadlet_entries | length > 0
+  tags: [quadlet_preflight]
+- name: Inspect candidate-only rootful Quadlet generated units
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+      - --property=LoadState
+      - --value
+  changed_when: false
+  loop: "{{ abhaile_rootful_quadlet_cleanup_entries | default([]) | reverse | list }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  register: abhaile_rootful_quadlet_cleanup_load_states
+  when: not ansible_check_mode
+- name: Reinspect candidate-only rootful Quadlet files before deactivation
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootful_quadlet_cleanup_entries | default([]) | reverse | list }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_quadlet_pre_deactivation_targets
+  when: not ansible_check_mode
+- name: Refuse changed candidate-only rootful Quadlets before deactivation
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum == item.item.candidate_sha256
+    fail_msg: Candidate-only rootful Quadlet changed before deactivation
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_pre_deactivation_targets.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when: not ansible_check_mode
+- name: Stop loaded candidate-only rootful Quadlet generated units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+    state: stopped
+  loop: "{{ abhaile_rootful_quadlet_cleanup_load_states.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.stdout | trim == 'loaded'
+- name: Reinspect candidate-only rootful Quadlet files before removal
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootful_quadlet_cleanup_entries | default([]) | reverse | list }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_quadlet_cleanup_targets
+- name: Refuse changed candidate-only rootful Quadlet cleanup targets
+  ansible.builtin.assert:
+    that:
+      - not item.stat.exists or (item.stat.isreg and not item.stat.islnk and item.stat.checksum == item.item.candidate_sha256)
+    fail_msg: Candidate-only rootful Quadlet changed before removal
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_cleanup_targets.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Remove candidate-only rootful Quadlet files
+  ansible.builtin.file:
+    path: "{{ item.item.target_path }}"
+    state: absent
+  loop: "{{ abhaile_rootful_quadlet_cleanup_targets.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  register: abhaile_rootful_quadlet_removals
+- name: Publish rootful Quadlet files
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+    dest: "{{ item.target_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_quadlet_publications
+- name: Reload the system manager after rootful Quadlet publication
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - not ansible_check_mode
+    - rootful_quadlet_changed
+  vars: &rootful_quadlet_change_vars
+    rootful_quadlet_changed: >-
+      {{ abhaile_rootful_quadlet_publications.results | selectattr('changed') | list | length > 0 or abhaile_rootful_quadlet_removals.results
+      | selectattr('changed') | list | length > 0 }}
+- name: Reinspect removed rootful Quadlet generated-unit failed states
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+      - --property=ActiveState
+      - --value
+  changed_when: false
+  loop: "{{ abhaile_rootful_quadlet_cleanup_entries | default([]) | reverse | list }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  register: abhaile_rootful_quadlet_post_reload_active_states
+  when: not ansible_check_mode
+- name: Clear removed rootful Quadlet failed-state residue
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - reset-failed
+      - "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+  changed_when: false
+  loop: "{{ abhaile_rootful_quadlet_post_reload_active_states.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.stdout | trim == 'failed'
+- name: Verify rootful Quadlet generated units are loaded
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+      - --property=LoadState
+      - --value
+  changed_when: false
+  failed_when: abhaile_quadlet_load_state.stdout | trim != 'loaded'
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  register: abhaile_quadlet_load_state
+  when:
+    - not ansible_check_mode
+    - rootful_quadlet_changed
+  vars: *rootful_quadlet_change_vars
+- name: Reset consumers restarted by managed rootful builds
+  ansible.builtin.set_fact:
+    abhaile_rebuilt_rootful_consumers: []
+  when: not ansible_check_mode
+- name: Run changed managed rootful builds
+  ansible.builtin.include_tasks: converge_build.yml
+  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
+  loop_control:
+    loop_var: abhaile_build_publication
+    label: "{{ abhaile_build_publication.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - abhaile_build_publication.item.kind == 'quadlet.build'
+    - >-
+      abhaile_build_publication.changed or 'service:' ~ abhaile_build_publication.item.apply_hints.managed_build.service
+      in abhaile_changed_service_config_owners | default([])
+- name: Start or restart changed automatic rootful containers and pods
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+    state: restarted
+  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.changed
+    - item.item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.item.apply_hints.restart_mode | default('try-restart') != 'manual'
+    - >-
+      item.item.owner_ref | regex_replace('^unit:', '') not in abhaile_rebuilt_rootful_consumers | default([])
+- name: Ensure automatic rootful containers and pods are started
+  ansible.builtin.systemd_service:
+    name: "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+    state: started
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.apply_hints.restart_mode | default('try-restart') != 'manual'
+- name: Reset changed manual rootful parent pods
+  ansible.builtin.set_fact:
+    abhaile_changed_rootful_parent_pods: []
+- name: Collect parent pods for changed manual rootful containers
+  ansible.builtin.set_fact:
+    abhaile_changed_rootful_parent_pods: "{{ (abhaile_changed_rootful_parent_pods | default([])) + (abhaile_rootful_quadlet_owners[item.item.owner_ref].requires
+      | intersect(rootful_quadlet_pod_owner_refs)) }}"
+  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.changed
+    - item.item.kind == 'quadlet.container'
+    - item.item.apply_hints.restart_mode | default('try-restart') == 'manual'
+  vars:
+    rootful_quadlet_pod_owner_refs: "{{ abhaile_rootful_quadlet_entries | selectattr('kind', 'equalto', 'quadlet.pod')
+      | map(attribute='owner_ref') | list }}"
+- name: Start or restart parent pods for changed manual rootful containers
+  ansible.builtin.systemd_service:
+    name: "{{ item | regex_replace('^unit:', '') }}"
+    state: restarted
+  loop: "{{ abhaile_changed_rootful_parent_pods | default([]) | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  when: item not in changed_rootful_pod_owner_refs
+  vars: &changed_rootful_pod_vars
+    changed_rootful_pod_owner_refs: "{{ abhaile_rootful_quadlet_publications.results | selectattr('changed') | selectattr('item.kind',
+      'equalto', 'quadlet.pod') | map(attribute='item.owner_ref') | list }}"
+- name: Verify parent pods for changed manual rootful containers are active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - --quiet
+      - "{{ item | regex_replace('^unit:', '') }}"
+  changed_when: false
+  loop: "{{ abhaile_changed_rootful_parent_pods | default([]) | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  when: item not in changed_rootful_pod_owner_refs
+  vars: *changed_rootful_pod_vars
+- name: Verify automatic rootful containers and pods are active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - --quiet
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+  changed_when: false
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.apply_hints.restart_mode | default('try-restart') != 'manual'

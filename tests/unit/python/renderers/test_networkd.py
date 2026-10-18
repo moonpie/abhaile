@@ -118,6 +118,7 @@ class TestRenderNetworkdConfig:
         assert output_dir_path.is_dir()
         artifacts = collector.get_all_artifacts()
         assert len(artifacts) == 1
+        assert artifacts[0].target_path == "/etc/systemd/network/20-vlan.network.d/"
         assert artifacts[0].kind == "networkd.dropin"
         assert artifacts[0].apply_hints == {
             "owner": "root",

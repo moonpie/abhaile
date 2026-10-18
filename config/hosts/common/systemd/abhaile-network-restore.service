@@ -1,0 +1,19 @@
+[Unit]
+Description=Restore Abhaile last-successful network configuration
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target systemd-networkd.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/abhaile/scripts/abhaile-runner --restore-network
+User=abhaile
+Group=abhaile
+WorkingDirectory=/opt/abhaile
+Environment=PATH=/opt/abhaile/.venv/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/etc/abhaile/runner.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+RequiredBy=systemd-networkd.service

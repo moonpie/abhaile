@@ -12,14 +12,17 @@ Add one row per ADR. Keep links current when ADR status changes.
 | --- | ----- | ------ | ---- | ---------- | ------------- | ------------ |
 | [0001](0001-output-root-and-environment-paths.md) | Output Root and Environment Paths | Accepted | 2026-05-05 | - | - | 001, 002, 003, 004, 006, 007, 008, 009, 012 |
 | [0002](0002-hash-based-drift-detection-and-state-model.md) | Hash-based Drift Detection and State Model | Accepted | 2026-05-05 | - | - | 001, 002, 003, 004, 005, 006, 007, 008, 009 |
-| [0003](0003-gitops-runner-responsibility-boundary.md) | GitOps Runner Responsibility Boundary | Accepted | 2026-03-14 | - | - | 001, 008, 009, 012, 014 |
-| [0004](0004-apply-execution-model.md) | Apply Execution Model | Accepted | 2026-04-22 | - | - | 008, 009, 011 |
+| [0003](0003-gitops-runner-responsibility-boundary.md) | GitOps Runner Responsibility Boundary | Accepted (refined by 0013) | 2026-03-14 | - | - | 001, 008, 009, 012, 014, 028 |
+| [0004](0004-apply-execution-model.md) | Apply Execution Model | Accepted (legacy during migration) | 2026-04-22 | - | - | 008, 009, 011, 028 |
 | [0005](0005-service-authoring-model.md) | Service Authoring Model | Accepted | 2026-05-04 | - | - | 001, 002, 003, 004, 005, 006, 007, 009, 011, 015, 016, 017, 018, 019, 020 |
 | [0006](0006-secrets-model-and-bootstrap-artifacts.md) | Secrets Model and Bootstrap Artifacts | Accepted | 2026-05-05 | - | - | 001, 005, 007, 010, 011, 014, 015, 018, 019, 020 |
 | [0007](0007-sops-bootstrap-policy-and-layout.md) | SOPS Bootstrap Policy and Layout | Accepted | 2026-05-05 | - | - | 010, 013, 014 |
 | [0008](0008-host-infrastructure-authoring-model.md) | Host Infrastructure Authoring Model | Accepted | 2026-06-19 | - | - | 023 |
 | [0009](0009-vault-agent-approle-auto-auth.md) | Vault Agent AppRole Auto-Auth | Accepted | 2026-06-22 | - | - | 025 |
-| [0010](0010-ansible-reconciliation-model.md) | Ansible Reconciliation Model | Accepted | 2026-09-05 | - | - | 028 |
+| [0010](0010-ansible-reconciliation-model.md) | Ansible Reconciliation Model | Superseded | 2026-09-05 | - | 0012 | 028 |
+| [0011](0011-guarded-networkd-convergence.md) | Guarded systemd-networkd Convergence | Superseded | 2026-10-02 | - | 0012 | 028 |
+| [0012](0012-trusted-revision-ansible-reconciliation.md) | Trusted-Revision Ansible Reconciliation | Superseded | 2026-10-05 | 0010, 0011 | 0013 | 028 |
+| [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted | 2026-10-08 | 0012 | - | 028 |
 
 ## Status Values
 

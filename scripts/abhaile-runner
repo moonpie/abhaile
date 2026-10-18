@@ -1,31 +1,33 @@
 #!/usr/bin/env bash
 # Abhaile GitOps Runner — outer reconciliation loop.
 # Fetches repository state, renders, applies, and tracks success.
-# See: docs/specs/active/0012-gitops-runner.md
+# See: docs/specs/active/0028-target-host-reconciliation-model.md
 set -euo pipefail
 
 readonly ABHAILE_BRANCH="${ABHAILE_BRANCH:-main}"
 readonly ABHAILE_REMOTE="${ABHAILE_REMOTE:-origin}"
 readonly ABHAILE_OUTPUT="${ABHAILE_OUTPUT:-/var/lib/abhaile}"
 readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"
+readonly ABHAILE_PYTHON="${ABHAILE_PYTHON:-${ABHAILE_VENV_BIN}/python}"
 readonly ABHAILE_GIT_SSH_KEY="${ABHAILE_GIT_SSH_KEY:-/home/abhaile/.ssh/gitops_ed25519}"
 ABHAILE_VERBOSE="${ABHAILE_VERBOSE:-0}"
 readonly RUNNER_STATE_DIR="${ABHAILE_OUTPUT}/runner"
 readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
-readonly LAST_COMMIT_FILE="${RUNNER_STATE_DIR}/last-successful-commit"
 readonly LAST_STATUS_FILE="${RUNNER_STATE_DIR}/last-run-status"
 readonly LAST_SUMMARY_FILE="${RUNNER_STATE_DIR}/last-run-summary"
-readonly CURRENT_RUN_FILE="${RUNNER_STATE_DIR}/current-run"
-readonly FAILED_TARGET_FILE="${RUNNER_STATE_DIR}/failed-target"
 readonly ABHAILE_FORCE_RETRY="${ABHAILE_FORCE_RETRY:-0}"
-readonly ABHAILE_ENTRYPOINT_INSTALLER="${ABHAILE_ENTRYPOINT_INSTALLER:-${PWD}/scripts/install-abhaile-entrypoints}"
 readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"
-readonly ABHAILE_APPLY="${ABHAILE_VENV_BIN}/abhaile-apply"
+readonly ABHAILE_ANSIBLE_PLAYBOOK="${ABHAILE_ANSIBLE_PLAYBOOK:-/usr/bin/ansible-playbook}"
+readonly ABHAILE_ANSIBLE_CONFIG="${ABHAILE_ANSIBLE_CONFIG:-${PWD}/ansible/ansible.cfg}"
+readonly ABHAILE_RECONCILE_PLAYBOOK="${ABHAILE_RECONCILE_PLAYBOOK:-${PWD}/ansible/playbooks/reconcile.yml}"
+readonly ABHAILE_NETWORK_RESTORE_PLAYBOOK="${ABHAILE_NETWORK_RESTORE_PLAYBOOK:-${PWD}/ansible/playbooks/restore-network.yml}"
 readonly ABHAILE_HEALTH="${ABHAILE_VENV_BIN}/abhaile-health"
 readonly ABHAILE_CLUSTER_HEALTH="${ABHAILE_CLUSTER_HEALTH:-0}"
 RUN_STARTED_AT=""
 RUN_STARTED_SECONDS=""
-RUN_TARGET_SHA=""
+CURRENT_PHASE="start"
+RECOVERED_LAST_SUCCESSFUL=0
+RUN_CONTEXT_DIR=""
 
 log() { printf '[abhaile-runner] %s\n' "$*"; }
 die() { log "FATAL: $*"; exit 1; }
@@ -73,68 +75,116 @@ last_good_sha=${last_good_sha:-none}
 rollback_attempted=${rollback}"
 }
 
-record_current_phase() {
-    local phase="$1" target_sha="${2:-${RUN_TARGET_SHA:-unknown}}"
-    write_atomic "$CURRENT_RUN_FILE" "host=$(hostname -s)
+record_network_restore_noop_summary() {
+    local last_good_sha="${1:-}" ts duration
+    ts="$(date --iso-8601=seconds)"
+    duration="$(($(date +%s) - RUN_STARTED_SECONDS))"
+    write_atomic "$LAST_SUMMARY_FILE" "host=$(hostname -s)
 branch=${ABHAILE_BRANCH}
 remote=${ABHAILE_REMOTE}
-phase=${phase}
-target_sha=${target_sha}
-updated_at=$(date --iso-8601=seconds)"
+started_at=${RUN_STARTED_AT}
+finished_at=${ts}
+duration_seconds=${duration}
+phase=network-restore
+outcome=not-required
+exit_code=0
+current_sha=unknown
+target_sha=${last_good_sha:-unknown}
+last_good_sha=${last_good_sha:-none}
+rollback_attempted=false"
 }
 
-read_current_phase() {
-    if [[ -f "$CURRENT_RUN_FILE" ]]; then
-        awk -F= '/^phase=/{print $2}' "$CURRENT_RUN_FILE"
+read_restore_record() {
+    local path="$1" allow_legacy="$2" payload
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        return 0
     fi
+    if [[ ! -f "$path" || -L "$path" ]]; then
+        printf 'runner state error: Runner state record is not a regular file: %s\n' \
+            "${path##*/}" >&2
+        return 2
+    fi
+    if ! payload="$(<"$path")"; then
+        printf 'runner state error: Unable to read runner state record: %s\n' \
+            "${path##*/}" >&2
+        return 2
+    fi
+    if [[ "$allow_legacy" == "true" ]]; then
+        if [[ "$payload" =~ ^([0-9a-f]{40})([[:space:]].*)?$ ]]; then
+            printf '%s' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+    elif [[ "$payload" =~ ^[0-9a-f]{40}$ ]]; then
+        printf '%s' "$payload"
+        return 0
+    fi
+    printf 'runner state error: Invalid %s commit SHA\n' "${path##*/}" >&2
+    return 2
 }
 
-phase_or_default() {
-    local phase
-    phase="$(read_current_phase || true)"
-    if [[ -n "$phase" ]]; then
-        printf '%s' "$phase"
+network_restore_admission() {
+    local current last_good
+    current="$(read_restore_record "${RUNNER_STATE_DIR}/current-run" false)" || return $?
+    last_good="$(read_restore_record "${RUNNER_STATE_DIR}/last-successful-commit" true)" \
+        || return $?
+    if [[ -z "$current" || "$current" == "$last_good" ]]; then
+        printf 'not-required:%s\n' "$last_good"
     else
-        printf '%s' "$1"
+        printf 'restore-required:%s\n' "$last_good"
     fi
 }
 
-read_failed_target_sha() {
-    if [[ -f "$FAILED_TARGET_FILE" ]]; then
-        awk '{print $1}' "$FAILED_TARGET_FILE"
+record_current_phase() { CURRENT_PHASE="$1"; }
+
+read_current_phase() { printf '%s' "$CURRENT_PHASE"; }
+
+state_call() {
+    local operation="$1"
+    shift
+    "$ABHAILE_PYTHON" -c "
+from pathlib import Path
+import sys
+from abhaile.state import reconciliation
+from abhaile.utils.errors import ApplyError
+operation = getattr(reconciliation, sys.argv[1])
+try:
+    result = operation(Path(sys.argv[2]), *sys.argv[3:])
+except ApplyError as exc:
+    print(f'runner state error: {exc}', file=sys.stderr)
+    raise SystemExit(2) from None
+if result is not None:
+    print(result)
+" "$operation" "$RUNNER_STATE_DIR" "$@"
+}
+
+read_failed_target_sha() { state_call read_failed_target; }
+
+record_failed_target() { state_call mark_failed_target "$1"; }
+
+read_last_good_sha() { state_call read_last_successful; }
+
+read_current_run_sha() { state_call read_current_run; }
+
+classify_startup_state() { state_call classify_startup; }
+
+mark_mutation() { state_call mark_current_run "$1"; }
+
+commit_success() {
+    local sha="$1" clear_failed="${2:-true}" failed_sha=""
+    if [[ "$clear_failed" == "true" ]]; then
+        failed_sha="$(read_failed_target_sha)"
     fi
-}
-
-record_failed_target() {
-    local sha="$1" last_good_sha="${2:-none}"
-    local ts
-    ts="$(date --iso-8601=seconds)"
-    write_atomic "$FAILED_TARGET_FILE" "${sha} ${ts} last_good=${last_good_sha:-none} retries_suppressed=true"
-}
-
-clear_failed_target() {
-    rm -f "$FAILED_TARGET_FILE"
-}
-
-read_last_good_sha() {
-    if [[ -f "$LAST_COMMIT_FILE" ]]; then
-        awk '{print $1}' "$LAST_COMMIT_FILE"
+    state_call commit_last_successful "$sha"
+    if [[ -n "$failed_sha" ]]; then
+        state_call clear_matching_failed_target "$failed_sha"
     fi
-}
-
-record_success() {
-    local sha="$1"
-    local ts
-    ts="$(date --iso-8601=seconds)"
-    write_atomic "$LAST_COMMIT_FILE" "${sha} ${ts} ${ABHAILE_BRANCH}"
-    clear_failed_target
 }
 
 # --- Validation --------------------------------------------------------------
 
 validate_host() {
     local host="$1"
-    if ! python3 -c "
+    if ! "$ABHAILE_PYTHON" -c "
 import yaml, sys
 m = yaml.safe_load(open('config/mapping.yaml'))
 hosts = [k for item in m.get('abhaile', []) for k in item]
@@ -143,7 +193,6 @@ sys.exit(0 if '$host' in hosts else 1)
         log "Host '${host}' not found in config/mapping.yaml"
         record_run_status 3 "unknown"
         record_run_summary 3 "validate_host" "failure"
-        rm -f "$CURRENT_RUN_FILE"
         exit 3
     fi
 }
@@ -161,7 +210,6 @@ check_worktree_clean() {
         git reflog -n 5 --date=iso || true
         record_run_status 3 "unknown"
         record_run_summary 3 "check_worktree_clean" "dirty-worktree"
-        rm -f "$CURRENT_RUN_FILE"
         exit 3
     fi
 }
@@ -174,12 +222,7 @@ do_fetch() {
     if [[ -f "$ABHAILE_GIT_SSH_KEY" ]]; then
         export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -i ${ABHAILE_GIT_SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new}"
     fi
-    if ! git fetch --prune "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"; then
-        record_run_status 1 "unknown"
-        record_run_summary 1 "fetch" "failure"
-        rm -f "$CURRENT_RUN_FILE"
-        die "git fetch failed (network/auth issue)"
-    fi
+    git fetch --prune "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"
 }
 
 do_checkout() {
@@ -193,52 +236,90 @@ do_checkout() {
         log "Cannot fast-forward: current HEAD is not an ancestor of target"
         record_run_status 1 "$target_sha"
         record_run_summary 1 "checkout" "fast-forward-failure" "$target_sha"
-        rm -f "$CURRENT_RUN_FILE"
         exit 1
     fi
 
     git merge --ff-only --quiet "$target_sha"
 }
 
-do_entrypoints() {
-    local target_sha="${1:-${RUN_TARGET_SHA:-unknown}}"
-    record_current_phase "entrypoints" "$target_sha"
-    log "entrypoints: synchronizing managed CLI wrappers"
-
-    if [[ ! -x "$ABHAILE_ENTRYPOINT_INSTALLER" ]]; then
-        log "entrypoints: missing installer at ${ABHAILE_ENTRYPOINT_INSTALLER}"
-        return 1
-    fi
-
-    "$ABHAILE_ENTRYPOINT_INSTALLER"
-}
-
 do_render() {
-    local host="$1"
+    local host="$1" output_root="$2"
     local verbose_flag=""
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
     record_current_phase "render"
-    log "render: host=${host} output=${ABHAILE_OUTPUT}"
-    "$ABHAILE_RENDER" --host "$host" --output "$ABHAILE_OUTPUT" $verbose_flag
+    log "render: host=${host} output=${output_root}"
+    "$ABHAILE_RENDER" --host "$host" --output "$output_root" $verbose_flag
 }
 
-do_apply() {
+write_ansible_vars() {
+    local host="$1" rendered_root="$2" destination="$3"
+    local desired_manifest="${4:-}" removal_source_manifest="${5:-}"
+    local cleanup_scope="${6:-all}"
+    "$ABHAILE_PYTHON" -c '
+import json
+from pathlib import Path
+import sys
+
+from abhaile.plan.diff import classify_manifest_removals
+
+host, rendered_root, config_root, destination, desired, removal_source, cleanup_scope = sys.argv[1:]
+cleanup = []
+if desired and removal_source:
+    included_kinds = None
+    network_kinds = {"networkd.netdev", "networkd.network", "networkd.dropin"}
+    if cleanup_scope == "network":
+        included_kinds = network_kinds
+    elif cleanup_scope != "all":
+        raise SystemExit(f"Unsupported cleanup scope: {cleanup_scope}")
+    classification = classify_manifest_removals(
+        Path(desired),
+        Path(removal_source),
+        included_kinds=included_kinds,
+        directory_residue_kinds={"networkd.dropin", "service.directory"},
+        file_residue_kinds={"caddy.config"},
+    )
+    if classification["blocked"]:
+        blocked = ", ".join(
+            "{} ({})".format(item["target_path"], item["reason"])
+            for item in classification["blocked"]
+        )
+        raise SystemExit(f"Managed removal is blocked: {blocked}")
+    cleanup = classification["identity_matches"]
+
+payload = {
+    "abhaile_rendered_root": str(Path(rendered_root).resolve() / "rendered"),
+    "abhaile_config_root": str(Path(config_root).resolve()),
+    "abhaile_expected_host": host,
+    "abhaile_candidate_cleanup_entries": cleanup,
+}
+Path(destination).write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+' "$host" "$rendered_root" "${PWD}/config" "$destination" "$desired_manifest" "$removal_source_manifest" "$cleanup_scope"
+}
+
+do_ansible_check() {
+    local vars_file="$1" playbook="${2:-$ABHAILE_RECONCILE_PLAYBOOK}"
     local verbose_flag=""
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
-    record_current_phase "apply"
-    log "apply: output=${ABHAILE_OUTPUT}"
-    sudo "$ABHAILE_APPLY" --output "$ABHAILE_OUTPUT" $verbose_flag
+    record_current_phase "ansible-check"
+    log "ansible-check: playbook=${playbook}"
+    sudo /usr/bin/env ANSIBLE_CONFIG="$ABHAILE_ANSIBLE_CONFIG" \
+        "$ABHAILE_ANSIBLE_PLAYBOOK" --inventory localhost, --connection local --check \
+        --extra-vars "@${vars_file}" $verbose_flag "$playbook"
 }
 
-do_health() {
+do_ansible_apply() {
+    local vars_file="$1" playbook="${2:-$ABHAILE_RECONCILE_PLAYBOOK}"
     local verbose_flag=""
     [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
     [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
-    record_current_phase "health"
-    log "health: output=${ABHAILE_OUTPUT}"
-    sudo "$ABHAILE_HEALTH" --output "$ABHAILE_OUTPUT" $verbose_flag
+    record_current_phase "ansible-apply"
+    log "ansible-apply: playbook=${playbook}"
+    sudo /usr/bin/env ANSIBLE_CONFIG="$ABHAILE_ANSIBLE_CONFIG" \
+        "$ABHAILE_ANSIBLE_PLAYBOOK" --inventory localhost, --connection local \
+        --extra-vars "@${vars_file}" --extra-vars '{"abhaile_live_apply":true}' \
+        $verbose_flag "$playbook"
 }
 
 do_cluster_health() {
@@ -258,8 +339,17 @@ do_cluster_health() {
 }
 
 run_pipeline_for_checked_out_commit() {
-    local host="$1" target_sha="$2"
-    do_entrypoints "$target_sha" && do_render "$host" && do_apply && do_health && do_cluster_health
+    local host="$1" target_sha="$2" rendered_root="$3"
+    local desired_manifest="${4:-}" removal_source_manifest="${5:-}"
+    local mutation_sha="${6-$target_sha}"
+    local vars_file="${rendered_root}/ansible-vars.json"
+    do_render "$host" "$rendered_root" \
+        && write_ansible_vars "$host" "$rendered_root" "$vars_file" \
+            "$desired_manifest" "$removal_source_manifest" \
+        && do_ansible_check "$vars_file" \
+        && { [[ -z "$mutation_sha" ]] || mark_mutation "$mutation_sha"; } \
+        && do_ansible_apply "$vars_file" \
+        && do_cluster_health
 }
 
 return_to_branch() {
@@ -269,38 +359,125 @@ return_to_branch() {
         || true
 }
 
-do_rollback() {
-    local host="$1" target_sha="$2"
-    local last_good_sha
+recover_last_successful() {
+    local host="$1" interrupted_sha="${2:-}" preserve_failed="${3:-true}"
+    local last_good_sha original_marker candidate_root last_successful_root candidate_manifest=""
     last_good_sha="$(read_last_good_sha)"
-    record_current_phase "rollback" "$target_sha"
+    original_marker="$(read_current_run_sha)"
+    record_current_phase "recovery"
 
     if [[ -z "$last_good_sha" ]]; then
-        log "rollback: no last-known-good commit (first run); cannot rollback"
+        log "recovery: no last-successful commit; explicit enrollment is required"
         return 2
     fi
 
-    if ! git cat-file -t "$last_good_sha" &>/dev/null; then
-        log "rollback: target SHA ${last_good_sha:0:12} unreachable; operator intervention required"
+    if ! git cat-file -e "${last_good_sha}^{commit}" 2>/dev/null; then
+        log "recovery: commit ${last_good_sha:0:12} is unavailable locally"
         return 2
     fi
 
-    log "rollback: checking out last-known-good ${last_good_sha:0:12}"
+    if [[ -n "$interrupted_sha" && "$interrupted_sha" != "$last_good_sha" ]]; then
+        record_failed_target "$interrupted_sha"
+    fi
+
+    if [[ -n "$interrupted_sha" && "$interrupted_sha" != "$last_good_sha" ]]; then
+        if ! git cat-file -e "${interrupted_sha}^{commit}" 2>/dev/null; then
+            log "recovery: interrupted commit ${interrupted_sha:0:12} is unavailable locally"
+            return 2
+        fi
+        candidate_root="${RUN_CONTEXT_DIR}/recovery-candidate"
+        log "recovery: rendering interrupted candidate ${interrupted_sha:0:12} for cleanup proof"
+        git checkout --quiet "$interrupted_sha"
+        validate_host "$host"
+        do_render "$host" "$candidate_root" || return 1
+        candidate_manifest="${candidate_root}/rendered/manifest.json"
+    fi
+
+    log "recovery: reconciling last-successful ${last_good_sha:0:12}"
     git checkout --quiet "$last_good_sha"
+    validate_host "$host"
+    last_successful_root="${RUN_CONTEXT_DIR}/recovery-last-successful"
 
-    if run_pipeline_for_checked_out_commit "$host" "$last_good_sha"; then
-        log "rollback: SUCCESS — host running prior commit ${last_good_sha:0:12}, not latest ${target_sha:0:12}"
+    local recovery_marker="$last_good_sha" marker_to_clear="$last_good_sha"
+    if [[ -n "$original_marker" ]]; then
+        if [[ "$original_marker" != "$interrupted_sha" ]]; then
+            log "recovery: current-run changed before accepted reconciliation"
+            return 2
+        fi
+        recovery_marker=""
+        marker_to_clear="$original_marker"
+    fi
+    if run_pipeline_for_checked_out_commit "$host" "$last_good_sha" "$last_successful_root" \
+        "${last_successful_root}/rendered/manifest.json" "$candidate_manifest" \
+        "$recovery_marker"; then
+        state_call clear_matching_current_run "$marker_to_clear"
+        if [[ "$preserve_failed" != "true" ]]; then
+            local failed_sha
+            failed_sha="$(read_failed_target_sha)"
+            if [[ -n "$failed_sha" ]]; then
+                state_call clear_matching_failed_target "$failed_sha"
+            fi
+        fi
+        log "recovery: SUCCESS — host reconciled to ${last_good_sha:0:12}"
         return 0
     else
-        log "rollback: FAILED — both new and last-known-good commits fail"
+        log "recovery: FAILED — last-successful reconciliation did not pass"
         return 1
     fi
+}
+
+restore_last_successful_network() {
+    local host="$1" last_good_sha interrupted_sha candidate_root last_successful_root candidate_manifest=""
+    last_good_sha="$(read_last_good_sha)"
+    interrupted_sha="$(read_current_run_sha)"
+    record_current_phase "network-restore"
+
+    if [[ -z "$last_good_sha" ]]; then
+        log "network-restore: no last-successful commit; explicit enrollment is required"
+        return 2
+    fi
+    if ! git cat-file -e "${last_good_sha}^{commit}" 2>/dev/null; then
+        log "network-restore: last-successful commit ${last_good_sha:0:12} is unavailable locally"
+        return 2
+    fi
+
+    if [[ -n "$interrupted_sha" && "$interrupted_sha" != "$last_good_sha" ]]; then
+        if ! git cat-file -e "${interrupted_sha}^{commit}" 2>/dev/null; then
+            log "network-restore: interrupted commit ${interrupted_sha:0:12} is unavailable locally"
+            return 2
+        fi
+        candidate_root="${RUN_CONTEXT_DIR}/network-candidate"
+        git checkout --quiet "$interrupted_sha"
+        validate_host "$host"
+        do_render "$host" "$candidate_root" || return 1
+        candidate_manifest="${candidate_root}/rendered/manifest.json"
+    fi
+
+    last_successful_root="${RUN_CONTEXT_DIR}/network-last-successful"
+    git checkout --quiet "$last_good_sha"
+    validate_host "$host"
+    do_render "$host" "$last_successful_root" || return 1
+    write_ansible_vars "$host" "$last_successful_root" \
+        "${last_successful_root}/ansible-vars.json" \
+        "${last_successful_root}/rendered/manifest.json" "$candidate_manifest" "network" || return 1
+    do_ansible_check "${last_successful_root}/ansible-vars.json" \
+        "$ABHAILE_NETWORK_RESTORE_PLAYBOOK" \
+        || return 1
+    do_ansible_apply "${last_successful_root}/ansible-vars.json" \
+        "$ABHAILE_NETWORK_RESTORE_PLAYBOOK"
 }
 
 # --- Main --------------------------------------------------------------------
 
 main() {
-    local host
+    local host mode="reconcile"
+    if [[ $# -gt 1 ]]; then
+        die "usage: abhaile-runner [--restore-network]"
+    fi
+    if [[ $# -eq 1 ]]; then
+        [[ "$1" == "--restore-network" ]] || die "usage: abhaile-runner [--restore-network]"
+        mode="restore-network"
+    fi
     host="$(hostname -s)"
     RUN_STARTED_AT="$(date --iso-8601=seconds)"
     RUN_STARTED_SECONDS="$(date +%s)"
@@ -319,78 +496,173 @@ main() {
     log "start: host=${host} branch=${ABHAILE_BRANCH} remote=${ABHAILE_REMOTE} cwd=${PWD}"
     record_current_phase "start"
 
-    validate_host "$host"
-    check_worktree_clean
-    do_fetch
-
-    # Detect: compare fetched HEAD against last-applied commit
-    local target_sha last_sha current_sha
-    target_sha="$(git rev-parse "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}")"
-    RUN_TARGET_SHA="$target_sha"
-    last_sha="$(read_last_good_sha)"
-
-    if [[ "$target_sha" == "$last_sha" ]]; then
-        current_sha="$(git rev-parse HEAD)"
-        if [[ "$current_sha" == "$target_sha" ]]; then
-            log "detect: already at target commit ${target_sha:0:12}; nothing to do"
-            record_run_status 0 "$target_sha"
-            record_run_summary 0 "detect" "already-current" "$target_sha" "false"
-            rm -f "$CURRENT_RUN_FILE"
+    if [[ "$mode" == "restore-network" ]]; then
+        local admission last_network_sha
+        admission="$(network_restore_admission)" || exit $?
+        if [[ "$admission" == not-required:* ]]; then
+            last_network_sha="${admission#not-required:}"
+            log "network-restore: no interrupted mutation; allowing normal network startup"
+            record_run_status 0 "${last_network_sha:-unknown}"
+            record_network_restore_noop_summary "$last_network_sha"
             exit 0
         fi
     fi
 
-    current_sha="$(git rev-parse HEAD)"
-    log "detect: current=${current_sha:0:12} target=${target_sha:0:12} last-good=${last_sha:-none}"
+    RUN_CONTEXT_DIR="$(mktemp -d "${RUNNER_STATE_DIR}/run.XXXXXX")"
+    trap 'if [[ -n "$RUN_CONTEXT_DIR" && "$RUN_CONTEXT_DIR" == "${RUNNER_STATE_DIR}"/run.* ]]; then rm -rf -- "$RUN_CONTEXT_DIR"; fi' EXIT
 
-    local failed_sha
-    failed_sha="$(read_failed_target_sha || true)"
+    if [[ "$mode" == "restore-network" ]]; then
+        local last_network_sha
+        check_worktree_clean
+        log "network-restore: enforcing retained last-successful network files"
+        if restore_last_successful_network "$host"; then
+            return_to_branch
+            record_run_status 0 "$(read_last_good_sha)"
+            record_run_summary 0 "network-restore" "success" "$(read_last_good_sha)" "false"
+            exit 0
+        fi
+        return_to_branch
+        record_run_status 1 "$(read_last_good_sha || true)"
+        record_run_summary 1 "network-restore" "failure" "$(read_last_good_sha || true)" "false"
+        exit 1
+    fi
+
+    check_worktree_clean
+
+    local startup_action interrupted_sha last_sha
+    startup_action="$(classify_startup_state)"
+    interrupted_sha="$(read_current_run_sha)"
+    last_sha="$(read_last_good_sha)"
+    case "$startup_action" in
+        enrollment-required)
+            log "startup: no last-successful commit; explicit enrollment is required"
+            record_run_status 1 "unknown"
+            record_run_summary 1 "startup" "enrollment-required"
+            exit 1
+            ;;
+        recovery-blocked)
+            log "startup: interrupted mutation has no last-successful recovery target"
+            record_run_status 1 "${interrupted_sha:-unknown}"
+            record_run_summary 1 "startup" "recovery-blocked" "${interrupted_sha:-unknown}"
+            exit 1
+            ;;
+        recover-last-successful | verify-committed)
+            log "startup: ${startup_action}"
+            if ! recover_last_successful "$host" "$interrupted_sha" "true"; then
+                return_to_branch
+                record_run_status 1 "${interrupted_sha:-unknown}"
+                record_run_summary 1 "recovery" "failure" "${interrupted_sha:-unknown}" "true"
+                exit 1
+            fi
+            return_to_branch
+            RECOVERED_LAST_SUCCESSFUL=1
+            ;;
+        normal) ;;
+        *) die "unknown startup action: ${startup_action}" ;;
+    esac
+
+    validate_host "$host"
+
+    if ! do_fetch; then
+        log "fetch: unavailable; reconciling retained last-successful state"
+        if [[ "$RECOVERED_LAST_SUCCESSFUL" == "1" ]] \
+            || recover_last_successful "$host" "" "true"; then
+            return_to_branch
+            record_run_status 0 "$last_sha"
+            record_run_summary 0 "fetch" "offline-last-successful" "$last_sha" "true"
+            exit 0
+        fi
+        return_to_branch
+        record_run_status 1 "$last_sha"
+        record_run_summary 1 "recovery" "failure" "$last_sha" "true"
+        exit 1
+    fi
+
+    local target_sha current_sha failed_sha
+    target_sha="$(git rev-parse "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}")"
+    last_sha="$(read_last_good_sha)"
+    current_sha="$(git rev-parse HEAD)"
+    log "detect: current=${current_sha:0:12} target=${target_sha:0:12} last-good=${last_sha:0:12}"
+
+    failed_sha="$(read_failed_target_sha)"
+    if [[ "$RECOVERED_LAST_SUCCESSFUL" == "1" && "$target_sha" == "$last_sha" ]]; then
+        log "detect: fetched target already reconciled during startup recovery"
+        if [[ -n "$failed_sha" ]]; then
+            state_call clear_matching_failed_target "$failed_sha"
+        fi
+        record_run_status 0 "$target_sha"
+        record_run_summary 0 "complete" "recovery-success" "$target_sha" "true"
+        return_to_branch
+        exit 0
+    fi
     if [[ "$ABHAILE_FORCE_RETRY" != "1" && -n "$failed_sha" && "$failed_sha" == "$target_sha" ]]; then
-        log "detect: suppressing retry of failed commit ${target_sha:0:12}; waiting for ${ABHAILE_REMOTE}/${ABHAILE_BRANCH} to change"
+        log "detect: suppressing retry of failed commit ${target_sha:0:12}; reconciling last-successful"
+        if [[ "$RECOVERED_LAST_SUCCESSFUL" != "1" ]] \
+            && ! recover_last_successful "$host" "$failed_sha" "true"; then
+            return_to_branch
+            record_run_status 1 "$target_sha"
+            record_run_summary 1 "recovery" "failure" "$target_sha" "true"
+            exit 1
+        fi
+        return_to_branch
         record_run_status 1 "$target_sha"
         record_run_summary 1 "detect" "retry-suppressed" "$target_sha" "false"
-        rm -f "$CURRENT_RUN_FILE"
         exit 1
+    fi
+
+    local previous_manifest=""
+    if [[ "$target_sha" != "$last_sha" ]]; then
+        local previous_root="${RUN_CONTEXT_DIR}/previous-last-successful"
+        log "removal-context: rendering last-successful ${last_sha:0:12}"
+        git checkout --quiet "$last_sha"
+        validate_host "$host"
+        if ! do_render "$host" "$previous_root"; then
+            return_to_branch
+            record_run_status 1 "$target_sha"
+            record_run_summary 1 "render" "last-successful-context-failure" "$target_sha" "false"
+            exit 1
+        fi
+        previous_manifest="${previous_root}/rendered/manifest.json"
+        git checkout --quiet "$ABHAILE_BRANCH"
     fi
 
     # Checkout (fast-forward only)
     do_checkout "$target_sha"
 
-    # Synchronize entrypoints, then render + apply + health.
-    if run_pipeline_for_checked_out_commit "$host" "$target_sha"; then
+    # Reconcile even when target equals last-successful so ordinary drift is repaired.
+    local candidate_root="${RUN_CONTEXT_DIR}/candidate"
+    if run_pipeline_for_checked_out_commit "$host" "$target_sha" "$candidate_root" \
+        "${candidate_root}/rendered/manifest.json" "$previous_manifest"; then
         log "success: applied commit ${target_sha:0:12}"
-        record_success "$target_sha"
+        commit_success "$target_sha" "true"
         record_run_status 0 "$target_sha"
         record_run_summary 0 "complete" "success" "$target_sha" "false"
-        rm -f "$CURRENT_RUN_FILE"
         return_to_branch
         exit 0
     fi
 
-    # Pipeline failed — attempt rollback when a last-known-good commit exists.
-    local failed_phase rollback_rc
+    # A failed candidate remains failed even when last-successful recovery passes.
+    local failed_phase
     failed_phase="$(read_current_phase || true)"
-    log "pipeline failed at commit ${target_sha:0:12}; attempting rollback"
-    if do_rollback "$host" "$target_sha"; then
+    record_failed_target "$target_sha"
+    if [[ "$(read_current_run_sha)" != "$target_sha" ]]; then
+        log "pipeline failed before managed-state mutation; recovery is not required"
         return_to_branch
-        record_failed_target "$target_sha" "$last_sha"
-        record_run_status 0 "$target_sha"
-        record_run_summary 0 "rollback" "rollback-success" "$target_sha" "true"
-        rm -f "$CURRENT_RUN_FILE"
-        exit 0
-    else
-        rollback_rc=$?
-        return_to_branch
-        record_failed_target "$target_sha" "$last_sha"
         record_run_status 1 "$target_sha"
-        if [[ "$rollback_rc" -eq 2 ]]; then
-            record_run_summary 1 "${failed_phase:-entrypoints}" "failure" "$target_sha" "false"
-        else
-            record_run_summary 1 "$(phase_or_default rollback)" "failure" "$target_sha" "true"
-        fi
-        rm -f "$CURRENT_RUN_FILE"
+        record_run_summary 1 "${failed_phase:-preflight}" "failure-before-mutation" "$target_sha" "false"
         exit 1
     fi
+    log "pipeline failed at ${target_sha:0:12}; reconciling last-successful"
+    if recover_last_successful "$host" "$target_sha" "true"; then
+        return_to_branch
+        record_run_status 1 "$target_sha"
+        record_run_summary 1 "${failed_phase:-apply}" "failure-recovered" "$target_sha" "true"
+        exit 1
+    fi
+    return_to_branch
+    record_run_status 1 "$target_sha"
+    record_run_summary 1 "recovery" "failure" "$target_sha" "true"
+    exit 1
 }
 
 main "$@"

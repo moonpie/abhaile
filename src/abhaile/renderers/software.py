@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import yaml
 
+from abhaile.renderers.collector import ArtifactCollector
 from abhaile.utils.composition import walk_host_includes
 from abhaile.utils.config import read_json, read_yaml_mapping
 from abhaile.utils.errors import RenderError
@@ -19,6 +19,9 @@ def render_software_artifacts(
     host: str,
     config_root: Path,
     output_dir: Path,
+    *,
+    collector: ArtifactCollector | None = None,
+    rendered_root: Path | None = None,
 ) -> None:
     """Render software package/install artifacts for a host.
 
@@ -50,7 +53,6 @@ def render_software_artifacts(
 
             spec = read_yaml_mapping(source_path)
             validate_schema(spec, schema, str(source_path), schema_path)
-
             spec_id = spec.get("id")
             if spec_id != ref:
                 raise RenderError(

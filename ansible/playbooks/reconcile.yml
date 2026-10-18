@@ -1,0 +1,25 @@
+- name: Reconcile one rendered host through direct resource-family roles
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    abhaile_live_apply: false
+  pre_tasks:
+    - name: Require fixed local reconciliation inputs and mutation authorization
+      ansible.builtin.assert:
+        that:
+          - abhaile_rendered_root is string
+          - abhaile_rendered_root is match('^/')
+          - abhaile_config_root is string
+          - abhaile_config_root is match('^/')
+          - abhaile_expected_host is string
+          - abhaile_expected_host | length > 0
+          - abhaile_live_apply is boolean
+          - ansible_check_mode or abhaile_live_apply
+        fail_msg: >-
+          Reconciliation requires absolute rendered/config roots, an expected host, and explicit live authorization
+          outside check mode
+        quiet: true
+  roles:
+    - role: manifest_orchestration

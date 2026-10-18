@@ -1,0 +1,13 @@
+- name: Converge one service file owner
+  ansible.builtin.include_role:
+    name: service_config
+  vars:
+    abhaile_service_config_entries: >-
+      {{ owner_entries | selectattr('owner_ref', 'equalto', owner_ref) | list }}
+    abhaile_service_config_cleanup_entries: >-
+      {{ cleanup_entries | selectattr('owner_ref', 'equalto', owner_ref) | list }}
+    abhaile_service_config_managed_directory_targets: >-
+      {{ abhaile_directory_entries | map(attribute='target_path') | list }}
+    owner_entries: "{{ abhaile_service_config_entries_all }}"
+    cleanup_entries: "{{ abhaile_service_config_cleanup_entries_all }}"
+    owner_ref: "{{ abhaile_service_config_owner }}"

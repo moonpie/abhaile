@@ -1,7 +1,7 @@
 [Unit]
 Description=Abhaile GitOps Runner
-After=network-online.target
-Wants=network-online.target
+After=systemd-networkd.service abhaile-network-restore.service
+Wants=systemd-networkd.service
 
 [Service]
 Type=oneshot

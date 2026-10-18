@@ -1,0 +1,250 @@
+- name: Require the fixed manifest orchestration inputs
+  ansible.builtin.assert:
+    that:
+      - abhaile_rendered_root is string
+      - abhaile_rendered_root | length > 0
+      - abhaile_expected_host is string
+      - abhaile_expected_host | length > 0
+      - abhaile_candidate_cleanup_entries | default([]) is sequence
+      - abhaile_candidate_cleanup_entries | default([]) is not string
+    fail_msg: Manifest orchestration requires a rendered root and expected host
+    quiet: true
+  tags: [manifest_selection]
+- name: Load the canonical rendered manifest
+  ansible.builtin.include_vars:
+    file: "{{ abhaile_rendered_root }}/manifest.json"
+    name: abhaile_manifest
+  tags: [manifest_selection]
+- name: Validate the canonical manifest envelope
+  ansible.builtin.assert:
+    that:
+      - abhaile_manifest is mapping
+      - abhaile_manifest.keys() | difference(['entries', 'host', 'owners', 'version']) | length == 0
+      - "['entries', 'host', 'version'] | difference(abhaile_manifest.keys()) | length == 0"
+      - abhaile_manifest.version == '1'
+      - abhaile_manifest.host == abhaile_expected_host
+      - abhaile_manifest.entries is sequence
+      - abhaile_manifest.entries is not string
+      - abhaile_manifest.owners is not defined or abhaile_manifest.owners is mapping
+    fail_msg: Canonical manifest envelope is invalid or belongs to another host
+    quiet: true
+  tags: [manifest_selection]
+- name: Select fixed manifest resource families
+  ansible.builtin.set_fact:
+    abhaile_directory_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'equalto', 'service.directory') | list }}
+    abhaile_reserved_host_access_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_host_access_kinds) | list }}
+    abhaile_rootful_systemd_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_rootful_systemd_kinds) | rejectattr('owner_ref',
+      'in', abhaile_reserved_runner_owners) | list }}
+    abhaile_rootful_systemd_cleanup_entries: >-
+      {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'equalto', 'systemd.unit') | rejectattr('owner_ref',
+      'in', abhaile_reserved_runner_owners) | list }}
+    abhaile_reserved_runner_entries: >-
+      {{ abhaile_manifest.entries | selectattr('owner_ref', 'in', abhaile_reserved_runner_owners) | list }}
+    abhaile_reserved_runner_cleanup_entries: >-
+      {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('owner_ref', 'in', abhaile_reserved_runner_owners)
+      | list }}
+    abhaile_service_config_entries_all: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_service_config_kinds) | list }}
+    abhaile_service_config_cleanup_entries_all: >-
+      {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'in', abhaile_service_config_kinds)
+      | list }}
+    abhaile_vault_agent_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_vault_agent_kinds) | list }}
+    abhaile_quadlet_entries_all: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_quadlet_kinds) | list }}
+    abhaile_rootful_quadlet_cleanup_entries: >-
+      {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'in', abhaile_quadlet_kinds) | list
+      }}
+    abhaile_caddy_entries_all: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'equalto', 'caddy.config') | list }}
+    abhaile_coredns_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_coredns_kinds) | list }}
+    abhaile_coredns_cleanup_entries: >-
+      {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'equalto', 'coredns.zone') | list
+      }}
+    abhaile_networkd_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_networkd_kinds) | list }}
+    abhaile_networkd_cleanup_entries: >-
+      {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'in', abhaile_networkd_kinds) | list
+      }}
+    abhaile_vault_agent_quadlet_owners:
+      - unit:host-certs-volume.service
+      - unit:vault-agent-out-volume.service
+      - unit:vault-agent-run-volume.service
+      - unit:vault-agent-templates-volume.service
+      - unit:vault-agent.service
+  vars:
+    abhaile_host_access_kinds: [host.sysusers, host.sudoers, host.authorized_keys]
+    abhaile_rootful_systemd_kinds: [systemd.unit, systemd.dropin, resolved.config, resolved.dropin]
+    abhaile_service_config_kinds: [service.config, service.env]
+    abhaile_vault_agent_kinds: [vault.config, vault.template]
+    abhaile_quadlet_kinds:
+      - quadlet.network
+      - quadlet.volume
+      - quadlet.image
+      - quadlet.build
+      - quadlet.pod
+      - quadlet.container
+    abhaile_coredns_kinds: [coredns.config, coredns.zone]
+    abhaile_networkd_kinds: [networkd.netdev, networkd.network, networkd.dropin]
+    abhaile_reserved_runner_owners:
+      - unit:abhaile-network-restore.service
+      - unit:abhaile-runner.service
+      - unit:abhaile-runner.timer
+  tags: [manifest_selection]
+- name: Require the closed rootless Quadlet boundary
+  ansible.builtin.assert:
+    that:
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is defined
+      - item.apply_hints.rootless is boolean
+      - not item.apply_hints.rootless or item.owner_ref in abhaile_vault_agent_quadlet_owners
+    fail_msg: Rootless Quadlets are restricted to the closed Vault Agent owner set
+    quiet: true
+  loop: "{{ abhaile_quadlet_entries_all }}"
+  loop_control:
+    label: "{{ item.owner_ref | default('invalid Quadlet owner') }}"
+  tags: [manifest_selection]
+- name: Require candidate Quadlet cleanup to remain rootful
+  ansible.builtin.assert:
+    that:
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is defined
+      - item.apply_hints.rootless is boolean
+      - not item.apply_hints.rootless
+    fail_msg: Candidate cleanup supports rootful Quadlets only
+    quiet: true
+  loop: "{{ abhaile_rootful_quadlet_cleanup_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref | default('invalid cleanup Quadlet owner') }}"
+  tags: [manifest_selection]
+- name: Initialize Quadlet execution-context selections
+  ansible.builtin.set_fact:
+    abhaile_vault_agent_quadlet_entries: []
+    abhaile_rootful_quadlet_entries: []
+  tags: [manifest_selection]
+- name: Partition Quadlets by execution context
+  ansible.builtin.set_fact:
+    abhaile_vault_agent_quadlet_entries: "{{ abhaile_vault_agent_quadlet_entries + ([item] if is_rootless else [])
+      }}"
+    abhaile_rootful_quadlet_entries: "{{ abhaile_rootful_quadlet_entries + ([] if is_rootless else [item]) }}"
+  loop: "{{ abhaile_quadlet_entries_all }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  vars:
+    is_rootless: "{{ item.apply_hints.rootless }}"
+  tags: [manifest_selection]
+- name: Select owner-scoped service batches
+  ansible.builtin.set_fact:
+    abhaile_service_config_owners: >-
+      {{ abhaile_service_config_all_entries | map(attribute='owner_ref') | unique | list }}
+  vars:
+    abhaile_service_config_all_entries: >-
+      {{ abhaile_service_config_entries_all + abhaile_service_config_cleanup_entries_all }}
+  tags: [manifest_selection]
+- name: Require exact and complete family selection
+  ansible.builtin.assert:
+    that:
+      - selected_entry_count == abhaile_manifest.entries | length
+      - >-
+        (abhaile_service_config_cleanup_entries_all | length) + (abhaile_coredns_cleanup_entries | length) + (abhaile_rootful_systemd_cleanup_entries
+        | length) + (abhaile_networkd_cleanup_entries | length) + (abhaile_reserved_runner_cleanup_entries | length)
+        + (abhaile_rootful_quadlet_cleanup_entries | length) == abhaile_candidate_cleanup_entries | default([])
+        | length
+      - abhaile_vault_agent_quadlet_entries | rejectattr('owner_ref', 'in', abhaile_vault_agent_quadlet_owners)
+        | list | length == 0
+    fail_msg: Manifest contains an unsupported, overlapping, or unexpected rootless resource
+    quiet: true
+  vars:
+    selected_entry_count: "{{ selected_families | map('length') | sum }}"
+    selected_families:
+      - "{{ abhaile_directory_entries }}"
+      - "{{ abhaile_reserved_host_access_entries }}"
+      - "{{ abhaile_rootful_systemd_entries }}"
+      - "{{ abhaile_service_config_entries_all }}"
+      - "{{ abhaile_vault_agent_entries }}"
+      - "{{ abhaile_quadlet_entries_all }}"
+      - "{{ abhaile_caddy_entries_all }}"
+      - "{{ abhaile_coredns_entries }}"
+      - "{{ abhaile_networkd_entries }}"
+      - "{{ abhaile_reserved_runner_entries }}"
+  tags: [manifest_selection]
+- name: Require the closed bootstrap-owned host-access inventory
+  ansible.builtin.assert:
+    that:
+      - item.target_path == abhaile_reserved_host_access_targets[item.kind]
+    fail_msg: Host identity and access artifacts are bootstrap-owned fixed inventory
+    quiet: true
+  loop: "{{ abhaile_reserved_host_access_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid reserved host-access artifact') }}"
+  vars:
+    abhaile_reserved_host_access_targets:
+      host.sysusers: /etc/sysusers.d/abhaile.conf
+      host.sudoers: /etc/sudoers.d/abhaile
+      host.authorized_keys: /home/abhaile/.ssh/authorized_keys
+  tags: [manifest_selection]
+- name: Require the closed reserved runner-unit inventory
+  ansible.builtin.assert:
+    that:
+      - item.kind == 'systemd.unit'
+      - item.owner_ref == 'unit:' ~ (item.target_path | basename)
+      - item.target_path in abhaile_reserved_runner_targets
+    fail_msg: Reserved runner inventory is not one of the fixed installation-owned units
+    quiet: true
+  loop: "{{ abhaile_reserved_runner_entries + abhaile_reserved_runner_cleanup_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid reserved runner unit') }}"
+  vars:
+    abhaile_reserved_runner_targets:
+      - /etc/systemd/system/abhaile-network-restore.service
+      - /etc/systemd/system/abhaile-runner.service
+      - /etc/systemd/system/abhaile-runner.timer
+  tags: [manifest_selection]
+- name: Converge managed directories
+  ansible.builtin.include_role:
+    name: managed_directories
+  when: abhaile_directory_entries | length > 0
+- name: Converge rootful systemd and resolved files
+  ansible.builtin.include_role:
+    name: rootful_systemd
+  when: >-
+    abhaile_rootful_systemd_entries | length > 0 or abhaile_rootful_systemd_cleanup_entries | length > 0
+- name: Converge owner-scoped service files
+  ansible.builtin.include_tasks: service_owner.yml
+  loop: "{{ abhaile_service_config_owners }}"
+  loop_control:
+    loop_var: abhaile_service_config_owner
+    label: "{{ abhaile_service_config_owner }}"
+- name: Converge Vault Agent configuration and rootless Quadlets
+  ansible.builtin.include_role:
+    name: vault_agent_config
+  vars:
+    abhaile_vault_agent_managed_directory_targets: >-
+      {{ abhaile_directory_entries | map(attribute='target_path') | list }}
+  when: abhaile_vault_agent_entries | length > 0
+- name: Converge rootful Quadlets
+  ansible.builtin.include_role:
+    name: rootful_quadlet_files
+  when: >-
+    abhaile_rootful_quadlet_entries | length > 0 or abhaile_rootful_quadlet_cleanup_entries | length > 0
+- name: Converge owner-scoped Caddy configuration
+  ansible.builtin.include_tasks: caddy_owner.yml
+  loop: "{{ abhaile_caddy_entries_all }}"
+  loop_control:
+    loop_var: abhaile_caddy_entry
+    label: "{{ abhaile_caddy_entry.owner_ref }}"
+- name: Converge CoreDNS configuration
+  ansible.builtin.include_role:
+    name: coredns_config
+  when: abhaile_coredns_entries | length > 0
+- name: Converge systemd-networkd configuration
+  ansible.builtin.include_role:
+    name: networkd_config
+  when: abhaile_networkd_entries | length > 0 or abhaile_networkd_cleanup_entries | length > 0
+- name: Evaluate bounded local acceptance
+  ansible.builtin.include_role:
+    name: local_acceptance

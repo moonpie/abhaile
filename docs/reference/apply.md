@@ -1,18 +1,11 @@
-# Apply Notes
+# Legacy Apply Notes
+
+This is the reference for the Python apply backend that remains authoritative on the live hosts
+until each explicitly approved Ansible cutover. The repository also contains the replacement
+direct-role reconciliation path tracked by active Spec 0028; its presence does not authorize live
+use or change the commands documented here.
 
 This document records the operator-facing apply behavior that was added for service-owned artifacts.
-
-## Experimental Ansible Compatibility Mode
-
-The repository contains an incomplete Ansible migration scaffold behind the explicit
-`abhaile-apply --ansible` option. Do not use this option for live convergence. The normal GitOps
-runner and bootstrap flow continue to use the legacy Python apply engine while the migration work
-tracked in `TODO.md` is completed and reviewed.
-
-The Ansible scaffold is not yet a supported dry-run or apply path. It does not currently preserve
-the full manifest, state, prune, health, rollback, privilege, and rootless-runtime contracts
-documented for `abhaile-apply`. Do not invoke `ansible/playbooks/converge.yml` directly on either
-host.
 
 ## `apply.config_change_restart_unit`
 

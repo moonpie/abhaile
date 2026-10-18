@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +23,6 @@ def build_manifest(host: str, metadata: RenderMetadata) -> dict[str, Any]:
     manifest: dict[str, Any] = {
         "version": MANIFEST_VERSION,
         "host": host,
-        "rendered_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "entries": entries,
     }
     if owners:

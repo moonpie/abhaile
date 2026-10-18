@@ -7,6 +7,8 @@ composition:
         variables: {}
       destination: /etc/systemd/resolved.conf
   systemd:
+    - source: common/systemd/abhaile-network-restore.service
+      destination: /etc/systemd/system/abhaile-network-restore.service
     - source: common/systemd/abhaile-runner.service
       destination: /etc/systemd/system/abhaile-runner.service
     - source: common/systemd/abhaile-runner.timer

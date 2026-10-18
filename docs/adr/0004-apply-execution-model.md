@@ -5,6 +5,9 @@
 2026-04-22: Updated Accepted
 2026-04-21: Accepted
 
+2026-10-05: Retained as the legacy production model during migration. ADR 0012 defines its target
+replacement; this record becomes historical at cutover.
+
 ## Context
 
 Abhaile manages multiple artifact families with different runtime behaviors: systemd units, networkd artifacts, service configs, DNS-related assets, quadlets, and host-managed files. Apply needs a deterministic and testable way to reconcile changed artifacts without relying on ad hoc shell hooks.
@@ -45,6 +48,7 @@ Apply uses typed owner-based execution driven by planner output and renderer-int
 
 ## References
 
+- [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - ADR 0003: GitOps Runner Responsibility Boundary
 - ADR 0005: Service Authoring Model
 - `docs/reference/apply.md`

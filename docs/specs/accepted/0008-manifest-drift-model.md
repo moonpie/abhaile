@@ -8,7 +8,7 @@ title: Manifest and Drift Model
 status: accepted
 owner: moonpie
 created: 2026-06-04
-updated: 2026-06-05
+updated: 2026-10-17
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -96,7 +96,8 @@ Top-level manifest contract:
 
 - `version`: currently fixed to `"1"`.
 - `host`: required host identifier for safety checks and state matching.
-- `rendered_at`: UTC ISO 8601 timestamp with `Z` suffix.
+- No render timestamp is emitted. Identical desired input therefore produces identical manifest
+  bytes; operational run times belong in logs and apply-owned history, not desired state.
 - `entries`: ordered list of artifact records.
 - `owners`: optional object keyed by owner reference.
 
@@ -272,6 +273,16 @@ the GitOps runner layer and are not part of `src/abhaile/plan/`,
 `src/abhaile/apply/`, or `src/abhaile/state/`.
 
 ## Decision Notes
+
+- Decision: Keep render timestamps out of manifest v1.
+
+- Rationale: A render timestamp makes identical desired input produce different manifest bytes and
+  adds no drift authority.
+
+- Impact: Manifest identity is deterministic; apply history retains its separate operational
+  timestamps.
+
+- ADR: 0013-last-successful-ansible-reconciliation
 
 - Decision: Separate desired render manifests from durable applied-state manifests.
 

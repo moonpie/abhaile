@@ -1,0 +1,57 @@
+- name: Restore last-successful networkd files before networkd starts
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    abhaile_live_apply: false
+  pre_tasks:
+    - name: Require fixed local network restoration inputs
+      ansible.builtin.assert:
+        that:
+          - abhaile_rendered_root is string
+          - abhaile_rendered_root is match('^/')
+          - abhaile_expected_host is string
+          - abhaile_expected_host | length > 0
+          - abhaile_candidate_cleanup_entries | default([]) is sequence
+          - abhaile_candidate_cleanup_entries | default([]) is not string
+          - abhaile_live_apply is boolean
+          - ansible_check_mode or abhaile_live_apply
+        fail_msg: Network restoration requires fixed local inputs and explicit live authorization
+        quiet: true
+    - name: Load the last-successful manifest
+      ansible.builtin.include_vars:
+        file: "{{ abhaile_rendered_root }}/manifest.json"
+        name: abhaile_manifest
+    - name: Validate the last-successful manifest envelope
+      ansible.builtin.assert:
+        that:
+          - abhaile_manifest is mapping
+          - abhaile_manifest.keys() | difference(['entries', 'host', 'owners', 'version']) | length == 0
+          - "['entries', 'host', 'version'] | difference(abhaile_manifest.keys()) | length == 0"
+          - abhaile_manifest.version == '1'
+          - abhaile_manifest.host == abhaile_expected_host
+          - abhaile_manifest.entries is sequence
+          - abhaile_manifest.entries is not string
+        fail_msg: Last-successful manifest is invalid or belongs to another host
+        quiet: true
+    - name: Select only networkd restoration entries
+      ansible.builtin.set_fact:
+        abhaile_networkd_entries: >-
+          {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_networkd_kinds) | list }}
+        abhaile_networkd_cleanup_entries: >-
+          {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'in', abhaile_networkd_kinds)
+          | list }}
+      vars:
+        abhaile_networkd_kinds: [networkd.netdev, networkd.network, networkd.dropin]
+    - name: Require complete network-only cleanup selection
+      ansible.builtin.assert:
+        that:
+          - abhaile_networkd_entries | length > 0
+          - abhaile_networkd_cleanup_entries | length == abhaile_candidate_cleanup_entries | default([]) | length
+        fail_msg: Network restoration received missing desired state or non-network cleanup evidence
+        quiet: true
+  roles:
+    - role: networkd_config
+      vars:
+        abhaile_networkd_early_restore: true

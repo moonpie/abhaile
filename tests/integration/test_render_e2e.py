@@ -61,7 +61,7 @@ class TestRenderE2E:
 
         assert loaded["host"] == "testhost"
         assert loaded["version"] == "1"
-        assert "rendered_at" in loaded
+        assert "rendered_at" not in loaded
         assert "entries" in loaded
         assert len(loaded["entries"]) == 2
 
@@ -99,8 +99,8 @@ class TestRenderE2E:
 
         assert phobos_manifest["host"] == "phobos"
         assert deimos_manifest["host"] == "deimos"
-        assert "rendered_at" in phobos_manifest
-        assert "rendered_at" in deimos_manifest
+        assert "rendered_at" not in phobos_manifest
+        assert "rendered_at" not in deimos_manifest
         # Verify host-specific files are in correct manifests
         phobos_paths = [e["target_path"] for e in phobos_manifest["entries"]]
         deimos_paths = [e["target_path"] for e in deimos_manifest["entries"]]
@@ -206,12 +206,7 @@ class TestRenderE2E:
         m1_content = (tmp_output / "manifest1.json").read_text()
         m2_content = (tmp_output / "manifest2.json").read_text()
 
-        # Parse to compare
-        m1 = json.loads(m1_content)
-        m2 = json.loads(m2_content)
-
-        # Entries should be identical
-        assert m1["entries"] == m2["entries"]
+        assert m1_content == m2_content
 
     def test_render_services_configs(self, tmp_repo_with_config, tmp_output):
         """Test that service configs are rendered correctly for mapped services."""

@@ -8,7 +8,8 @@
 - name: ensure rootless podman runtime is initialized for abhaile
   ansible.builtin.command:
     cmd: >-
-      sudo -H -u abhaile env HOME=/home/abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) bash -lc 'cd /tmp && podman system info'
+      sudo -H -u abhaile env HOME=/home/abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) bash -lc 'cd /tmp &&
+      podman system info'
   register: abhaile_podman_runtime
   changed_when: abhaile_podman_runtime.rc == 0
   failed_when: abhaile_podman_runtime.rc not in [0, 1]

@@ -1,0 +1,101 @@
+- name: Require one Caddy configuration entry
+  ansible.builtin.assert:
+    that:
+      - abhaile_caddy_config_entries is sequence
+      - abhaile_caddy_config_entries is not string
+      - abhaile_caddy_config_entries | length == 1
+    fail_msg: Caddy configuration selection must contain exactly one segment
+    quiet: true
+  tags: [caddy_contract]
+- name: Validate common Caddy configuration manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+    apply:
+      tags: [caddy_contract]
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_caddy_config_entries }}"
+  tags: [caddy_contract]
+- name: Validate the Caddy segment contract
+  ansible.builtin.assert:
+    that:
+      - caddy_entry.kind == 'caddy.config'
+      - caddy_entry.owner_ref is match('^caddy:[a-z0-9][a-z0-9-]*$')
+      - caddy_segment == caddy_entry.owner_ref | regex_replace('^caddy:', '')
+      - caddy_entry.target_path == '/srv/caddy/' ~ caddy_segment ~ '/Caddyfile'
+      - caddy_entry.apply_hints is mapping
+      - caddy_entry.apply_hints.keys() | difference(['contributors']) | length == 0
+      - caddy_entry.apply_hints.contributors is sequence
+      - caddy_entry.apply_hints.contributors is not string
+      - >-
+        caddy_entry.apply_hints.contributors | reject('match', '^service:[a-z0-9][a-z0-9-]*$') | list | length ==
+        0
+    fail_msg: Caddy configuration entry violates its closed segment contract
+    quiet: true
+  vars: &caddy_config_vars
+    caddy_entry: "{{ abhaile_caddy_config_entries[0] }}"
+    caddy_segment: "{{ caddy_entry.owner_ref | regex_replace('^caddy:', '') }}"
+  tags: [caddy_contract]
+- name: Read candidate Caddy configuration
+  ansible.builtin.slurp:
+    src: "{{ caddy_entry_source }}"
+  register: abhaile_caddy_candidate
+  vars:
+    caddy_entry_source: "{{ abhaile_rendered_root }}/{{ abhaile_caddy_config_entries[0].render_path }}"
+- name: Require the existing Caddy container for candidate validation
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/podman
+      - container
+      - exists
+      - "systemd-caddy-{{ caddy_segment }}"
+  check_mode: false
+  changed_when: false
+  vars: *caddy_config_vars
+- name: Validate candidate with the installed Caddy runtime
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/podman
+      - exec
+      - --interactive
+      - "systemd-caddy-{{ caddy_segment }}"
+      - /usr/bin/caddy
+      - validate
+      - --config
+      - '-'
+      - --adapter
+      - caddyfile
+    stdin: "{{ abhaile_caddy_candidate.content | b64decode }}"
+    stdin_add_newline: false
+  check_mode: false
+  changed_when: false
+  vars: *caddy_config_vars
+- name: Publish Caddy configuration
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ caddy_entry.render_path }}"
+    dest: "{{ caddy_entry.target_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  register: abhaile_caddy_publication
+  vars: *caddy_config_vars
+- name: Restart Caddy after changed configuration
+  ansible.builtin.systemd_service:
+    name: "caddy-{{ caddy_segment }}.service"
+    state: restarted
+  when:
+    - not ansible_check_mode
+    - abhaile_caddy_publication.changed
+  vars: *caddy_config_vars
+- name: Verify changed Caddy segment is active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - --quiet
+      - "caddy-{{ caddy_segment }}.service"
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - abhaile_caddy_publication.changed
+  vars: *caddy_config_vars

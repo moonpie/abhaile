@@ -233,7 +233,13 @@ def render_host(
     )
 
     LOG.debug("render.phase.software host=%s", host)
-    _render_host_software(host, config_root, software_dir)
+    _render_host_software(
+        host,
+        config_root,
+        software_dir,
+        collector=collector,
+        rendered_root=rendered_dir,
+    )
     LOG.debug("render.phase.users host=%s", host)
     _render_host_users(
         host,
@@ -309,9 +315,22 @@ def _prepare_host_artifact_dirs(
     return system_dir, software_dir, services_output_dir
 
 
-def _render_host_software(host: str, config_root: Path, software_dir: Path) -> None:
+def _render_host_software(
+    host: str,
+    config_root: Path,
+    software_dir: Path,
+    *,
+    collector: ArtifactCollector,
+    rendered_root: Path,
+) -> None:
     """Render software package/install artifacts for a host."""
-    render_software_artifacts(host, config_root, software_dir)
+    render_software_artifacts(
+        host,
+        config_root,
+        software_dir,
+        collector=collector,
+        rendered_root=rendered_root,
+    )
 
 
 def _render_host_users(
@@ -441,7 +460,8 @@ def _write_manifest(
 ) -> Path:
     """Build and write the render manifest into the rendered directory."""
     collector.compute_hashes_and_sizes(rendered_dir)
-    manifest = build_manifest(host, collector.get_metadata())
+    metadata = collector.get_metadata()
+    manifest = build_manifest(host, metadata)
     manifest_path = rendered_dir / "manifest.json"
     write_manifest(manifest, manifest_path)
     return manifest_path

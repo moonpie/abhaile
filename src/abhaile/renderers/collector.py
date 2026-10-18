@@ -88,13 +88,14 @@ class ArtifactCollector:
         seen_targets: dict[str, str] = {}
         for artifact in self._metadata.artifacts.values():
             target = artifact.target_path
-            if target in seen_targets:
+            if target and target in seen_targets:
                 raise ValueError(
                     f"Duplicate target_path '{target}': "
                     f"render_path={artifact.render_path} conflicts with "
                     f"render_path={seen_targets[target]}"
                 )
-            seen_targets[target] = artifact.render_path
+            if target:
+                seen_targets[target] = artifact.render_path
 
         for artifact in self._metadata.artifacts.values():
             artifact_path = rendered_dir / artifact.render_path

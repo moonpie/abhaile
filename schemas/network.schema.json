@@ -147,6 +147,47 @@
                 "vlan": {
                   "type": "string",
                   "description": "VLAN name this interface belongs to"
+                },
+                "convergence_probes": {
+                  "type": "array",
+                  "description": "Explicit guarded-transition probes; omission keeps network mutation unavailable",
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "items": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "required": ["id", "type", "target"],
+                        "properties": {
+                          "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+                          "type": {"const": "gateway"},
+                          "target": {"const": "vlan_gateway"}
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["id", "type", "address"],
+                        "properties": {
+                          "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+                          "type": {"const": "icmp"},
+                          "address": {"type": "string", "format": "ipv4"}
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": ["id", "type", "address", "port"],
+                        "properties": {
+                          "id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$"},
+                          "type": {"const": "external-peer"},
+                          "address": {"type": "string", "format": "ipv4"},
+                          "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
                 }
               },
               "additionalProperties": false

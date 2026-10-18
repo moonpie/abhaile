@@ -1,0 +1,74 @@
+- name: Adopt systemd-networkd as the host network backend
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    abhaile_live_apply: false
+  pre_tasks:
+    - name: Require fixed adoption inputs and explicit authorization
+      ansible.builtin.assert:
+        that:
+          - abhaile_rendered_root is string
+          - abhaile_rendered_root is match('^/')
+          - abhaile_config_root is string
+          - abhaile_config_root is match('^/')
+          - abhaile_expected_host is string
+          - abhaile_expected_host | length > 0
+          - abhaile_live_apply is boolean
+          - ansible_check_mode or abhaile_live_apply
+        fail_msg: >-
+          Network adoption requires absolute rendered/config roots, an expected host, and explicit live authorization
+          outside check mode
+        quiet: true
+    - name: Load the rendered manifest
+      ansible.builtin.include_vars:
+        file: "{{ abhaile_rendered_root }}/manifest.json"
+        name: abhaile_manifest
+    - name: Validate the rendered manifest envelope
+      ansible.builtin.assert:
+        that:
+          - abhaile_manifest is mapping
+          - abhaile_manifest.keys() | difference(['entries', 'host', 'owners', 'version']) | length == 0
+          - "['entries', 'host', 'version'] | difference(abhaile_manifest.keys()) | length == 0"
+          - abhaile_manifest.version == '1'
+          - abhaile_manifest.host == abhaile_expected_host
+          - abhaile_manifest.entries is sequence
+          - abhaile_manifest.entries is not string
+        fail_msg: Rendered manifest is invalid or belongs to another host
+        quiet: true
+    - name: Select networkd entries for adoption
+      ansible.builtin.set_fact:
+        abhaile_networkd_entries: >-
+          {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_networkd_kinds) | list }}
+        abhaile_networkd_cleanup_entries: []
+        abhaile_network_restore_entries: >-
+          {{ abhaile_manifest.entries | selectattr('target_path', 'equalto', '/etc/systemd/system/abhaile-network-restore.service')
+          | list }}
+      vars:
+        abhaile_networkd_kinds: [networkd.netdev, networkd.network, networkd.dropin]
+    - name: Require rendered networkd desired state
+      ansible.builtin.assert:
+        that:
+          - abhaile_networkd_entries | length > 0
+        fail_msg: Network adoption requires rendered networkd entries
+        quiet: true
+  tasks:
+    - name: Install recovery before network backend adoption
+      ansible.builtin.include_role:
+        name: network_restore_install
+    - name: Publish and activate the networkd backend
+      ansible.builtin.include_role:
+        name: networkd_config
+      vars:
+        abhaile_networkd_adoption: true
+    - name: Verify local management-path acceptance
+      ansible.builtin.include_role:
+        name: local_acceptance
+      vars:
+        abhaile_network_acceptance_required: true
+    - name: Disable the legacy backend for the next boot
+      ansible.builtin.systemd_service:
+        name: networking.service
+        enabled: false
+      when: not ansible_check_mode

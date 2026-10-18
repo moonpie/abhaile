@@ -1,0 +1,58 @@
+- name: Validate common selected manifest entry fields
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.render_path is string
+      - item.render_path | length > 0
+      - not item.render_path.startswith('/')
+      - item.render_path not in ['.', '..']
+      - not item.render_path.startswith('./')
+      - not item.render_path.startswith('../')
+      - "'//' not in item.render_path"
+      - "'/./' not in item.render_path"
+      - "'/../' not in item.render_path"
+      - not item.render_path.endswith('/.')
+      - not item.render_path.endswith('/..')
+      - item.target_path is string
+      - item.target_path is match('^/')
+      - item.target_path != '/'
+      - "'//' not in item.target_path"
+      - "'/./' not in item.target_path"
+      - "'/../' not in item.target_path"
+      - not item.target_path.endswith('/.')
+      - not item.target_path.endswith('/..')
+      - item.is_directory is not defined or item.is_directory is boolean
+      - item.is_directory | default(false) or item.sha256 is string
+      - item.is_directory | default(false) or item.sha256 is match('^[0-9a-f]{64}$')
+      - item.is_directory | default(false) or item.size is integer
+      - item.is_directory | default(false) or item.size >= 0
+    fail_msg: Selected manifest entry has invalid common fields
+    quiet: true
+  loop: "{{ abhaile_preflight_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid manifest entry') }}"
+- name: Inspect rendered manifest sources
+  ansible.builtin.stat:
+    path: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_preflight_entries }}"
+  loop_control:
+    label: "{{ item.render_path }}"
+  when: not item.is_directory | default(false)
+  register: abhaile_preflight_source_stats
+- name: Validate rendered manifest source identity
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum == item.item.sha256
+      - item.stat.size == item.item.size
+    fail_msg: Rendered source does not match manifest identity
+    quiet: true
+  loop: "{{ abhaile_preflight_source_stats.results }}"
+  loop_control:
+    label: "{{ item.item.render_path }}"
+  when: not item.skipped | default(false)

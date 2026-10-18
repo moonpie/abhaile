@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from abhaile.plan.diff import _live_directory_state, plan_manifest_drift
+from abhaile.plan.diff import (
+    _live_directory_state,
+    classify_candidate_only_files,
+    classify_manifest_removals,
+    plan_manifest_drift,
+)
 from abhaile.utils.errors import DiffError
 
 
@@ -137,6 +142,254 @@ def _quadlet_build_entry(
     }
 
 
+class TestCandidateOnlyClassification:
+    """Classify interrupted-candidate additions without performing cleanup."""
+
+    def _entry(self, target: Path, content: str, **overrides: object) -> dict[str, object]:
+        """Build one canonical candidate file entry."""
+        entry: dict[str, object] = {
+            "render_path": f"services/test/{target.name}",
+            "target_path": target.as_posix(),
+            "sha256": _sha_of(content),
+            "size": len(content.encode("utf-8")),
+            "kind": "service.config",
+            "owner_ref": "service:test",
+        }
+        entry.update(overrides)
+        return entry
+
+    def test_matching_candidate_only_file_has_identity_evidence(self, tmp_path: Path) -> None:
+        """Report matching bytes without claiming that deletion is supported."""
+        target = tmp_path / "live" / "candidate.conf"
+        target.parent.mkdir()
+        target.write_text("candidate=yes\n")
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(candidate, "deimos", [self._entry(target, "candidate=yes\n")])
+
+        result = classify_candidate_only_files(accepted, candidate)
+
+        assert [entry["target_path"] for entry in result["identity_matches"]] == [target.as_posix()]
+        assert result["missing"] == []
+        assert result["blocked"] == []
+
+    def test_accepted_target_is_not_candidate_only(self, tmp_path: Path) -> None:
+        """Ignore changed resources because accepted reconciliation restores them."""
+        target = tmp_path / "live" / "shared.conf"
+        target.parent.mkdir()
+        target.write_text("candidate=yes\n")
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [self._entry(target, "accepted=yes\n")])
+        _write_manifest(candidate, "deimos", [self._entry(target, "candidate=yes\n")])
+
+        result = classify_candidate_only_files(accepted, candidate)
+
+        assert result["identity_matches"] == []
+        assert result["missing"] == []
+        assert result["blocked"] == []
+
+    @pytest.mark.parametrize(
+        ("live_content", "reason"),
+        [("locally-modified\n", "live-content-mismatch"), (None, "non-regular-live-path")],
+    )
+    def test_ambiguous_live_identity_is_blocked(
+        self,
+        tmp_path: Path,
+        live_content: str | None,
+        reason: str,
+    ) -> None:
+        """Block drifted content and non-regular live paths."""
+        target = tmp_path / "live" / "candidate.conf"
+        target.parent.mkdir()
+        if live_content is None:
+            target.mkdir()
+        else:
+            target.write_text(live_content)
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(candidate, "deimos", [self._entry(target, "candidate=yes\n")])
+
+        result = classify_candidate_only_files(accepted, candidate)
+
+        assert result["identity_matches"] == []
+        assert result["blocked"][0]["reason"] == reason
+
+    def test_missing_candidate_only_file_needs_no_removal(self, tmp_path: Path) -> None:
+        """Separate already-absent files from matching and ambiguous live state."""
+        target = tmp_path / "live" / "missing.conf"
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(candidate, "deimos", [self._entry(target, "candidate=yes\n")])
+
+        result = classify_candidate_only_files(accepted, candidate)
+
+        assert [entry["target_path"] for entry in result["missing"]] == [target.as_posix()]
+
+    def test_dangling_symlink_is_blocked_not_missing(self, tmp_path: Path) -> None:
+        """Treat a redirected live path as ambiguous even when its target is absent."""
+        target = tmp_path / "live" / "candidate.conf"
+        target.parent.mkdir()
+        target.symlink_to(tmp_path / "absent")
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(candidate, "deimos", [self._entry(target, "candidate=yes\n")])
+
+        result = classify_candidate_only_files(accepted, candidate)
+
+        assert result["missing"] == []
+        assert result["blocked"][0]["reason"] == "non-regular-live-path"
+
+    def test_candidate_only_directory_is_blocked(self, tmp_path: Path) -> None:
+        """Do not infer safe directory removal from metadata-only identity."""
+        target = tmp_path / "live" / "candidate-directory"
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(
+            candidate,
+            "deimos",
+            [self._entry(target, "", kind="service.directory", is_directory=True)],
+        )
+
+        result = classify_candidate_only_files(accepted, candidate)
+
+        assert result["blocked"][0]["reason"] == "directory-identity-incomplete"
+
+    def test_cleanup_scope_ignores_other_kinds_and_directory_residue(self, tmp_path: Path) -> None:
+        """Scope boot cleanup to network files while leaving inert directories in place."""
+        network_file = tmp_path / "live" / "20-test.network"
+        network_file.parent.mkdir()
+        network_file.write_text("[Match]\nName=test0\n")
+        unrelated = tmp_path / "live" / "service.conf"
+        unrelated.write_text("candidate=yes\n")
+        directory = tmp_path / "live" / "20-test.network.d"
+        directory.mkdir()
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(
+            candidate,
+            "deimos",
+            [
+                self._entry(
+                    network_file,
+                    "[Match]\nName=test0\n",
+                    kind="networkd.network",
+                    owner_ref="iface:test0",
+                ),
+                self._entry(unrelated, "candidate=yes\n"),
+                self._entry(
+                    directory,
+                    "",
+                    kind="networkd.dropin",
+                    owner_ref="iface:test0",
+                    is_directory=True,
+                ),
+            ],
+        )
+
+        result = classify_candidate_only_files(
+            accepted,
+            candidate,
+            included_kinds={"networkd.netdev", "networkd.network", "networkd.dropin"},
+            directory_residue_kinds={"networkd.dropin"},
+        )
+
+        assert [entry["target_path"] for entry in result["identity_matches"]] == [
+            network_file.as_posix()
+        ]
+        assert result["blocked"] == []
+
+    def test_known_inert_file_and_directory_residue_is_ignored(self, tmp_path: Path) -> None:
+        """Leave only explicitly named inert residue outside removal authorization."""
+        directory = tmp_path / "live" / "service-data"
+        directory.mkdir(parents=True)
+        caddy = tmp_path / "live" / "Caddyfile"
+        caddy.write_text("example.invalid\n")
+        last_successful = tmp_path / "last-successful.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(last_successful, "deimos", [])
+        _write_manifest(
+            candidate,
+            "deimos",
+            [
+                self._entry(
+                    directory,
+                    "",
+                    kind="service.directory",
+                    is_directory=True,
+                ),
+                self._entry(caddy, "example.invalid\n", kind="caddy.config"),
+            ],
+        )
+
+        result = classify_candidate_only_files(
+            last_successful,
+            candidate,
+            directory_residue_kinds={"service.directory"},
+            file_residue_kinds={"caddy.config"},
+        )
+
+        assert result["identity_matches"] == []
+        assert result["missing"] == []
+        assert result["blocked"] == []
+
+    def test_candidate_cleanup_requires_same_host(self, tmp_path: Path) -> None:
+        """Refuse cross-host candidate context."""
+        accepted = tmp_path / "accepted.json"
+        candidate = tmp_path / "candidate.json"
+        _write_manifest(accepted, "deimos", [])
+        _write_manifest(candidate, "phobos", [])
+
+        with pytest.raises(DiffError, match="Manifest removal host mismatch"):
+            classify_candidate_only_files(accepted, candidate)
+
+    def test_forward_removal_classifies_previous_only_file(self, tmp_path: Path) -> None:
+        """Classify an identity-matched file removed from new desired state."""
+        target = tmp_path / "live" / "removed.conf"
+        target.parent.mkdir()
+        target.write_text("accepted=yes\n")
+        previous = tmp_path / "previous.json"
+        desired = tmp_path / "desired.json"
+        entry = self._entry(target, "accepted=yes\n")
+        _write_manifest(previous, "deimos", [entry])
+        _write_manifest(desired, "deimos", [])
+
+        result = classify_manifest_removals(desired, previous)
+
+        assert result["identity_matches"] == [
+            {
+                "target_path": target.as_posix(),
+                "render_path": entry["render_path"],
+                "kind": "service.config",
+                "owner_ref": "service:test",
+                "candidate_sha256": entry["sha256"],
+                "apply_hints": None,
+                "live_sha256": entry["sha256"],
+            }
+        ]
+
+    def test_forward_removal_refuses_drifted_previous_file(self, tmp_path: Path) -> None:
+        """Do not authorize removal after live bytes diverge from previous intent."""
+        target = tmp_path / "live" / "removed.conf"
+        target.parent.mkdir()
+        target.write_text("operator-change=yes\n")
+        previous = tmp_path / "previous.json"
+        desired = tmp_path / "desired.json"
+        _write_manifest(previous, "deimos", [self._entry(target, "accepted=yes\n")])
+        _write_manifest(desired, "deimos", [])
+
+        result = classify_manifest_removals(desired, previous)
+
+        assert result["identity_matches"] == []
+        assert result["blocked"][0]["reason"] == "live-content-mismatch"
+
+
 class TestPlanManifestDrift:
     """Tests for plan_manifest_drift()."""
 
@@ -208,6 +461,31 @@ class TestPlanManifestDrift:
 
         assert plan["summary"]["writes"] == 0
         assert plan["summary"]["changed"] == 0
+
+    def test_named_directory_owner_uses_injected_identity_authority(self, tmp_path: Path) -> None:
+        """Resolve test-owned names without consulting workstation accounts."""
+        target = tmp_path / "target" / "srv" / "service"
+        desired_manifest = tmp_path / "out" / "rendered" / "manifest.json"
+        applied_manifest = tmp_path / "out" / "state" / "manifest.json"
+        entry = _directory_manifest_entry(
+            target,
+            render_path="services/test/srv/service",
+            owner_ref="service:test",
+            owner="isolated-user",
+            group="isolated-group",
+            mode="0750",
+        )
+        _write_manifest(desired_manifest, "phobos", [entry])
+
+        plan = plan_manifest_drift(
+            desired_manifest,
+            applied_manifest,
+            uid_resolver={"isolated-user": 12001}.__getitem__,
+            gid_resolver={"isolated-group": 12002}.__getitem__,
+        )
+
+        metadata = plan["sync"]["writes"][0]["desired_metadata"]
+        assert metadata == {"owner": "12001", "group": "12002", "mode": "0750"}
 
     def test_live_directory_state_reports_numeric_ids_when_accounts_exist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

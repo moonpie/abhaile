@@ -5,21 +5,25 @@
 ```yaml
 id: SPEC-2026-012
 title: GitOps Runner
-status: accepted
+status: superseded
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-10-05
 related_adrs:
   - 0003-gitops-runner-responsibility-boundary
   - 0001-output-root-and-environment-paths
 supersedes: null
-superseded_by: null
+superseded_by: SPEC-2026-028
 scope:
   hosts: [phobos, deimos]
   services: ["*"]
 ```
 
 ## Context
+
+> Superseded by [Spec 0028](../active/0028-target-host-reconciliation-model.md). This document
+> preserves the implemented legacy runner contract; its fetch-first checkout, skip-on-unchanged,
+> and rollback behavior are not the target reconciliation model.
 
 The render and apply pipelines are complete. `abhaile-render` produces
 deterministic host-scoped artifacts from `config/`, and `abhaile-apply`

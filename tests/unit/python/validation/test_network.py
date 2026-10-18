@@ -83,6 +83,40 @@ class TestNetworkSanity:
         with pytest.raises(RenderError, match="Duplicate IP"):
             validate_network_sanity(network)
 
+    def test_normalizes_explicit_gateway_and_independent_peer(self, tmp_repo_with_config):
+        """Require explicit interface-local intent and seal literal probe targets."""
+        network_path = tmp_repo_with_config / "config" / "network.yaml"
+        network = yaml.safe_load(network_path.read_text())
+        interface = network["hosts"]["phobos"]["interfaces"]["eth0"]
+        interface["convergence_probes"] = [
+            {"id": "gateway", "type": "gateway", "target": "vlan_gateway"},
+            {"id": "peer", "type": "external-peer", "address": "172.20.20.2", "port": 9443},
+        ]
+
+        validate_network_sanity(network)
+
+    def test_rejects_gateway_only_transition_authority(self, tmp_repo_with_config):
+        """Do not allow gateway reachability alone to disarm recovery."""
+        network_path = tmp_repo_with_config / "config" / "network.yaml"
+        network = yaml.safe_load(network_path.read_text())
+        network["hosts"]["phobos"]["interfaces"]["eth0"]["convergence_probes"] = [
+            {"id": "gateway", "type": "gateway", "target": "vlan_gateway"}
+        ]
+
+        with pytest.raises(RenderError, match="external peer"):
+            validate_network_sanity(network)
+
+    def test_rejects_self_probe_target(self, tmp_repo_with_config):
+        """Reject a probe that can succeed without traversing the affected network."""
+        network_path = tmp_repo_with_config / "config" / "network.yaml"
+        network = yaml.safe_load(network_path.read_text())
+        network["hosts"]["phobos"]["interfaces"]["eth0"]["convergence_probes"] = [
+            {"id": "peer", "type": "external-peer", "address": "172.20.20.10", "port": 9443}
+        ]
+
+        with pytest.raises(RenderError, match="Unsafe"):
+            validate_network_sanity(network)
+
 
 class TestHostPhysicalDevice:
     """Tests for host physical_device validation."""

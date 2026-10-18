@@ -145,6 +145,37 @@ prepare_output_ownership() {
     chown -R root:root "${OUTPUT_DIR}/state"
 }
 
+enable_network_restore() {
+    local baseline="${OUTPUT_DIR}/runner/last-successful-commit"
+    local restore_unit="/etc/systemd/system/abhaile-network-restore.service"
+    local restore_link="/etc/systemd/system/systemd-networkd.service.requires/abhaile-network-restore.service"
+    local baseline_sha
+
+    [[ -f "$restore_unit" && ! -L "$restore_unit" ]] \
+        || die "Network restore unit is not installed as a regular file: ${restore_unit}"
+    [[ -f "$baseline" && ! -L "$baseline" ]] \
+        || die "Network restore cannot be enabled without last-successful baseline: ${baseline}"
+    baseline_sha=$(cat "$baseline")
+    [[ $(wc -l <"$baseline") -eq 1 && "$baseline_sha" =~ ^[0-9a-f]{40}$ ]] \
+        || die "Network restore cannot be enabled with an invalid last-successful baseline"
+
+    systemctl daemon-reload
+    systemctl enable abhaile-network-restore.service
+
+    [[ -L "$restore_link" ]] \
+        || die "Network restore RequiredBy dependency was not installed: ${restore_link}"
+    systemctl show systemd-networkd.service --property=Requires --value \
+        | tr ' ' '\n' \
+        | grep -Fxq abhaile-network-restore.service \
+        || die "systemd-networkd does not require abhaile-network-restore.service"
+    systemctl show abhaile-network-restore.service --property=Before --value \
+        | tr ' ' '\n' \
+        | grep -Fxq systemd-networkd.service \
+        || die "Network restore is not ordered before systemd-networkd"
+
+    log "Enabled pre-networkd recovery for baseline ${baseline_sha:0:12}"
+}
+
 write_vault_agent_secret_file() {
     local path="$1"
     local value="$2"
@@ -363,9 +394,9 @@ stage_prerequisites() {
 
     install_vault_cli
 
-    # Enable systemd-networkd and systemd-resolved
-    systemctl enable --now systemd-networkd 2>/dev/null || true
-    systemctl enable --now systemd-resolved 2>/dev/null || true
+    # These are required foundations, not optional best-effort services.
+    systemctl enable --now systemd-networkd
+    systemctl enable --now systemd-resolved
 
     log "Prerequisites OK"
 }
@@ -589,6 +620,23 @@ stage_render_apply() {
     # Apply
     log "Running abhaile-apply (live)"
     "${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname" --output "$OUTPUT_DIR"
+
+    # The explicit bootstrap apply is the enrollment commit boundary. Ordinary runner execution
+    # must never invent this first recovery baseline for itself.
+    local enrolled_sha
+    enrolled_sha=$(run_as_abhaile git -C "$REPO_DIR" rev-parse HEAD)
+    run_as_abhaile "${REPO_DIR}/.venv/bin/python" -c '
+from pathlib import Path
+import sys
+from abhaile.state.reconciliation import establish_last_successful
+
+establish_last_successful(Path(sys.argv[1]), sys.argv[2])
+' "${OUTPUT_DIR}/runner" "$enrolled_sha"
+    log "Recorded initial last-successful commit ${enrolled_sha:0:12}"
+
+    # The rendered recovery unit becomes boot authority only after the successful enrollment
+    # boundary exists. Enabling it earlier would allow boot recovery without a valid target.
+    enable_network_restore
 
     log "Reloading abhaile user units"
     systemctl --user -M abhaile@ daemon-reload \

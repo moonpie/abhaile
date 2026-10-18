@@ -4,6 +4,9 @@
 
 2026-03-14: Accepted
 
+2026-10-05: Responsibility boundary retained; revision selection, recovery state, polling order,
+and drift scheduling refined by ADR 0012.
+
 ## Context
 
 `src/abhaile/` provides deterministic render, diff, and apply behavior for a given workspace state. The broader GitOps workflow also requires repository fetch/checkout, scheduled execution, run serialization, and recovery from bad revisions.
@@ -44,6 +47,7 @@ The runner is responsible for:
 
 ## References
 
+- [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - ADR 0001: Output Root and Environment Paths
 - ADR 0002: Hash-based Drift Detection and State Model
 - ADR 0004: Apply Execution Model

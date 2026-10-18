@@ -1,0 +1,120 @@
+- name: Validate the selected network restore manifest entry
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_network_restore_entries }}"
+- name: Require the fixed network restore unit contract
+  ansible.builtin.assert:
+    that:
+      - abhaile_network_restore_entries is sequence
+      - abhaile_network_restore_entries is not string
+      - abhaile_network_restore_entries | length == 1
+      - restore_entry.kind == 'systemd.unit'
+      - restore_entry.owner_ref == 'unit:abhaile-network-restore.service'
+      - restore_entry.target_path == '/etc/systemd/system/abhaile-network-restore.service'
+      - restore_entry.apply_hints is not defined
+    fail_msg: Network adoption requires exactly the fixed recovery unit
+    quiet: true
+  vars:
+    restore_entry: "{{ abhaile_network_restore_entries | first }}"
+- name: Validate the network restore unit with systemd
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemd-analyze
+      - verify
+      - "{{ abhaile_rendered_root }}/{{ restore_entry.render_path }}"
+  changed_when: false
+  check_mode: false
+  vars:
+    restore_entry: "{{ abhaile_network_restore_entries | first }}"
+- name: Inspect the last-successful baseline
+  ansible.builtin.stat:
+    path: /var/lib/abhaile/runner/last-successful-commit
+    follow: false
+  register: abhaile_network_restore_baseline
+  when: not ansible_check_mode
+- name: Require a regular recovery baseline before reading it
+  ansible.builtin.assert:
+    that:
+      - abhaile_network_restore_baseline.stat.exists
+      - abhaile_network_restore_baseline.stat.isreg
+      - not abhaile_network_restore_baseline.stat.islnk
+    fail_msg: Network restore cannot be installed without a regular last-successful baseline
+    quiet: true
+  when: not ansible_check_mode
+- name: Read the last-successful baseline
+  ansible.builtin.slurp:
+    path: /var/lib/abhaile/runner/last-successful-commit
+  register: abhaile_network_restore_baseline_content
+  when: not ansible_check_mode
+- name: Require a valid recovery baseline before installation
+  ansible.builtin.assert:
+    that:
+      - baseline_lines | length == 1
+      - baseline_lines[0] is match('^[0-9a-f]{40}$')
+    fail_msg: Network restore cannot be installed without a valid last-successful baseline
+    quiet: true
+  vars:
+    baseline_lines: "{{ (abhaile_network_restore_baseline_content.content | b64decode).splitlines() }}"
+  when: not ansible_check_mode
+- name: Publish the network restore unit
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ restore_entry.render_path }}"
+    dest: /etc/systemd/system/abhaile-network-restore.service
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  register: abhaile_network_restore_publication
+  vars:
+    restore_entry: "{{ abhaile_network_restore_entries | first }}"
+- name: Reload systemd after network restore publication
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - not ansible_check_mode
+    - abhaile_network_restore_publication.changed
+- name: Enable pre-networkd recovery without starting it
+  ansible.builtin.systemd_service:
+    name: abhaile-network-restore.service
+    enabled: true
+  when: not ansible_check_mode
+- name: Inspect the effective recovery dependency
+  ansible.builtin.stat:
+    path: >-
+      /etc/systemd/system/systemd-networkd.service.requires/abhaile-network-restore.service
+    follow: false
+  register: abhaile_network_restore_required_link
+  when: not ansible_check_mode
+- name: Read the effective networkd requirements
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - systemd-networkd.service
+      - --property=Requires
+      - --value
+  changed_when: false
+  register: abhaile_networkd_effective_requires
+  when: not ansible_check_mode
+- name: Read the effective restore ordering
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - abhaile-network-restore.service
+      - --property=Before
+      - --value
+  changed_when: false
+  register: abhaile_network_restore_effective_before
+  when: not ansible_check_mode
+- name: Verify effective restore dependency and boot ordering
+  ansible.builtin.assert:
+    that:
+      - abhaile_network_restore_required_link.stat.exists
+      - abhaile_network_restore_required_link.stat.islnk
+      - "'abhaile-network-restore.service' in abhaile_networkd_effective_requires.stdout.split()"
+      - "'systemd-networkd.service' in abhaile_network_restore_effective_before.stdout.split()"
+    fail_msg: Network restore is not effectively required and ordered before networkd
+    quiet: true
+  when: not ansible_check_mode

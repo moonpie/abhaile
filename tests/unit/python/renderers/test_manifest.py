@@ -21,7 +21,7 @@ class TestBuildManifest:
 
         assert manifest["version"] == MANIFEST_VERSION
         assert manifest["host"] == "testhost"
-        assert "rendered_at" in manifest
+        assert "rendered_at" not in manifest
         assert manifest["entries"] == []
         assert "owners" not in manifest
 
@@ -159,7 +159,6 @@ class TestWriteManifest:
         manifest = {
             "version": "1",
             "host": "testhost",
-            "rendered_at": "2026-03-11T00:00:00Z",
             "entries": [
                 {
                     "render_path": "etc/config",
@@ -186,7 +185,6 @@ class TestWriteManifest:
         manifest = {
             "version": "1",
             "host": "testhost",
-            "rendered_at": "2026-03-11T00:00:00Z",
             "entries": [],
         }
         manifest_path = tmp_path / "deep" / "nested" / "path" / "manifest.json"
@@ -204,7 +202,6 @@ class TestWriteManifest:
         manifest = {
             "version": "1",
             "host": "testhost",
-            "rendered_at": "2026-03-11T00:00:00Z",
             "entries": [
                 {
                     "render_path": "etc/config",

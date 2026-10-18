@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 BOOTSTRAP_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "bootstrap.sh"
+BOOTSTRAP_GUIDE = Path(__file__).resolve().parents[2] / "docs" / "guides" / "bootstrap.md"
+NETWORK_RESTORE_UNIT = (
+    Path(__file__).resolve().parents[2]
+    / "config/hosts/common/systemd/abhaile-network-restore.service"
+)
 
 
 @pytest.mark.integration
@@ -135,6 +141,34 @@ class TestBootstrapPreflight:
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert "ansible-core" in script
 
+    def test_bootstrap_requires_network_service_enablement(self) -> None:
+        """Fail bootstrap rather than hide missing required network foundations."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        assert "systemctl enable --now systemd-networkd" in script
+        assert "systemctl enable --now systemd-resolved" in script
+        assert "systemctl enable --now systemd-networkd 2>/dev/null || true" not in script
+        assert "systemctl enable --now systemd-resolved 2>/dev/null || true" not in script
+
+    def test_existing_host_proof_binds_candidate_and_restoration_authority(self) -> None:
+        """Document one exact non-polled proof with complete accept and reject boundaries."""
+        guide = BOOTSTRAP_GUIDE.read_text(encoding="utf-8")
+
+        assert "candidate_branch=review/phase-5.2" in guide
+        assert 'ABHAILE_BRANCH="$candidate_branch"' in guide
+        assert "establish_last_successful(Path(sys.argv[1]), sys.argv[2])" in guide
+        assert guide.index("abhaile-apply") < guide.index("establish_last_successful")
+        assert 'git rev-parse refs/remotes/origin/main)" = "$candidate_revision"' in guide
+        rejection = guide.index("If cutover is refused")
+        disable_restore = guide.index(
+            "systemctl disable --now abhaile-network-restore.service", rejection
+        )
+        restore_legacy = guide.index('git checkout --detach "$legacy_revision"', rejection)
+        restore_baseline = guide.index(
+            "establish_last_successful(Path(sys.argv[1]), sys.argv[2])", restore_legacy
+        )
+        enable_timer = guide.index("systemctl enable --now abhaile-runner.timer", rejection)
+        assert rejection < disable_restore < restore_legacy < restore_baseline < enable_timer
+
     def test_bootstrap_does_not_reassign_readonly_group_in_env(self) -> None:
         """Bootstrap passes repo env vars without reassigning readonly shell variables."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
@@ -158,6 +192,33 @@ class TestBootstrapPreflight:
         assert "write_abhaile_entrypoint" not in script
         assert 'run_as_abhaile "${REPO_DIR}/.venv/bin/abhaile-render"' in script
         assert '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"' in script
+
+    def test_bootstrap_records_first_last_successful_before_runner_registration(self) -> None:
+        """Make successful explicit enrollment the runner's initial recovery authority."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        apply_call = '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"'
+        baseline_call = "establish_last_successful(Path(sys.argv[1]), sys.argv[2])"
+        registration_call = "stage_registration"
+
+        assert script.index(apply_call) < script.index(baseline_call)
+        assert script.index(baseline_call) < script.rindex(registration_call)
+        assert '"${OUTPUT_DIR}/runner" "$enrolled_sha"' in script
+
+    def test_bootstrap_enables_network_restore_after_initial_baseline(self) -> None:
+        """Enable boot recovery only after successful apply establishes its target."""
+        script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
+        apply_call = '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"'
+        baseline_call = "establish_last_successful(Path(sys.argv[1]), sys.argv[2])"
+        restore_call = "    enable_network_restore\n"
+        registration_call = "stage_registration"
+
+        assert script.index(apply_call) < script.index(baseline_call)
+        assert script.index(baseline_call) < script.index(restore_call)
+        assert script.index(restore_call) < script.rindex(registration_call)
+        assert "systemctl enable abhaile-network-restore.service" in script
+        assert "systemd-networkd.service.requires/abhaile-network-restore.service" in script
+        assert "systemctl show systemd-networkd.service --property=Requires" in script
+        assert "systemctl show abhaile-network-restore.service --property=Before" in script
 
     def test_bootstrap_prepares_runner_ownership_boundaries(self) -> None:
         """Bootstrap separates runner-owned paths from apply-owned state."""
@@ -329,3 +390,53 @@ class TestBootstrapPreflight:
         assert "systemctl --user -M abhaile@ daemon-reload" in script
         assert "systemctl --user -M abhaile@ restart vault-agent.service" in script
         assert "Waiting for Vault Agent ready sentinel" in script
+
+
+@pytest.mark.integration
+def test_network_restore_required_by_creates_effective_networkd_dependency(
+    tmp_path: Path,
+) -> None:
+    """Prove systemd installs the recovery dependency and accepts its boot ordering."""
+    systemctl = shutil.which("systemctl")
+    systemd_analyze = shutil.which("systemd-analyze")
+    if systemctl is None or systemd_analyze is None:
+        pytest.skip("systemd tooling is unavailable")
+
+    root = tmp_path / "root"
+    etc_units = root / "etc/systemd/system"
+    vendor_units = root / "usr/lib/systemd/system"
+    etc_units.mkdir(parents=True)
+    vendor_units.mkdir(parents=True)
+    restore_content = NETWORK_RESTORE_UNIT.read_text(encoding="utf-8")
+    proof_content = restore_content.replace(
+        "ExecStart=/opt/abhaile/scripts/abhaile-runner --restore-network",
+        "ExecStart=/bin/true",
+    )
+    (etc_units / "abhaile-network-restore.service").write_text(proof_content, encoding="utf-8")
+
+    enabled = subprocess.run(
+        [systemctl, f"--root={root}", "enable", "abhaile-network-restore.service"],
+        capture_output=True,
+        text=True,
+    )
+    assert enabled.returncode == 0, enabled.stdout + enabled.stderr
+
+    required_link = (
+        etc_units / "systemd-networkd.service.requires" / "abhaile-network-restore.service"
+    )
+    assert required_link.is_symlink()
+    assert os.readlink(required_link) == "/etc/systemd/system/abhaile-network-restore.service"
+    assert "Before=network-pre.target systemd-networkd.service" in restore_content
+
+    verified = subprocess.run(
+        [systemd_analyze, "verify", "abhaile-network-restore.service"],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "SYSTEMD_UNIT_PATH": (
+                f"{etc_units}:/etc/systemd/system:/usr/lib/systemd/system:/lib/systemd/system"
+            ),
+        },
+    )
+    assert verified.returncode == 0, verified.stdout + verified.stderr

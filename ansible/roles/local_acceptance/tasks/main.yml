@@ -1,0 +1,107 @@
+- name: Validate the local acceptance input
+  ansible.builtin.assert:
+    that:
+      - abhaile_changed_networkd_owners | default([]) is sequence
+      - abhaile_changed_networkd_owners | default([]) is not string
+      - abhaile_network_acceptance_required | default(false) is boolean
+    fail_msg: Changed networkd owners must be a list
+    quiet: true
+- name: Require the canonical network intent for a changed network
+  ansible.builtin.assert:
+    that:
+      - abhaile_config_root is string
+      - abhaile_config_root | length > 0
+      - abhaile_expected_host is string
+      - abhaile_expected_host is match('^[a-z][a-z0-9-]*$')
+    fail_msg: Network acceptance requires the canonical config root
+    quiet: true
+  when: network_acceptance_required
+  vars: &acceptance_state
+    network_acceptance_required: >-
+      {{ abhaile_network_acceptance_required | default(false) or abhaile_networkd_backend_activation.changed | default(false)
+      or abhaile_changed_networkd_owners | default([]) | length > 0 }}
+    abhaile_management_interface: >-
+      {{ abhaile_acceptance_network.hosts[abhaile_expected_host].interfaces[ abhaile_acceptance_host.physical_device]
+      }}
+- name: Load canonical network intent for a changed network
+  ansible.builtin.include_vars:
+    file: "{{ abhaile_config_root }}/network.yaml"
+    name: abhaile_acceptance_network
+  when: network_acceptance_required
+  vars: *acceptance_state
+- name: Load canonical host intent for a changed network
+  ansible.builtin.include_vars:
+    file: "{{ abhaile_config_root }}/hosts/{{ abhaile_expected_host }}/host.yaml"
+    name: abhaile_acceptance_host
+  when: network_acceptance_required
+  vars: *acceptance_state
+- name: Validate the canonical management path
+  ansible.builtin.assert:
+    that:
+      - abhaile_acceptance_host.name == abhaile_expected_host
+      - abhaile_acceptance_host.physical_device is string
+      - abhaile_acceptance_host.physical_device is match('^[A-Za-z0-9_.:-]+$')
+      - abhaile_acceptance_network.vlans is mapping
+      - abhaile_acceptance_network.vlans.services is mapping
+      - abhaile_acceptance_network.vlans.services.gateway is string
+      - abhaile_acceptance_network.vlans.services.gateway | length > 0
+      - abhaile_acceptance_network.hosts is mapping
+      - abhaile_expected_host in abhaile_acceptance_network.hosts
+      - abhaile_acceptance_network.hosts[abhaile_expected_host].interfaces is mapping
+      - >-
+        abhaile_acceptance_host.physical_device in abhaile_acceptance_network.hosts[abhaile_expected_host].interfaces
+      - abhaile_management_interface.address is string
+      - abhaile_management_interface.address is match('^[0-9]+(?:\.[0-9]+){3}/[0-9]+$')
+    fail_msg: Canonical management interface, address, or gateway is missing
+    quiet: true
+  when: network_acceptance_required
+  vars: *acceptance_state
+- name: Require the canonical management interface online after a network change
+  ansible.builtin.command:
+    argv:
+      - /usr/lib/systemd/systemd-networkd-wait-online
+      - "--interface={{ abhaile_acceptance_host.physical_device }}"
+      - --timeout=3s
+  changed_when: false
+  when:
+    - network_acceptance_required
+    - not ansible_check_mode
+  vars: *acceptance_state
+- name: Resolve the canonical management route after a network change
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ip
+      - -json
+      - route
+      - get
+      - "{{ abhaile_acceptance_network.vlans.services.gateway }}"
+      - from
+      - "{{ abhaile_management_address }}"
+  changed_when: false
+  register: abhaile_management_route
+  when:
+    - network_acceptance_required
+    - not ansible_check_mode
+  vars:
+    !!merge <<: *acceptance_state
+    abhaile_management_address: >-
+      {{ abhaile_management_interface.address | split('/') | first }}
+- name: Validate the canonical management route after a network change
+  ansible.builtin.assert:
+    that:
+      - abhaile_management_route.stdout | from_json is sequence
+      - abhaile_management_route.stdout | from_json | length == 1
+      - >-
+        (abhaile_management_route.stdout | from_json | first).dev == abhaile_acceptance_host.physical_device
+      - >-
+        (abhaile_management_route.stdout | from_json | first).from == abhaile_management_address
+    fail_msg: Canonical management route does not use the declared interface and source address
+    quiet: true
+  changed_when: false
+  when:
+    - network_acceptance_required
+    - not ansible_check_mode
+  vars:
+    !!merge <<: *acceptance_state
+    abhaile_management_address: >-
+      {{ abhaile_management_interface.address | split('/') | first }}

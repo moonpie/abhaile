@@ -1,0 +1,34 @@
+- name: Validate common managed directory manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_directory_entries }}"
+- name: Validate selected managed directories
+  ansible.builtin.assert:
+    that:
+      - item.is_directory | default(false) is boolean
+      - item.is_directory
+      - item.apply_hints is mapping
+      - >-
+        (item.apply_hints.owner is string and item.apply_hints.owner | length > 0) or (item.apply_hints.owner is
+        integer and item.apply_hints.owner >= 0)
+      - >-
+        (item.apply_hints.group is string and item.apply_hints.group | length > 0) or (item.apply_hints.group is
+        integer and item.apply_hints.group >= 0)
+      - item.apply_hints.mode is string
+      - item.apply_hints.mode is match('^0[0-7]{3}$')
+    fail_msg: Managed directory entry is invalid
+    quiet: true
+  loop: "{{ abhaile_directory_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid directory entry') }}"
+- name: Converge managed directories
+  ansible.builtin.file:
+    path: "{{ item.target_path }}"
+    state: directory
+    owner: "{{ item.apply_hints.owner }}"
+    group: "{{ item.apply_hints.group }}"
+    mode: "{{ item.apply_hints.mode }}"
+  loop: "{{ abhaile_directory_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"

@@ -1,0 +1,229 @@
+- name: Require list-shaped service configuration selections
+  ansible.builtin.assert:
+    that:
+      - abhaile_service_config_entries is sequence
+      - abhaile_service_config_entries is not string
+      - abhaile_service_config_cleanup_entries | default([]) is sequence
+      - abhaile_service_config_cleanup_entries | default([]) is not string
+      - abhaile_service_config_managed_directory_targets | default([]) is sequence
+      - abhaile_service_config_managed_directory_targets | default([]) is not string
+    fail_msg: Service configuration desired and cleanup selections must be lists
+    quiet: true
+- name: Normalize service configuration cleanup selection
+  ansible.builtin.set_fact:
+    abhaile_service_config_cleanup_entries_effective: >-
+      {{ abhaile_service_config_cleanup_entries | default([]) }}
+    abhaile_service_config_all_entries: >-
+      {{ abhaile_service_config_entries + (abhaile_service_config_cleanup_entries | default([])) }}
+- name: Require a non-empty service configuration owner selection
+  ansible.builtin.assert:
+    that:
+      - abhaile_service_config_all_entries | length > 0
+      - desired_targets | intersect(cleanup_targets) | length == 0
+      - cleanup_targets | unique | length == cleanup_targets | length
+    fail_msg: Service configuration desired and cleanup selections must be disjoint lists
+    quiet: true
+  vars:
+    desired_targets: "{{ abhaile_service_config_entries | map(attribute='target_path') | list }}"
+    cleanup_targets: >-
+      {{ abhaile_service_config_cleanup_entries_effective | map(attribute='target_path') | list }}
+- name: Validate common service configuration manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_service_config_entries }}"
+  when: abhaile_service_config_entries | length > 0
+- name: Require one coherent service configuration owner
+  ansible.builtin.assert:
+    that:
+      - item.kind in ['service.config', 'service.env']
+      - item.owner_ref is string
+      - item.owner_ref | length > 0
+      - item.owner_ref == abhaile_service_config_all_entries[0].owner_ref
+      - item.apply_hints is not defined or item.apply_hints is none or item.apply_hints is mapping
+      - item_hints.rootless is not defined or item_hints.rootless is boolean
+      - not item_hints.rootless | default(false) or item_hints.podman_user is string
+      - not item_hints.rootless | default(false) or item_hints.podman_user | length > 0
+      - item_hints.restart_unit is not defined or item_hints.restart_unit is none or restart_valid
+      - item_hints.mode is not defined or item_hints.mode is match('^0[0-7]{3}$')
+      - item_hints.restart_unit | default(none) == owner_hints.restart_unit | default(none)
+      - item_hints.rootless | default(false) == owner_hints.rootless | default(false)
+      - item_hints.podman_user | default(none) == owner_hints.podman_user | default(none)
+    fail_msg: Service configuration owner selection is invalid or inconsistent
+    quiet: true
+  loop: "{{ abhaile_service_config_all_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid service configuration entry') }}"
+  vars:
+    item_hints: "{{ item.apply_hints | default({}, true) }}"
+    owner_hints: "{{ abhaile_service_config_all_entries[0].apply_hints | default({}, true) }}"
+    restart_valid: "{{ item_hints.restart_unit is string and item_hints.restart_unit is match('^[A-Za-z0-9_.@:-]+[.]service$')
+      }}"
+- name: Require closed candidate-only service cleanup identities
+  ansible.builtin.assert:
+    that:
+      - item.target_path is string
+      - item.target_path is match('^/')
+      - item.target_path != '/'
+      - "'//' not in item.target_path"
+      - "'/./' not in item.target_path"
+      - "'/../' not in item.target_path"
+      - not item.target_path.endswith('/.')
+      - not item.target_path.endswith('/..')
+      - item.candidate_sha256 is string
+      - item.candidate_sha256 is match('^[0-9a-f]{64}$')
+      - item.live_sha256 is string
+      - item.live_sha256 == item.candidate_sha256
+    fail_msg: Candidate-only service cleanup entry lacks matching file identity evidence
+    quiet: true
+  loop: "{{ abhaile_service_config_cleanup_entries_effective }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid service cleanup entry') }}"
+- name: Recheck candidate-only service files immediately before removal
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_service_config_cleanup_entries_effective }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_service_config_cleanup_stats
+- name: Refuse changed or redirected candidate-only service files
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum == item.item.candidate_sha256
+    fail_msg: Candidate-only service file changed before cleanup
+    quiet: true
+  loop: "{{ abhaile_service_config_cleanup_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Remove matching candidate-only service files
+  ansible.builtin.file:
+    path: "{{ item.target_path }}"
+    state: absent
+  loop: "{{ abhaile_service_config_cleanup_entries_effective }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_service_config_removals
+- name: Inspect service configuration parent directories
+  ansible.builtin.stat:
+    path: "{{ item.target_path | dirname }}"
+    follow: false
+  loop: "{{ abhaile_service_config_entries }}"
+  loop_control:
+    label: "{{ item.target_path | dirname }}"
+  register: abhaile_service_config_parents
+- name: Require existing or explicitly managed service configuration parents
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.stat.exists and item.stat.isdir and not item.stat.islnk) or (ansible_check_mode and (item.item.target_path
+        | dirname) in (abhaile_service_config_managed_directory_targets | default([])))
+    fail_msg: Service configuration parent is absent, redirected, or not manifest-managed
+    quiet: true
+  loop: "{{ abhaile_service_config_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path | dirname }}"
+- name: Report service configuration planned beneath a new managed parent
+  ansible.builtin.debug:
+    msg: "Service configuration will be published after its managed parent is created"
+  changed_when: true
+  loop: "{{ abhaile_service_config_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - ansible_check_mode
+    - not item.stat.exists
+- name: Publish service configuration files
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ item.item.render_path }}"
+    dest: "{{ item.item.target_path }}"
+    remote_src: true
+    owner: "{{ item_hints.podman_user if item_hints.rootless | default(false) else 'root' }}"
+    group: "{{ item_hints.podman_user if item_hints.rootless | default(false) else 'root' }}"
+    mode: "{{ item_hints.mode | default('0644') }}"
+  loop: "{{ abhaile_service_config_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  vars:
+    item_hints: "{{ item.item.apply_hints | default({}, true) }}"
+  register: abhaile_service_config_publications
+  when:
+    - abhaile_service_config_entries | length > 0
+    - not ansible_check_mode or item.stat.exists
+- name: Record changed service configuration owner
+  ansible.builtin.set_fact:
+    abhaile_changed_service_config_owners: "{{ (abhaile_changed_service_config_owners | default([])) + [abhaile_service_config_all_entries[0].owner_ref]
+      }}"
+  when:
+    - not ansible_check_mode
+    - service_config_changed
+  vars: &service_config_runtime_vars
+    owner_hints: "{{ abhaile_service_config_all_entries[0].apply_hints | default({}, true) }}"
+    service_config_changed: >-
+      {{ (abhaile_service_config_publications.results | default([]) | selectattr('changed') | list | length > 0)
+      or (abhaile_service_config_removals.results | default([]) | selectattr('changed') | list | length > 0) }}
+- name: Apply the rootful owner restart once
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - try-restart
+      - "{{ owner_hints.restart_unit }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - service_config_changed
+    - not owner_hints.rootless | default(false)
+    - owner_hints.restart_unit | default(none) is not none
+  vars: *service_config_runtime_vars
+- name: Verify the rootful owner unit is active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - --quiet
+      - "{{ owner_hints.restart_unit }}"
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - service_config_changed
+    - not owner_hints.rootless | default(false)
+    - owner_hints.restart_unit | default(none) is not none
+  vars: *service_config_runtime_vars
+- name: Apply the rootless owner restart once
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ owner_hints.podman_user }}@"
+      - try-restart
+      - "{{ owner_hints.restart_unit }}"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - service_config_changed
+    - owner_hints.rootless | default(false)
+    - owner_hints.restart_unit | default(none) is not none
+  vars: *service_config_runtime_vars
+- name: Verify the rootless owner unit is active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ owner_hints.podman_user }}@"
+      - is-active
+      - --quiet
+      - "{{ owner_hints.restart_unit }}"
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - service_config_changed
+    - owner_hints.rootless | default(false)
+    - owner_hints.restart_unit | default(none) is not none
+  vars: *service_config_runtime_vars

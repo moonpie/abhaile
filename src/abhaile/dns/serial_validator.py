@@ -3,87 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import subprocess
-from copy import deepcopy
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable
-
-import yaml
+from typing import Any
 
 from abhaile.dns.records import collect_zone_records
 from abhaile.utils.errors import RenderError
-
-GitShowCallable = Callable[..., subprocess.CompletedProcess[str]]
-
-
-def _read_head_network_yaml(
-    git_show: GitShowCallable = subprocess.run,
-    cwd: Path | None = None,
-) -> dict[str, Any] | None:
-    """Read config/network.yaml from git HEAD.
-
-    Args:
-        git_show: Callable that performs the git command (for test injection).
-        cwd: Working directory override.
-
-    Returns:
-        Parsed network dict, or None if unavailable.
-    """
-    try:
-        result = git_show(
-            ["git", "show", "HEAD:config/network.yaml"],
-            capture_output=True,
-            text=True,
-            check=True,
-            cwd=Path.cwd() if cwd is None else cwd,
-        )
-    except subprocess.CalledProcessError:
-        return None
-    except (OSError, PermissionError):
-        return None
-
-    try:
-        head_network = yaml.safe_load(result.stdout)
-    except yaml.YAMLError:
-        return None
-
-    return head_network if isinstance(head_network, dict) else None
-
-
-def _get_git_head_serial(
-    zone_name: str,
-    git_show: GitShowCallable = subprocess.run,
-    cwd: Path | None = None,
-) -> dict[str, Any] | None:
-    """Get zone serial from last git commit (HEAD).
-
-    Args:
-        zone_name: Name of the zone to look up.
-
-    Returns:
-        Dict with date, counter, content_hash from HEAD, or None if not found.
-    """
-    head_network = _read_head_network_yaml(git_show=git_show, cwd=cwd)
-    if not head_network:
-        return None
-
-    dns_block = head_network.get("dns")
-    if not isinstance(dns_block, dict):
-        return None
-
-    zones = dns_block.get("zones")
-    if not isinstance(zones, list):
-        return None
-
-    for zone in zones:
-        if not isinstance(zone, dict):
-            continue
-        if zone.get("name") == zone_name:
-            serial = zone.get("serial", {})
-            return serial if isinstance(serial, dict) else None
-
-    return None
 
 
 def validate_zone_serial(
@@ -116,8 +40,7 @@ def validate_zone_serial(
     if not current_hash:
         raise RenderError(f"Zone '{zone_name}' missing content_hash in serial")
 
-    # Get current serial values from workspace
-    current_date_str, current_date, current_counter = _parse_serial_fields(serial_info, zone_name)
+    _parse_serial_fields(serial_info, zone_name)
 
     zone_content = _render_zone_content_for_hash(zone, network, deployed_services, config_root)
     computed_hash = compute_content_hash(zone_content)
@@ -126,67 +49,11 @@ def validate_zone_serial(
     if computed_hash == current_hash:
         return  # All is well
 
-    # Hash mismatch - compute expected serial and hash
-    # Get last serial from git HEAD for comparison
-    head_serial = _get_git_head_serial(zone_name)
-
-    today_str = datetime.now().strftime("%Y%m%d")
-    today_int = int(today_str)
-
-    if head_serial:
-        head_date_raw = head_serial.get("date", "")
-        try:
-            head_date = int(str(head_date_raw).strip())
-        except ValueError:
-            head_date = today_int
-
-        try:
-            head_counter = int(str(head_serial.get("counter", "0")).strip())
-        except ValueError:
-            head_counter = 0
-    else:
-        head_date = today_int
-        head_counter = 0
-
-    # Compute expected serial based on git HEAD vs today
-    if head_date == today_int:
-        expected_date_str = today_str
-        expected_counter = head_counter + 1
-    else:
-        expected_date_str = today_str
-        expected_counter = 0
-
-    expected_zone = deepcopy(zone)
-    expected_zone.setdefault("serial", {})
-    expected_zone["serial"]["date"] = int(expected_date_str)
-    expected_zone["serial"]["counter"] = expected_counter
-    expected_content = _render_zone_content_for_hash(
-        expected_zone,
-        network,
-        deployed_services,
-        config_root,
+    raise RenderError(
+        f"Zone '{zone_name}' content hash mismatch.\n"
+        "  Update the zone serial and set serial.content_hash for the declared serial to:\n"
+        f"    serial.content_hash: {computed_hash}"
     )
-    expected_hash = compute_content_hash(expected_content)
-
-    # Compare expected vs current workspace values and collect differences
-    mismatches = []
-
-    if int(expected_date_str) != current_date:
-        mismatches.append(f"    serial.date: {expected_date_str}")
-
-    if expected_counter != current_counter:
-        mismatches.append(f"    serial.counter: {expected_counter:02d}")
-
-    if expected_hash != current_hash:
-        mismatches.append(f"    serial.content_hash: {expected_hash}")
-
-    if mismatches:
-        error_lines = [
-            f"Zone '{zone_name}' content hash mismatch.",
-            "  To fix: update zone.serial in config/network.yaml",
-        ]
-        error_lines.extend(mismatches)
-        raise RenderError("\n".join(error_lines))
 
 
 def validate_zone_serial_collect(

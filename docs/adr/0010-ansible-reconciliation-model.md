@@ -2,7 +2,16 @@
 
 ## Status
 
+2026-10-05: Superseded by ADR 0012.
+
 2026-09-05: Accepted
+
+2026-09-30: Amended by active Spec 0028 with bounded publication and validation mechanics.
+
+2026-10-01: Amended by active Spec 0028 with durable runner-LKG promotion mechanics.
+
+2026-10-02: Amended by ADR 0011 with guarded systemd-networkd convergence and independent
+recovery mechanics.
 
 ## Context
 
@@ -56,12 +65,53 @@ environment, or accept caller-controlled paths outside configured roots. Rootles
 explicitly transition from the root play context to the declared service user with the correct
 home, runtime directory, and user manager.
 
+Privileged publication never traverses ancestry writable by the target rootless identity.
+Rootless Quadlets are published root-owned in Podman's system-wide per-UID search path,
+`/etc/containers/systemd/users/<sealed-uid>/`, while activation still uses the manifest-sealed
+named-user manager context. Other named-user-writable targets remain fail closed unless a later
+accepted design provides equivalent race-free publication.
+
+Every publication candidate is content-validated during the complete pre-mutation pass. Native
+non-starting validators use fixed protected paths and argv. Renderer-owned Caddy and CoreDNS
+configuration is also constrained by a project parser that accepts only the complete closed
+grammar emitted by the renderer; unknown nesting, arity, directives, imports, or blocks fail
+before mutation. Exact installed binary/plugin compatibility remains an adoption evidence gate
+and cannot broaden the admitted grammar.
+
 ### State and Health Boundaries
 
 Apply state and runner state are separate ledgers. Apply records a manifest only after convergence
 and local validation succeed. The runner records a last-known-good revision only after its wider
 health gate succeeds. If wider health fails, rollback retains the previous last-known-good revision
 and plans reconvergence from the actual newly applied manifest to that revision's desired manifest.
+
+Runner last-known-good promotion is a protected durable transaction, not an in-memory health
+marker. One coordinator entry point holds a protected process lock across apply-state verification,
+protected wider-health-result verification, promotion, and publication authorization. Health
+success is derived from closed observations in a no-follow ownership/mode-checked persisted result
+bound to an unpredictable challenge created only after apply commit and to the exact transaction
+and apply evidence; a caller boolean, callback, or predated result is not authority. The
+coordinator re-verifies current apply state, retained applied-state identity, and the retained
+mirror ref immediately before persisting and fsyncing a journal bound to candidate and retained
+revision/manifest identities, capsule, health, and apply evidence. It compare-and-swap rotates the admitted mirror last-known-good and rollback
+refs, verifies the resulting ref, then atomically persists a separate runner-LKG receipt. Only a
+verifier-issued authority produced by re-reading that receipt and ref permits transaction-bound
+runner-unit publication or recovery. Recovery finishes forward only from the journal's exact prior
+or candidate ref state; a same-revision promotion performs no redundant ref mutation. Mismatched,
+stale, fabricated, predated, or third-state authority fails closed. A
+health failure never mutates the LKG ref or runner ledger. If candidate and retained desired-state
+identities are equal, the result is an explicit same-desired-state recovery plan rather than a
+fictitious revision rollback.
+
+Protected wider-health evidence also has a durable completion boundary. An exact active journal
+retains the challenge and transaction identity across interruption, and immutable results cannot
+be reused across transactions. Success becomes terminal only after the LKG receipt and mirror ref
+are re-verified. Failure remains active and excludes new transactions until the protected rollback
+coordinator durably commits the exact retained apply state. Transaction-scoped terminal records
+are written before active evidence is cleared. Interrupted cleanup finishes forward only after
+the corresponding receipt/ref or rollback state is independently re-verified; it never relies on
+timestamps, caller assertions, or blind deletion. This permits consecutive and fresh
+same-revision reconciliations while preserving exact retry recovery and stale-evidence isolation.
 
 ### Required Migration Constraints
 
@@ -124,6 +174,7 @@ This option is the chosen direction.
 
 ## References
 
+- [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - [Spec 0028: Target Host Reconciliation Model](../specs/active/0028-target-host-reconciliation-model.md)
 - ADR 0002: Hash-based Drift Detection and State Model
 - ADR 0003: GitOps Runner Responsibility Boundary
@@ -131,4 +182,5 @@ This option is the chosen direction.
 - ADR 0006: Secrets Model and Bootstrap Artifacts
 - [docs/specs/accepted/0008-manifest-drift-model.md](../specs/accepted/0008-manifest-drift-model.md)
 - [docs/specs/accepted/0009-apply-pipeline.md](../specs/accepted/0009-apply-pipeline.md)
-- [docs/specs/accepted/0012-gitops-runner.md](../specs/accepted/0012-gitops-runner.md)
+- [Superseded Spec 0012: GitOps Runner](../specs/superseded/0012-gitops-runner.md)
+- [ADR 0011: Guarded systemd-networkd Convergence](0011-guarded-networkd-convergence.md)

@@ -248,8 +248,13 @@ Bootstrap stages:
 1. Configuration validation: host exists in mapping and network config.
 1. Sealed handoff: decrypt host artifact ephemerally, optionally unseal Vault, and write Vault
    Agent AppRole files.
-1. First render and live apply: render host artifacts and apply desired state.
+1. First render, live apply, and baseline: render host artifacts, apply desired state, then atomically
+   record the exact checked-out commit as `last-successful-commit`.
 1. Runner registration: enable and start the GitOps runner timer.
+
+Bootstrap records the baseline only after the explicit live apply succeeds and before enabling the
+timer. Routine runner execution refuses unattended mutation when that baseline is absent; it does
+not infer first-enrollment success for itself.
 
 If it fails, check:
 
@@ -294,7 +299,83 @@ systemctl status <unit>.service --no-pager
 
 Use `config/mapping.yaml` and `docs/INVENTORY.md` to identify expected services and addresses.
 
-## 9. Re-Enrollment
+## 9. Existing-Host Assessment
+
+Assess an existing host before re-enrollment or Ansible cutover. Do not run bootstrap, render,
+apply, or reconciliation during this assessment. Record the command output in the operator's
+change record; the repository does not maintain a second host-inventory ledger or classify the
+results automatically.
+
+First prove that the operator's own account—not `abhaile`—can connect, obtain administrative
+access, and reach the machine through its console or other recovery path. Do not change the
+`abhaile` account or sudo policy until those independent paths have been exercised.
+
+Use ordinary Ansible facts for the platform baseline:
+
+```bash
+cd /opt/abhaile
+sudo /usr/bin/ansible localhost -i localhost, -c local \
+  -m ansible.builtin.setup \
+  -a '{"gather_subset":["!all","min","network","virtual"],"filter":["ansible_hostname","ansible_distribution*","ansible_architecture","ansible_virtualization_*","ansible_default_ipv4","ansible_interfaces"]}'
+```
+
+Confirm from that output that the short hostname is the intended `deimos` or `phobos` host and
+that the system is Debian 13. Treat unexpected platform, hostname, interface, or address facts as
+a stop condition rather than trying to repair them during assessment.
+
+Then collect the fixed host-local observations below. These commands are read-only; non-zero
+results are evidence to investigate, not permission to mutate the host.
+
+```bash
+getent passwd abhaile
+getent group abhaile
+id abhaile
+sudo -n -l -U abhaile
+
+sudo -u abhaile git -C /opt/abhaile status --short --branch
+sudo -u abhaile git -C /opt/abhaile rev-parse HEAD
+sudo -u abhaile git -C /opt/abhaile remote get-url origin
+sudo -u abhaile test -x /opt/abhaile/.venv/bin/abhaile-render
+test -x /usr/bin/ansible-playbook
+
+systemctl show abhaile-runner.service abhaile-runner.timer \
+  -p Id -p LoadState -p UnitFileState -p ActiveState -p SubState
+systemctl list-timers abhaile-runner.timer --no-pager
+loginctl show-user abhaile -p Linger -p RuntimePath -p State
+
+sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  systemctl --user show vault-agent.service \
+  -p Id -p LoadState -p UnitFileState -p ActiveState -p SubState
+sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  podman ps --all --format '{{.Names}} {{.Status}}'
+
+networkctl list --no-pager
+networkctl status --no-pager
+find /etc/systemd/network -maxdepth 2 -mindepth 1 -printf '%y %p\n' | sort
+
+sudo awk 'NF == 1 && $1 ~ /^[0-9a-f]{40}$/ {print FILENAME, $1}' \
+  /var/lib/abhaile/runner/last-successful-commit \
+  /var/lib/abhaile/runner/current-run \
+  /var/lib/abhaile/runner/failed-target
+```
+
+The `awk` command intentionally reports only SHA-shaped runner records and does not read
+secret-bearing environment, SSH identity, age, SOPS, Vault, or service configuration files.
+Missing optional runner records are valid observations. A missing or malformed
+`last-successful-commit` blocks unattended Ansible reconciliation until the initial baseline is
+established through the disposable-VM-proven adoption procedure.
+
+Finally, verify repository authentication without changing the checkout:
+
+```bash
+sudo -u abhaile git -C /opt/abhaile ls-remote --exit-code origin HEAD
+```
+
+This last command requires GitHub connectivity and is therefore recorded separately from the
+local recovery evidence. Local recovery must remain possible from retained Git objects when it
+fails.
+
+## 10. Re-Enrollment
 
 When re-bootstrapping an existing host:
 
@@ -319,7 +400,202 @@ Re-enable it after verification if bootstrap did not already do so:
 systemctl enable --now abhaile-runner.timer
 ```
 
-## 10. Adding a New Host
+## 11. Existing-Host Ansible Proof and Cutover
+
+The runner script and systemd unit paths are unchanged by this migration. Installing the new
+runner at those paths therefore changes authority; it is a cutover unless the maintenance window
+has a reviewed copy of the legacy revision available for exact restoration. Do not overwrite the
+runner and then describe the result as a reversible proof without that copy.
+
+Prepare the candidate on an exact reviewed non-polled ref. Keep `main` and `origin/main` at the
+exact legacy revision throughout the reversible proof. Before aligning the checkout or installing
+candidate units, record both revisions, stop scheduling and execution, and prove that the runner
+and its shared lock are quiescent:
+
+```bash
+cd /opt/abhaile
+legacy_branch=main
+candidate_branch=review/phase-5.2
+sudo -u abhaile git fetch origin "$candidate_branch"
+candidate_ref="refs/remotes/origin/${candidate_branch}"
+legacy_revision=$(sudo -u abhaile git rev-parse "refs/heads/${legacy_branch}")
+remote_legacy_revision=$(sudo -u abhaile git rev-parse "refs/remotes/origin/${legacy_branch}")
+candidate_revision=$(sudo -u abhaile git rev-parse "$candidate_ref")
+test "$legacy_revision" = "$remote_legacy_revision"
+test "$candidate_revision" != "$legacy_revision"
+sudo -u abhaile git cat-file -e "${legacy_revision}^{commit}"
+sudo -u abhaile git cat-file -e "${candidate_revision}^{commit}"
+sudo -u abhaile git merge-base --is-ancestor "$legacy_revision" "$candidate_revision"
+sudo systemctl disable --now abhaile-runner.timer
+sudo systemctl stop abhaile-runner.service
+sudo systemctl reset-failed abhaile-runner.service
+test "$(systemctl is-enabled abhaile-runner.timer)" = disabled
+test "$(systemctl is-active abhaile-runner.timer)" = inactive
+test "$(systemctl is-active abhaile-runner.service)" = inactive
+test -z "$(systemctl list-jobs --no-legend | awk '$2 ~ /^abhaile-runner[.]/ {print}')"
+sudo -u abhaile flock --nonblock /var/lib/abhaile/runner/lock true
+```
+
+Replace `candidate_branch` with the exact reviewed remote review branch; it must not be the polled
+branch. The final assertion acquires and releases the same lock used by the runner without
+blocking. Keep `abhaile-runner.timer` stopped for the entire dry-run and live proof.
+
+First detach at the candidate, render it, and prove the retained legacy apply plan. With explicit
+live-mutation approval, run that legacy apply before changing recovery authority. Only after it
+succeeds, atomically replace the legacy metadata-suffixed runner record with the exact candidate
+SHA using the reviewed state helper:
+
+```bash
+sudo -u abhaile git checkout --detach "$candidate_revision"
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render \
+  --host "$(hostname -s)" --output /var/lib/abhaile
+sudo /opt/abhaile/.venv/bin/abhaile-apply \
+  --host "$(hostname -s)" --output /var/lib/abhaile --dry-run --dry-run-validations
+# Review the exact plan, then run its documented live apply only with explicit approval.
+sudo test ! -e /var/lib/abhaile/runner/current-run
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/python -c '
+from pathlib import Path
+import sys
+from abhaile.state.reconciliation import establish_last_successful
+
+establish_last_successful(Path(sys.argv[1]), sys.argv[2])
+' /var/lib/abhaile/runner "$candidate_revision"
+test "$(sudo sed -n '1p' /var/lib/abhaile/runner/last-successful-commit)" = \
+  "$candidate_revision"
+test "$(sudo awk 'END {print NR}' /var/lib/abhaile/runner/last-successful-commit)" -eq 1
+```
+
+Next run the Section 12 adoption playbook in check mode and, with its separate network approval,
+live mode. This installs and verifies recovery against the candidate baseline before changing the
+network backend. After adoption and its reboot/access checks pass, exercise direct candidate
+reconciliation against the same non-polled remote branch:
+
+```bash
+sudo -H -u abhaile env \
+  HOME=/home/abhaile \
+  ABHAILE_BRANCH="$candidate_branch" \
+  ABHAILE_REMOTE=origin \
+  /opt/abhaile/scripts/abhaile-runner
+test "$(sudo sed -n '1p' /var/lib/abhaile/runner/last-successful-commit)" = \
+  "$candidate_revision"
+```
+
+The service environment remains configured for `main`; only this manual, lock-serialized proof
+selects the non-polled candidate branch.
+
+If the proof is accepted, keep scheduling stopped while the repository owner promotes exactly
+`candidate_revision` to `origin/main`. Fetch, align the local polled branch, and verify both refs
+name that exact SHA. Enable the new timer only after reconciliation, local health,
+`last-successful-commit`, recovery-unit dependency, and administrator access checks pass:
+
+```bash
+sudo -u abhaile git fetch --prune origin
+test "$(sudo -u abhaile git rev-parse refs/remotes/origin/main)" = "$candidate_revision"
+sudo -u abhaile git checkout main
+sudo -u abhaile git merge --ff-only "$candidate_revision"
+test "$(sudo -u abhaile git rev-parse refs/heads/main)" = "$candidate_revision"
+# Complete the reviewed cutover checks before enabling scheduling.
+sudo systemctl enable --now abhaile-runner.timer
+```
+
+If cutover is refused, restore the exact legacy revision and its rendered unit files while
+scheduling remains stopped. Disable the candidate-only boot restore service and prove its networkd
+dependency is absent before restarting legacy scheduling. If the proof adopted networkd, first
+restore and verify the approved legacy boot-network authority; either re-enable the preserved
+legacy backend or explicitly verify that the legacy revision's networkd files, enabled networkd
+service, and administrator path survive reboot.
+
+```bash
+sudo systemctl disable --now abhaile-network-restore.service
+sudo systemctl daemon-reload
+test ! -e /etc/systemd/system/systemd-networkd.service.requires/abhaile-network-restore.service
+! systemctl show systemd-networkd.service --property=Requires --value \
+  | tr ' ' '\n' \
+  | grep -Fxq abhaile-network-restore.service
+sudo -u abhaile git checkout --detach "$legacy_revision"
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render \
+  --host "$(hostname -s)" --output /var/lib/abhaile
+sudo /opt/abhaile/.venv/bin/abhaile-apply \
+  --host "$(hostname -s)" --output /var/lib/abhaile --dry-run --dry-run-validations
+# Review the exact legacy plan, then run its documented live apply only with explicit approval.
+# After the live legacy apply succeeds, use the reviewed candidate helper to restore exact
+# SHA-only legacy recovery authority while scheduling remains stopped.
+sudo test ! -e /var/lib/abhaile/runner/current-run
+sudo -u abhaile git checkout --detach "$candidate_revision"
+sudo -H -u abhaile env HOME=/home/abhaile \
+  /opt/abhaile/.venv/bin/python -c '
+from pathlib import Path
+import sys
+from abhaile.state.reconciliation import establish_last_successful
+
+establish_last_successful(Path(sys.argv[1]), sys.argv[2])
+' /var/lib/abhaile/runner "$legacy_revision"
+sudo -u abhaile git checkout "$legacy_branch"
+test "$(sudo -u abhaile git rev-parse "refs/heads/${legacy_branch}")" = "$legacy_revision"
+test "$(sudo -u abhaile git rev-parse "refs/remotes/origin/${legacy_branch}")" = "$legacy_revision"
+test "$(sudo sed -n '1p' /var/lib/abhaile/runner/last-successful-commit)" = "$legacy_revision"
+sudo systemctl enable --now abhaile-runner.timer
+```
+
+Verify the restored unit content, boot-network authority, branch refs, and active timer belong to
+`legacy_revision`; do not merely restart the candidate runner. No other scheduler or permanent
+runtime is introduced for this proof.
+
+## 12. Existing-Host Networkd Adoption
+
+Do not make recurring reconciliation choose a host's network backend. When an existing Debian host
+still has `networking.service` enabled, adopt networkd once in a console-backed maintenance window.
+Keep `/etc/network/interfaces{,.save}`, ifupdown packages and hooks, and `/etc/resolv.conf`
+unchanged during this step; they remain recovery evidence and separately reviewed foundations.
+
+Render the reviewed revision and run the adoption playbook in check mode first:
+
+```bash
+cd /opt/abhaile
+sudo /usr/bin/ansible-playbook -i localhost, --connection=local --check \
+  ansible/playbooks/adopt-networkd.yml \
+  --extra-vars '{"abhaile_rendered_root":"/var/lib/abhaile/rendered","abhaile_config_root":"/opt/abhaile/config","abhaile_expected_host":"deimos"}'
+```
+
+Replace `deimos` with the local short hostname and its rendered directory. Review the check output,
+keep the host console open, and then explicitly authorize the live adoption:
+
+```bash
+sudo /usr/bin/ansible-playbook -i localhost, --connection=local \
+  ansible/playbooks/adopt-networkd.yml \
+  --extra-vars '{"abhaile_rendered_root":"/var/lib/abhaile/rendered","abhaile_config_root":"/opt/abhaile/config","abhaile_expected_host":"deimos","abhaile_live_apply":true}'
+```
+
+The playbook first validates and installs `abhaile-network-restore.service`, requiring an existing
+valid `last-successful-commit` before it enables the unit's effective dependency on networkd. It
+then publishes networkd configuration, enables and starts networkd, verifies the declared
+management interface/address/route, and only then disables `networking.service` for the next boot.
+It deliberately does not stop the live legacy service. If recovery installation, activation, or
+acceptance fails, the legacy service remains enabled.
+
+Before rebooting, verify the expected states and network path from both the host and a separate
+administrative session:
+
+```bash
+systemctl is-enabled \
+  abhaile-network-restore.service systemd-networkd.service networking.service
+systemctl is-active systemd-networkd.service
+test -L /etc/systemd/system/systemd-networkd.service.requires/abhaile-network-restore.service
+systemctl show systemd-networkd.service -p Requires
+systemctl show abhaile-network-restore.service -p Before
+ip -brief address
+ip route
+```
+
+Reboot once while console access remains available, repeat those checks, and verify administrative
+SSH access. Adoption is incomplete until the host returns with networkd enabled and active, the
+legacy backend disabled, and the expected management path intact. Ordinary reconciliation then
+repairs networkd service drift but refuses to perform this first-time backend transition.
+
+## 13. Adding a New Host
 
 When adding another host:
 

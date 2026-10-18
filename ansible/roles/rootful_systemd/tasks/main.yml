@@ -1,0 +1,331 @@
+- name: Validate common rootful systemd manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+    apply:
+      tags: [rootful_systemd_contract]
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_rootful_systemd_entries }}"
+  tags: [rootful_systemd_contract]
+- name: Require list-shaped rootful systemd selections
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootful_systemd_entries is sequence
+      - abhaile_rootful_systemd_entries is not string
+      - abhaile_rootful_systemd_cleanup_entries | default([]) is sequence
+      - abhaile_rootful_systemd_cleanup_entries | default([]) is not string
+      - desired_targets | intersect(cleanup_targets) | length == 0
+      - cleanup_targets | unique | length == cleanup_targets | length
+    fail_msg: Rootful systemd desired and cleanup selections must be disjoint lists
+    quiet: true
+  vars:
+    desired_targets: "{{ abhaile_rootful_systemd_entries | map(attribute='target_path') | list }}"
+    cleanup_targets: >-
+      {{ abhaile_rootful_systemd_cleanup_entries | default([]) | map(attribute='target_path') | list }}
+  tags: [rootful_systemd_contract]
+- name: Validate selected rootful systemd entries
+  ansible.builtin.assert:
+    that:
+      - item.kind in ['systemd.unit', 'systemd.dropin', 'resolved.config', 'resolved.dropin']
+      - item.apply_hints is not defined or item.apply_hints is none or item.apply_hints is mapping
+      - >-
+        hints.rootless is not defined or hints.rootless is boolean
+      - hints.rootless | default(false) == false
+      - hints.restart_mode | default('none') in ['none', 'try-restart', 'reload-or-restart']
+      - >-
+        hints.activation_mode | default('none') in ['none', 'start', 'start-now']
+      - >-
+        hints.enable_mode | default('none') in ['none', 'enable']
+      - item.kind != 'systemd.unit' or item.owner_ref == 'unit:' ~ (item.target_path | basename)
+      - item.kind != 'systemd.dropin' or item.owner_ref is match('^unit:[^/]+$')
+      - >-
+        item.owner_ref not in ['unit:abhaile-network-restore.service', 'unit:abhaile-runner.service', 'unit:abhaile-runner.timer']
+    fail_msg: Rootful systemd entry is invalid
+    quiet: true
+  loop: "{{ abhaile_rootful_systemd_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid rootful systemd entry') }}"
+  vars:
+    hints: "{{ item.apply_hints | default({}, true) }}"
+  tags: [rootful_systemd_contract]
+- name: Require closed candidate-only rootful unit identities
+  ansible.builtin.assert:
+    that:
+      - item.kind == 'systemd.unit'
+      - item.owner_ref is match('^unit:[A-Za-z0-9_.@:-]+[.](service|path|timer|socket)$')
+      - unit_name == item.owner_ref | regex_replace('^unit:', '')
+      - item.target_path == '/etc/systemd/system/' ~ unit_name
+      - >-
+        item.owner_ref not in ['unit:abhaile-network-restore.service', 'unit:abhaile-runner.service', 'unit:abhaile-runner.timer']
+      - item.candidate_sha256 is string
+      - item.candidate_sha256 is match('^[0-9a-f]{64}$')
+      - item.live_sha256 is string
+      - item.live_sha256 == item.candidate_sha256
+    fail_msg: Candidate-only systemd cleanup is restricted to matching ordinary unit files
+    quiet: true
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid systemd cleanup entry') }}"
+  vars:
+    unit_name: "{{ item.target_path | basename }}"
+  tags: [rootful_systemd_contract]
+- name: Validate complete desired systemd unit context
+  when: abhaile_rootful_systemd_entries | selectattr('kind', 'in', ['systemd.unit', 'systemd.dropin']) | list |
+    length > 0
+  block:
+    - name: Create disposable systemd validation directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: abhaile-systemd-verify-
+      check_mode: false
+      changed_when: false
+      register: abhaile_systemd_validation_root
+    - name: Create disposable systemd validation parents
+      ansible.builtin.file:
+        path: "{{ abhaile_systemd_validation_root.path }}/{{ (item.owner_ref | regex_replace('^unit:', '')) ~ '.d'
+          if item.kind == 'systemd.dropin' else '' }}"
+        state: directory
+        mode: "0700"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_rootful_systemd_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      when: item.kind in ['systemd.unit', 'systemd.dropin']
+    - name: Stage complete desired systemd unit context
+      ansible.builtin.copy:
+        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+        dest: "{{ abhaile_systemd_validation_root.path }}/{{ (item.owner_ref | regex_replace('^unit:', '')) ~ '.d/'
+          ~ (item.target_path | basename) if item.kind == 'systemd.dropin' else (item.target_path | basename) }}"
+        remote_src: true
+        mode: "0600"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_rootful_systemd_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      when: item.kind in ['systemd.unit', 'systemd.dropin']
+    - name: Verify desired systemd units and drop-ins
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-analyze
+          - verify
+          - "{{ item.target_path | basename if item.kind == 'systemd.unit' else item.owner_ref | regex_replace('^unit:',
+            '') }}"
+      environment:
+        SYSTEMD_UNIT_PATH: >-
+          {{ abhaile_systemd_validation_root.path }}:/etc/systemd/system:/usr/lib/systemd/system:/lib/systemd/system
+      changed_when: false
+      check_mode: false
+      loop: "{{ abhaile_rootful_systemd_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      when: item.kind in ['systemd.unit', 'systemd.dropin']
+  always:
+    - name: Remove disposable systemd validation directory
+      ansible.builtin.file:
+        path: "{{ abhaile_systemd_validation_root.path }}"
+        state: absent
+      check_mode: false
+      changed_when: false
+      when: abhaile_systemd_validation_root.path is defined
+- name: Inspect candidate-only rootful units before deactivation
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_systemd_pre_deactivation_stats
+- name: Refuse ambiguous candidate-only rootful units before deactivation
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum == item.item.candidate_sha256
+    fail_msg: Candidate-only rootful unit changed before deactivation
+    quiet: true
+  loop: "{{ abhaile_rootful_systemd_pre_deactivation_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Stop and disable candidate-only rootful trigger units
+  ansible.builtin.systemd_service:
+    name: "{{ item.target_path | basename }}"
+    state: stopped
+    enabled: false
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - item.target_path is match('.*[.](path|timer|socket)$')
+- name: Stop and disable candidate-only rootful services
+  ansible.builtin.systemd_service:
+    name: "{{ item.target_path | basename }}"
+    state: stopped
+    enabled: false
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - item.target_path is match('.*[.]service$')
+- name: Recheck candidate-only rootful units immediately before removal
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_systemd_cleanup_stats
+- name: Refuse changed or redirected candidate-only rootful units
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.isreg
+      - not item.stat.islnk
+      - item.stat.checksum == item.item.candidate_sha256
+    fail_msg: Candidate-only rootful unit changed before cleanup
+    quiet: true
+  loop: "{{ abhaile_rootful_systemd_cleanup_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Remove matching candidate-only rootful unit files
+  ansible.builtin.file:
+    path: "{{ item.target_path }}"
+    state: absent
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_systemd_removals
+- name: Publish rootful systemd and resolved files
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+    dest: "{{ item.target_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ abhaile_rootful_systemd_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootful_systemd_publications
+- name: Reload the system manager after unit publication
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - not ansible_check_mode
+    - >-
+      changed_publications | selectattr('item.kind', 'in', systemd_kinds) | list | length > 0 or changed_unit_removals
+      | length > 0
+  vars:
+    changed_publications: >-
+      {{ abhaile_rootful_systemd_publications.results | selectattr('changed') | list }}
+    changed_unit_removals: >-
+      {{ abhaile_rootful_systemd_removals.results | default([]) | selectattr('changed') | list }}
+    systemd_kinds: [systemd.unit, systemd.dropin]
+- name: Reinspect removed rootful systemd unit failed states
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - show
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+      - --property=ActiveState
+      - --value
+  changed_when: false
+  loop: "{{ abhaile_rootful_systemd_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  register: abhaile_rootful_systemd_post_reload_active_states
+  when: not ansible_check_mode
+- name: Clear removed rootful systemd unit failed-state residue
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - reset-failed
+      - "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+  changed_when: false
+  loop: "{{ abhaile_rootful_systemd_post_reload_active_states.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.stdout | trim == 'failed'
+- name: Enable declared rootful units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.target_path | basename }}"
+    enabled: true
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.item.kind == 'systemd.unit'
+    - item.item.apply_hints | default({}, true) | length > 0
+    - item.item.apply_hints.enable_mode | default('none') == 'enable'
+- name: Apply declared rootful unit restart
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - "{{ declared_restart_mode if declared_restart_mode in supported_restart_modes else 'try-restart' }}"
+      - "{{ item.item.target_path | basename }}"
+  changed_when: true
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.changed
+    - item.item.kind == 'systemd.unit'
+    - item.item.apply_hints | default({}, true) | length > 0
+    - declared_restart_mode in supported_restart_modes or activation_mode in ['start', 'start-now']
+  vars:
+    declared_restart_mode: "{{ item.item.apply_hints.restart_mode | default('none') }}"
+    activation_mode: "{{ item.item.apply_hints.activation_mode | default('none') }}"
+    supported_restart_modes: [try-restart, reload-or-restart]
+- name: Restart parent units after drop-in publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - try-restart
+      - "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+  changed_when: true
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.changed
+    - item.item.kind == 'systemd.dropin'
+- name: Start declared rootful units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.target_path | basename }}"
+    state: started
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.item.kind == 'systemd.unit'
+    - item.item.apply_hints | default({}, true) | length > 0
+    - item.item.apply_hints.activation_mode | default('none') in ['start', 'start-now']
+- name: Reload systemd-resolved after configuration publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - reload-or-restart
+      - systemd-resolved.service
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - >-
+      abhaile_rootful_systemd_publications.results | selectattr('changed', 'equalto', true) | map(attribute='item')
+      | selectattr('kind', 'in', ['resolved.config', 'resolved.dropin']) | list | length > 0

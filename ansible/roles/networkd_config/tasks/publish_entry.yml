@@ -1,0 +1,26 @@
+- name: Ensure networkd drop-in directory
+  ansible.builtin.file:
+    path: "{{ abhaile_networkd_entry.target_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: abhaile_networkd_entry.is_directory | default(false)
+  register: abhaile_networkd_directory_publication
+- name: Publish networkd file
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ abhaile_networkd_entry.render_path }}"
+    dest: "{{ abhaile_networkd_entry.target_path }}"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: not abhaile_networkd_entry.is_directory | default(false)
+  register: abhaile_networkd_file_publication
+- name: Record changed networkd owner
+  ansible.builtin.set_fact:
+    abhaile_changed_networkd_owners: >-
+      {{ abhaile_changed_networkd_owners + [abhaile_networkd_entry.owner_ref] }}
+  when: >-
+    abhaile_networkd_directory_publication.changed | default(false) or abhaile_networkd_file_publication.changed
+    | default(false)

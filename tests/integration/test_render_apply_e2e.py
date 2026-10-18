@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,38 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 class TestRenderApplyE2E:
     """Render phobos with real config, then plan drift against empty state."""
+
+    @pytest.mark.parametrize("host", ["deimos", "phobos"])
+    def test_real_render_uses_only_deterministic_manifest_v1(
+        self, host: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Emit one deterministic managed-resource manifest and render-only software."""
+        repo_root = Path(__file__).resolve().parents[2]
+        monkeypatch.setattr("abhaile.cli.render.validate_dns_serials", lambda *a, **kw: None)
+        clear_config_cache()
+        paths = load_paths(repo_root)
+        validated = load_and_validate(repo_root, paths)
+        contents: list[bytes] = []
+        for suffix in ("first", "second"):
+            manifest_path = render_host(
+                host,
+                output_override=tmp_path / suffix,
+                paths=paths,
+                all_mode=False,
+                repo_root=repo_root,
+                mapping=validated.mapping,
+                network=validated.network,
+                host_services=validated.host_services,
+            )
+            rendered = manifest_path.parent
+            contract = json.loads(manifest_path.read_text(encoding="utf-8"))
+            all_references = [entry["render_path"] for entry in contract["entries"]]
+            assert len(all_references) == len(set(all_references))
+            assert all(not path.startswith("software/") for path in all_references)
+            assert (rendered / "software/packages.txt").is_file()
+            assert not (rendered / "convergence-manifest.json").exists()
+            contents.append(manifest_path.read_bytes())
+        assert contents[0] == contents[1]
 
     def test_render_phobos_plan_drift(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -49,7 +82,14 @@ class TestRenderApplyE2E:
 
         # Plan drift against empty applied state (all entries become writes)
         applied_path = tmp_path / "state" / "manifest.json"
-        plan = plan_manifest_drift(manifest_path, applied_path)
+        test_identities = {"abhaile": os.getuid(), "root": 0}
+        test_groups = {"abhaile": os.getgid(), "root": 0}
+        plan = plan_manifest_drift(
+            manifest_path,
+            applied_path,
+            uid_resolver=test_identities.__getitem__,
+            gid_resolver=test_groups.__getitem__,
+        )
 
         assert plan["summary"]["added"] > 0
         assert plan["summary"]["writes"] > 0
@@ -333,10 +373,26 @@ class TestRenderApplyE2E:
             assert "bind9-utils" in packages
             runner_unit = rendered_root / "system/etc/systemd/system/abhaile-runner.service"
             assert runner_unit.exists()
-            assert "Environment=PATH=/opt/abhaile/.venv/bin:" in runner_unit.read_text(
-                encoding="utf-8"
+            runner_content = runner_unit.read_text(encoding="utf-8")
+            assert "Environment=PATH=/opt/abhaile/.venv/bin:" in runner_content
+            assert (
+                "After=systemd-networkd.service abhaile-network-restore.service" in runner_content
             )
+            assert "Wants=systemd-networkd.service" in runner_content
+            assert "network-online.target" not in runner_content
             assert (rendered_root / "system/etc/systemd/system/abhaile-runner.timer").exists()
+            network_restore_unit = (
+                rendered_root / "system/etc/systemd/system/abhaile-network-restore.service"
+            )
+            network_restore_content = network_restore_unit.read_text(encoding="utf-8")
+            assert "DefaultDependencies=no" in network_restore_content
+            assert "After=local-fs.target" in network_restore_content
+            assert "Before=network-pre.target systemd-networkd.service" in (network_restore_content)
+            assert (
+                "ExecStart=/opt/abhaile/scripts/abhaile-runner --restore-network"
+                in network_restore_content
+            )
+            assert "RequiredBy=systemd-networkd.service" in network_restore_content
             vault_agent_unit = (
                 rendered_root
                 / "services/vault-agent/home/abhaile/.config/containers/systemd"
@@ -362,6 +418,9 @@ class TestRenderApplyE2E:
         deimos_entries = _entries_by_target(json.loads(manifests["deimos"].read_text()))
 
         for entries in (phobos_entries, deimos_entries):
+            restore_entry = entries["/etc/systemd/system/abhaile-network-restore.service"]
+            assert restore_entry["kind"] == "systemd.unit"
+            assert "apply_hints" not in restore_entry
             assert entries["/etc/systemd/system/abhaile-runner.service"]["kind"] == "systemd.unit"
             assert entries["/etc/systemd/system/abhaile-runner.timer"]["apply_hints"] == {
                 "activation_mode": "start",

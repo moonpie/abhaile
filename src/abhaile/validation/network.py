@@ -72,6 +72,10 @@ def validate_network_sanity(network: dict[str, Any]) -> None:
                     errors.append(
                         f"Host {host} interface {ifname} address {addr} not in vlan {vlan} {net}"
                     )
+            try:
+                normalize_convergence_probes(host, ifname, network)
+            except RenderError as exc:
+                errors.append(str(exc))
 
     # Service checks
     services = network.get("services", {})
@@ -137,6 +141,79 @@ def validate_network_sanity(network: dict[str, Any]) -> None:
     if errors:
         formatted = "\n".join(f"- {err}" for err in errors)
         raise RenderError(f"Network sanity checks failed:\n{formatted}")
+
+
+def normalize_convergence_probes(
+    host: str, interface: str, network: dict[str, Any]
+) -> list[dict[str, object]]:
+    """Normalize explicit interface probe intent into sealed literal authority."""
+    try:
+        ifdata = network["hosts"][host]["interfaces"][interface]
+        address = ipaddress.ip_interface(ifdata["address"])
+        vlan_name = ifdata["vlan"]
+        vlan = network["vlans"][vlan_name]
+        subnet = ipaddress.ip_network(vlan["cidr"], strict=False)
+        configured = ifdata.get("convergence_probes", [])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RenderError(f"Invalid convergence probe owner {host}:{interface}") from exc
+    if not configured:
+        return []
+    normalized: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
+    seen_semantics: set[tuple[object, ...]] = set()
+    has_peer = False
+    for raw in configured:
+        if not isinstance(raw, dict):
+            raise RenderError(f"Invalid convergence probe for {host}:{interface}")
+        probe_id = raw.get("id")
+        probe_type = raw.get("type")
+        if not isinstance(probe_id, str) or probe_id in seen_ids:
+            raise RenderError(f"Duplicate convergence probe id for {host}:{interface}")
+        seen_ids.add(probe_id)
+        target_value = vlan.get("gateway") if probe_type == "gateway" else raw.get("address")
+        if not isinstance(target_value, (str, int, bytes)):
+            raise RenderError(f"Invalid convergence probe target for {host}:{interface}")
+        try:
+            target = ipaddress.ip_address(target_value)
+        except (TypeError, ValueError) as exc:
+            raise RenderError(f"Invalid convergence probe target for {host}:{interface}") from exc
+        if (
+            target.version != address.version
+            or target == address.ip
+            or target.is_unspecified
+            or target.is_multicast
+            or target.is_loopback
+            or target.is_link_local
+            or (probe_type == "gateway" and target not in subnet)
+            or target in {subnet.network_address, subnet.broadcast_address}
+        ):
+            raise RenderError(f"Unsafe convergence probe target for {host}:{interface}")
+        transport = "icmp" if probe_type in {"gateway", "icmp"} else "tcp-peer"
+        port = raw.get("port") if probe_type == "external-peer" else None
+        semantic = (transport, str(target), port)
+        if semantic in seen_semantics:
+            raise RenderError(f"Duplicate convergence probe for {host}:{interface}")
+        seen_semantics.add(semantic)
+        has_peer = has_peer or probe_type == "external-peer"
+        normalized.append(
+            {
+                "id": probe_id,
+                "type": probe_type,
+                "transport": transport,
+                "host": host,
+                "interface": interface,
+                "owner_ref": f"iface:{interface}",
+                "source": str(address.ip),
+                "prefix": address.network.prefixlen,
+                "vlan": vlan_name,
+                "target": str(target),
+                "port": port,
+                "required": True,
+            }
+        )
+    if not has_peer:
+        raise RenderError(f"Convergence probes for {host}:{interface} lack an external peer")
+    return sorted(normalized, key=lambda probe: str(probe["id"]))
 
 
 def validate_host_physical_device(

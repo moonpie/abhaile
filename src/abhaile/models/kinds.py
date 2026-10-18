@@ -23,16 +23,3 @@ KIND_FAMILIES: dict[str, frozenset[str]] = {
 }
 
 ALL_KINDS: frozenset[str] = frozenset().union(*KIND_FAMILIES.values())
-
-# Documentation-only: valid apply_hints keys per kind family.
-# Not enforced in hot path — used for documentation, testing, and auditing.
-KNOWN_APPLY_HINTS: dict[str, list[str]] = {
-    "systemd": ["restart_mode", "enable_mode", "activation_mode"],
-    "user": ["owner_user", "owner_group", "mode", "ssh_dir_mode"],
-    "coredns": [],
-    "caddy": ["contributors", "restart_on_failure"],
-    "vault": ["write_order", "restart_mode", "rootless", "podman_user"],
-    "networkd": [],
-    "quadlet": ["rootless", "podman_user", "restart_mode", "shared", "managed_build"],
-    "service": ["restart_unit", "rootless", "podman_user", "owner", "group", "mode"],
-}

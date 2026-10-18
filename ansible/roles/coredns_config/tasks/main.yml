@@ -1,0 +1,196 @@
+- name: Require a complete CoreDNS configuration selection
+  ansible.builtin.assert:
+    that:
+      - abhaile_coredns_entries is sequence
+      - abhaile_coredns_entries is not string
+      - abhaile_coredns_cleanup_entries | default([]) is sequence
+      - abhaile_coredns_cleanup_entries | default([]) is not string
+      - abhaile_coredns_entries | length > 1
+      - abhaile_coredns_entries | selectattr('kind', 'equalto', 'coredns.config') | list | length == 1
+      - abhaile_coredns_entries | rejectattr('kind', 'in', ['coredns.config', 'coredns.zone']) | list | length ==
+        0
+      - desired_targets | intersect(cleanup_targets) | length == 0
+      - cleanup_targets | unique | length == cleanup_targets | length
+    fail_msg: CoreDNS selection must contain one Corefile and at least one zone
+    quiet: true
+  vars:
+    desired_targets: "{{ abhaile_coredns_entries | map(attribute='target_path') | list }}"
+    cleanup_targets: >-
+      {{ abhaile_coredns_cleanup_entries | default([]) | map(attribute='target_path') | list }}
+  tags: [coredns_contract]
+- name: Validate common CoreDNS manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+    apply:
+      tags: [coredns_contract]
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_coredns_entries }}"
+  tags: [coredns_contract]
+- name: Validate the closed CoreDNS file contract
+  ansible.builtin.assert:
+    that:
+      - >-
+        item.kind != 'coredns.config' or (item.owner_ref == 'dns:coredns' and item.target_path == '/etc/coredns/Corefile')
+      - >-
+        item.kind != 'coredns.config' or (item.apply_hints is mapping and item.apply_hints.keys() | difference(['restart_unit'])
+        | length == 0 and item.apply_hints.restart_unit is none)
+      - item.kind != 'coredns.zone' or item.owner_ref is match('^dns-zone:[A-Za-z0-9_.-]+$')
+      - >-
+        item.kind != 'coredns.zone' or item.target_path == '/etc/coredns/zones/' ~ (item.owner_ref | regex_replace('^dns-zone:',
+        '')) ~ '.zone'
+      - >-
+        item.kind != 'coredns.zone' or (item.apply_hints is mapping and item.apply_hints.keys() | difference(['reload_mode'])
+        | length == 0 and item.apply_hints.reload_mode == 'zones-service')
+    fail_msg: CoreDNS entry violates its closed file contract
+    quiet: true
+  loop: "{{ abhaile_coredns_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid CoreDNS entry') }}"
+  tags: [coredns_contract]
+- name: Require closed candidate-only CoreDNS zone identities
+  ansible.builtin.assert:
+    that:
+      - item.kind == 'coredns.zone'
+      - item.owner_ref is match('^dns-zone:[A-Za-z0-9_.-]+$')
+      - item.target_path == '/etc/coredns/zones/' ~ (item.owner_ref | regex_replace('^dns-zone:', '')) ~ '.zone'
+      - item.candidate_sha256 is string
+      - item.candidate_sha256 is match('^[0-9a-f]{64}$')
+      - item.live_sha256 is string
+      - item.live_sha256 == item.candidate_sha256
+      - item.apply_hints is mapping
+      - item.apply_hints.keys() | difference(['reload_mode']) | length == 0
+      - item.apply_hints.reload_mode == 'zones-service'
+    fail_msg: Candidate-only CoreDNS cleanup is restricted to matching managed zone files
+    quiet: true
+  loop: "{{ abhaile_coredns_cleanup_entries | default([]) }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid CoreDNS cleanup entry') }}"
+  tags: [coredns_contract]
+- name: Validate candidate CoreDNS zones
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/named-checkzone
+      - "{{ item.owner_ref | regex_replace('^dns-zone:', '') }}"
+      - "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+  changed_when: false
+  check_mode: false
+  loop: "{{ abhaile_coredns_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when: item.kind == 'coredns.zone'
+- name: Inspect live CoreDNS targets before watcher coordination
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_coredns_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_coredns_live_targets
+- name: Reset CoreDNS batch drift
+  ansible.builtin.set_fact:
+    abhaile_coredns_batch_changed: "{{ abhaile_coredns_cleanup_entries | default([]) | length > 0 }}"
+- name: Record CoreDNS batch drift
+  ansible.builtin.set_fact:
+    abhaile_coredns_batch_changed: true
+  loop: "{{ abhaile_coredns_live_targets.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when: >-
+    not item.stat.exists or not item.stat.isreg | default(false) or item.stat.islnk | default(false) or item.stat.checksum
+    | default('') != item.item.sha256 or item.stat.pw_name | default('') != 'root' or item.stat.gr_name | default('')
+    != 'root' or item.stat.mode | default('') != '0644'
+- name: Publish CoreDNS configuration as one watcher-safe batch
+  block:
+    - name: Stop the CoreDNS zone watcher
+      ansible.builtin.systemd_service:
+        name: coredns-zones.path
+        state: stopped
+      when:
+        - not ansible_check_mode
+        - abhaile_coredns_batch_changed
+    - name: Recheck candidate-only CoreDNS zones immediately before removal
+      ansible.builtin.stat:
+        path: "{{ item.target_path }}"
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+      loop: "{{ abhaile_coredns_cleanup_entries | default([]) }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      register: abhaile_coredns_cleanup_stats
+    - name: Refuse changed or redirected candidate-only CoreDNS zones
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.checksum == item.item.candidate_sha256
+        fail_msg: Candidate-only CoreDNS zone changed before cleanup
+        quiet: true
+      loop: "{{ abhaile_coredns_cleanup_stats.results }}"
+      loop_control:
+        label: "{{ item.item.target_path }}"
+    - name: Remove matching candidate-only CoreDNS zones
+      ansible.builtin.file:
+        path: "{{ item.target_path }}"
+        state: absent
+      loop: "{{ abhaile_coredns_cleanup_entries | default([]) }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      register: abhaile_coredns_zone_removals
+    - name: Publish CoreDNS configuration and zones
+      ansible.builtin.copy:
+        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+        dest: "{{ item.target_path }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ abhaile_coredns_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      register: abhaile_coredns_publications
+    - name: Record changed CoreDNS resource families
+      ansible.builtin.set_fact:
+        abhaile_coredns_config_changed: "{{ abhaile_coredns_publications.results | selectattr('changed') | selectattr('item.kind',
+          'equalto', 'coredns.config') | list | length > 0 }}"
+        abhaile_coredns_zones_changed: >-
+          {{ (abhaile_coredns_publications.results | selectattr('changed') | selectattr('item.kind', 'equalto',
+          'coredns.zone') | list | length > 0) or (abhaile_coredns_zone_removals.results | default([]) | selectattr('changed')
+          | list | length > 0) }}
+    - name: Restart CoreDNS after Corefile publication
+      ansible.builtin.systemd_service:
+        name: coredns.service
+        state: restarted
+      when:
+        - not ansible_check_mode
+        - abhaile_coredns_config_changed
+    - name: Reload CoreDNS after zone-only publication
+      ansible.builtin.systemd_service:
+        name: coredns.service
+        state: reloaded
+      when:
+        - not ansible_check_mode
+        - not abhaile_coredns_config_changed
+        - abhaile_coredns_zones_changed
+    - name: Verify CoreDNS is active after changed publication
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemctl
+          - is-active
+          - --quiet
+          - coredns.service
+      changed_when: false
+      when:
+        - not ansible_check_mode
+        - abhaile_coredns_config_changed or abhaile_coredns_zones_changed
+  always:
+    - name: Restore the CoreDNS zone watcher
+      ansible.builtin.systemd_service:
+        name: coredns-zones.path
+        state: started
+      when:
+        - not ansible_check_mode
+        - abhaile_coredns_batch_changed

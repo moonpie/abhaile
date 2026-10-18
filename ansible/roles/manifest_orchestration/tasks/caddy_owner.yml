@@ -1,0 +1,5 @@
+- name: Converge one Caddy configuration owner
+  ansible.builtin.include_role:
+    name: caddy_config
+  vars:
+    abhaile_caddy_config_entries: ["{{ abhaile_caddy_entry }}"]

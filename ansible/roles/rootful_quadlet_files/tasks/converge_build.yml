@@ -1,0 +1,44 @@
+- name: Start managed rootful build unit
+  ansible.builtin.systemd_service:
+    name: "{{ abhaile_build_publication.item.owner_ref | regex_replace('^unit:', '') }}"
+    state: started
+- name: Verify managed rootful build output image
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/podman
+      - image
+      - exists
+      - "{{ abhaile_build_publication.item.apply_hints.managed_build.output_image }}"
+  changed_when: false
+- name: Run managed rootful post-build install unit
+  ansible.builtin.systemd_service:
+    name: "{{ abhaile_build_publication.item.apply_hints.managed_build.post_build.install_unit }}"
+    state: started
+  when: abhaile_build_publication.item.apply_hints.managed_build.post_build is defined
+- name: Inspect managed rootful post-build artifact
+  ansible.builtin.stat:
+    path: "{{ abhaile_build_publication.item.apply_hints.managed_build.post_build.verify_binary }}"
+    follow: false
+  register: abhaile_post_build_artifact
+  when: abhaile_build_publication.item.apply_hints.managed_build.post_build is defined
+- name: Verify managed rootful post-build artifact
+  ansible.builtin.assert:
+    that:
+      - abhaile_post_build_artifact.stat.exists
+      - abhaile_post_build_artifact.stat.isreg
+      - not abhaile_post_build_artifact.stat.islnk
+      - abhaile_post_build_artifact.stat.executable
+    fail_msg: Managed rootful post-build artifact is not a regular executable file
+    quiet: true
+  when: abhaile_build_publication.item.apply_hints.managed_build.post_build is defined
+- name: Restart managed rootful build consumers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+  loop: "{{ abhaile_build_publication.item.apply_hints.managed_build.consumers }}"
+  loop_control:
+    label: "{{ item }}"
+- name: Record consumers restarted by managed rootful build
+  ansible.builtin.set_fact:
+    abhaile_rebuilt_rootful_consumers: "{{ abhaile_rebuilt_rootful_consumers + abhaile_build_publication.item.apply_hints.managed_build.consumers
+      }}"

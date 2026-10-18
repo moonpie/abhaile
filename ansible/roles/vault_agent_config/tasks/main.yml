@@ -1,0 +1,365 @@
+- name: Require a non-empty Vault Agent selection
+  ansible.builtin.assert:
+    that:
+      - abhaile_vault_agent_entries is sequence
+      - abhaile_vault_agent_entries is not string
+      - abhaile_vault_agent_entries | length > 0
+      - abhaile_vault_agent_managed_directory_targets | default([]) is sequence
+      - abhaile_vault_agent_managed_directory_targets | default([]) is not string
+    fail_msg: Vault Agent selection must be a non-empty list
+    quiet: true
+- name: Validate common Vault Agent manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_vault_agent_entries }}"
+- name: Require the complete Vault Agent rootless Quadlet selection
+  ansible.builtin.assert:
+    that:
+      - abhaile_vault_agent_quadlet_entries is sequence
+      - abhaile_vault_agent_quadlet_entries is not string
+      - abhaile_vault_agent_quadlet_entries | length == 5
+    fail_msg: Vault Agent convergence requires its five rootless Quadlet files
+    quiet: true
+- name: Validate common Vault Agent rootless Quadlet manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_vault_agent_quadlet_entries }}"
+- name: Validate the closed Vault Agent file contract
+  ansible.builtin.assert:
+    that:
+      - item.kind in ['vault.template', 'vault.config']
+      - item.owner_ref == 'service:vault-agent'
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is sameas true
+      - item.apply_hints.podman_user is string
+      - item.apply_hints.podman_user | length > 0
+      - item.apply_hints.podman_user == abhaile_vault_agent_entries[0].apply_hints.podman_user
+      - item.apply_hints.restart_mode == 'restart'
+      - >-
+        (item.kind == 'vault.template' and item.apply_hints.write_order == 'before-config') or (item.kind == 'vault.config'
+        and item.apply_hints.write_order == 'after-templates')
+    fail_msg: Vault Agent entry violates the closed publication contract
+    quiet: true
+  loop: "{{ abhaile_vault_agent_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid Vault Agent entry') }}"
+- name: Require exactly one Vault Agent configuration
+  ansible.builtin.assert:
+    that:
+      - >-
+        abhaile_vault_agent_entries | selectattr('kind', 'equalto', 'vault.config') | list | length == 1
+    fail_msg: Vault Agent selection must contain exactly one configuration file
+    quiet: true
+- name: Read the Vault Agent runtime identity
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ abhaile_vault_agent_entries[0].apply_hints.podman_user }}"
+- name: Record the Vault Agent runtime identity
+  ansible.builtin.set_fact:
+    abhaile_vault_agent_runtime_user: "{{ runtime_user }}"
+    abhaile_vault_agent_runtime_uid: "{{ ansible_facts.getent_passwd[runtime_user][1] | string }}"
+    abhaile_vault_agent_runtime_home: >-
+      {{ abhaile_vault_agent_home | default(ansible_facts.getent_passwd[runtime_user][4]) }}
+    abhaile_vault_agent_quadlet_root: "{{ (abhaile_vault_agent_home | default(ansible_facts.getent_passwd[runtime_user][4]))
+      ~ '/.config/containers/systemd' }}"
+  vars:
+    runtime_user: "{{ abhaile_vault_agent_entries[0].apply_hints.podman_user }}"
+- name: Read the current validation identity
+  ansible.builtin.command:
+    argv: [/usr/bin/id, -u]
+  changed_when: false
+  check_mode: false
+  register: abhaile_vault_agent_current_uid
+- name: Validate the closed Vault Agent rootless Quadlet contract
+  ansible.builtin.assert:
+    that:
+      - item.kind in ['quadlet.container', 'quadlet.volume']
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is sameas true
+      - item.apply_hints.podman_user == abhaile_vault_agent_runtime_user
+      - item.target_path | dirname == abhaile_vault_agent_quadlet_root
+      - item.owner_ref == 'unit:' ~ quadlet_stem ~ quadlet_suffixes[item.kind]
+      - >-
+        abhaile_vault_agent_quadlet_entries | map(attribute='owner_ref') | unique | sort == required_vault_agent_quadlet_owners
+        | sort
+    fail_msg: Vault Agent rootless Quadlet selection violates its closed owner contract
+    quiet: true
+  loop: "{{ abhaile_vault_agent_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid Vault Agent Quadlet entry') }}"
+  vars:
+    quadlet_stem: "{{ item.target_path | basename | splitext | first }}"
+    quadlet_suffixes:
+      quadlet.container: .service
+      quadlet.volume: -volume.service
+    required_vault_agent_quadlet_owners:
+      - unit:host-certs-volume.service
+      - unit:vault-agent-out-volume.service
+      - unit:vault-agent-run-volume.service
+      - unit:vault-agent-templates-volume.service
+      - unit:vault-agent.service
+- name: Validate the complete Vault Agent rootless Quadlet selection
+  block:
+    - name: Create disposable Vault Agent Quadlet validation directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: abhaile-vault-agent-quadlet-verify-
+      check_mode: false
+      changed_when: false
+      register: abhaile_vault_agent_quadlet_validation_root
+    - name: Make the validation directory private to the Vault Agent user
+      ansible.builtin.file:
+        path: "{{ abhaile_vault_agent_quadlet_validation_root.path }}"
+        state: directory
+        owner: "{{ abhaile_vault_agent_runtime_user }}"
+        group: "{{ abhaile_vault_agent_runtime_user }}"
+        mode: "0700"
+      check_mode: false
+      changed_when: false
+    - name: Stage Vault Agent Quadlet validation sources
+      ansible.builtin.copy:
+        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+        dest: "{{ abhaile_vault_agent_quadlet_validation_root.path }}/{{ item.target_path | basename }}"
+        remote_src: true
+        owner: "{{ abhaile_vault_agent_runtime_user }}"
+        group: "{{ abhaile_vault_agent_runtime_user }}"
+        mode: "0600"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_vault_agent_quadlet_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+    - name: Run the Vault Agent Quadlet generator as the current runtime user
+      ansible.builtin.command:
+        argv:
+          - /usr/lib/systemd/system-generators/podman-system-generator
+          - -dryrun
+      environment:
+        HOME: "{{ abhaile_vault_agent_runtime_home }}"
+        XDG_RUNTIME_DIR: "/run/user/{{ abhaile_vault_agent_runtime_uid }}"
+        QUADLET_UNIT_DIRS: "{{ abhaile_vault_agent_quadlet_validation_root.path }}"
+      check_mode: false
+      changed_when: false
+      when: abhaile_vault_agent_current_uid.stdout | trim == abhaile_vault_agent_runtime_uid
+    - name: Run the Vault Agent Quadlet generator as its runtime user
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - --user
+          - "{{ abhaile_vault_agent_runtime_user }}"
+          - --
+          - /usr/bin/env
+          - "HOME={{ abhaile_vault_agent_runtime_home }}"
+          - "XDG_RUNTIME_DIR=/run/user/{{ abhaile_vault_agent_runtime_uid }}"
+          - "QUADLET_UNIT_DIRS={{ abhaile_vault_agent_quadlet_validation_root.path }}"
+          - /usr/lib/systemd/system-generators/podman-system-generator
+          - -dryrun
+      check_mode: false
+      changed_when: false
+      when: abhaile_vault_agent_current_uid.stdout | trim != abhaile_vault_agent_runtime_uid
+  always:
+    - name: Remove disposable Vault Agent Quadlet validation directory
+      ansible.builtin.file:
+        path: "{{ abhaile_vault_agent_quadlet_validation_root.path }}"
+        state: absent
+      check_mode: false
+      changed_when: false
+      when: abhaile_vault_agent_quadlet_validation_root.path is defined
+- name: Inspect the Vault Agent rootless Quadlet directory
+  ansible.builtin.stat:
+    path: "{{ abhaile_vault_agent_quadlet_root }}"
+    follow: false
+  register: abhaile_vault_agent_quadlet_root_state
+- name: Require a valid existing Vault Agent rootless Quadlet directory
+  ansible.builtin.assert:
+    that:
+      - >-
+        not abhaile_vault_agent_quadlet_root_state.stat.exists or (abhaile_vault_agent_quadlet_root_state.stat.isdir
+        and not abhaile_vault_agent_quadlet_root_state.stat.islnk)
+    fail_msg: Vault Agent rootless Quadlet path is redirected or not a directory
+    quiet: true
+- name: Ensure the Vault Agent rootless Quadlet directory exists
+  ansible.builtin.file:
+    path: "{{ abhaile_vault_agent_quadlet_root }}"
+    state: directory
+    owner: "{{ abhaile_vault_agent_runtime_user }}"
+    group: "{{ abhaile_vault_agent_runtime_user }}"
+    mode: "0700"
+- name: Report Vault Agent Quadlets planned beneath their new role-owned directory
+  ansible.builtin.debug:
+    msg: Vault Agent rootless Quadlets will be published after their directory is created
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not abhaile_vault_agent_quadlet_root_state.stat.exists
+- name: Publish Vault Agent rootless Quadlet files
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+    dest: "{{ item.target_path }}"
+    remote_src: true
+    owner: "{{ abhaile_vault_agent_runtime_user }}"
+    group: "{{ abhaile_vault_agent_runtime_user }}"
+    mode: "0644"
+  loop: "{{ abhaile_vault_agent_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_vault_agent_quadlet_publications
+  when:
+    - not ansible_check_mode or abhaile_vault_agent_quadlet_root_state.stat.exists
+- name: Record Vault Agent rootless Quadlet publication changes
+  ansible.builtin.set_fact:
+    abhaile_vault_agent_quadlets_changed: "{{ abhaile_vault_agent_quadlet_publications.results | selectattr('changed')
+      | list | length > 0 }}"
+- name: Reload the Vault Agent user manager after Quadlet publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ abhaile_vault_agent_runtime_user }}@"
+      - daemon-reload
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - abhaile_vault_agent_quadlets_changed
+- name: Verify the Vault Agent generated user units are loaded
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ abhaile_vault_agent_runtime_user }}@"
+      - show
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+      - --property=LoadState
+      - --value
+  changed_when: false
+  failed_when: abhaile_vault_agent_quadlet_load_state.stdout | trim != 'loaded'
+  loop: "{{ abhaile_vault_agent_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  register: abhaile_vault_agent_quadlet_load_state
+  when:
+    - not ansible_check_mode
+    - abhaile_vault_agent_quadlets_changed
+- name: Inspect Vault Agent configuration parent directories
+  ansible.builtin.stat:
+    path: "{{ item.target_path | dirname }}"
+    follow: false
+  loop: "{{ abhaile_vault_agent_entries }}"
+  loop_control:
+    label: "{{ item.target_path | dirname }}"
+  register: abhaile_vault_agent_parents
+- name: Require existing or explicitly managed Vault Agent parents
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.stat.exists and item.stat.isdir and not item.stat.islnk) or (ansible_check_mode and ((item.item.target_path
+        | dirname) in (abhaile_vault_agent_managed_directory_targets | default([])) or (item.item.target_path |
+        dirname) in (abhaile_vault_agent_managed_directory_targets | default([]) | map('dirname') | list)))
+    fail_msg: Vault Agent parent is absent, redirected, or not manifest-managed
+    quiet: true
+  loop: "{{ abhaile_vault_agent_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path | dirname }}"
+- name: Report Vault Agent files planned beneath new managed parents
+  ansible.builtin.debug:
+    msg: Vault Agent file will be published after its managed parent is created
+  changed_when: true
+  loop: "{{ abhaile_vault_agent_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - ansible_check_mode
+    - not item.stat.exists
+- name: Publish Vault Agent templates
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ item.item.render_path }}"
+    dest: "{{ item.item.target_path }}"
+    remote_src: true
+    owner: "{{ item.item.apply_hints.podman_user }}"
+    group: "{{ item.item.apply_hints.podman_user }}"
+    mode: "0644"
+  loop: "{{ abhaile_vault_agent_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - item.item.kind == 'vault.template'
+    - not ansible_check_mode or item.stat.exists
+  register: abhaile_vault_template_publications
+- name: Publish Vault Agent configuration after templates
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ item.item.render_path }}"
+    dest: "{{ item.item.target_path }}"
+    remote_src: true
+    owner: "{{ item.item.apply_hints.podman_user }}"
+    group: "{{ item.item.apply_hints.podman_user }}"
+    mode: "0644"
+  loop: "{{ abhaile_vault_agent_parents.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - item.item.kind == 'vault.config'
+    - not ansible_check_mode or item.stat.exists
+  register: abhaile_vault_config_publications
+- name: Record Vault Agent configuration publication changes
+  ansible.builtin.set_fact:
+    abhaile_vault_templates_changed: "{{ abhaile_vault_template_publications.results | selectattr('changed') | list
+      | length > 0 }}"
+    abhaile_vault_config_changed: "{{ abhaile_vault_config_publications.results | selectattr('changed') | list |
+      length > 0 }}"
+- name: Restart Vault Agent once after changed publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ abhaile_vault_agent_runtime_user }}@"
+      - restart
+      - vault-agent.service
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - >-
+      abhaile_vault_agent_quadlets_changed or abhaile_vault_templates_changed or abhaile_vault_config_changed
+- name: Observe Vault Agent runtime state
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ abhaile_vault_agent_runtime_user }}@"
+      - is-active
+      - --quiet
+      - vault-agent.service
+  changed_when: false
+  failed_when: false
+  register: abhaile_vault_agent_active
+  when: not ansible_check_mode
+- name: Start inactive Vault Agent runtime
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ abhaile_vault_agent_runtime_user }}@"
+      - start
+      - vault-agent.service
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - abhaile_vault_agent_active.rc != 0
+- name: Verify Vault Agent is active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - --user
+      - -M
+      - "{{ abhaile_vault_agent_runtime_user }}@"
+      - is-active
+      - --quiet
+      - vault-agent.service
+  changed_when: false
+  when: not ansible_check_mode

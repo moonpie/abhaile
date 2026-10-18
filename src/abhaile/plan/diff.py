@@ -9,6 +9,7 @@ import pwd
 import stat
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any, TypedDict
 
 from abhaile.models.directory import resolve_directory_metadata
@@ -57,6 +58,15 @@ class PlanResult(TypedDict):
     networkd_netdev_delete_order: list[str]
     quadlet_convergence_plans: dict[str, list[dict[str, str]]]
     summary: DiffSummary
+
+
+class ManifestRemovalClassification(TypedDict):
+    """Manifest-only files grouped by live identity evidence."""
+
+    host: str
+    identity_matches: list[dict[str, Any]]
+    missing: list[dict[str, Any]]
+    blocked: list[dict[str, Any]]
 
 
 NON_REGULAR_LIVE_FILE = "__NON_REGULAR__"
@@ -181,9 +191,13 @@ def _load_manifest(path: Path, *, allow_missing: bool, default_host: str = "") -
 def _live_file_sha256(target_path: str) -> str | None:
     """Return live file sha256 for a regular file; None for missing paths."""
     path = Path(target_path)
-    if not path.exists():
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
         return None
-    if path.is_symlink() or not path.is_file():
+    except OSError as exc:
+        raise DiffError(f"Failed to inspect live file: {target_path} ({exc})") from exc
+    if not stat.S_ISREG(metadata.st_mode):
         return NON_REGULAR_LIVE_FILE
     try:
         return sha256_file(path)
@@ -191,24 +205,125 @@ def _live_file_sha256(target_path: str) -> str | None:
         raise DiffError(f"Failed to hash live file: {target_path} ({exc})") from exc
 
 
-def _canonical_uid(value: str | int) -> str:
+def classify_manifest_removals(
+    desired_manifest_path: Path,
+    removal_source_manifest_path: Path,
+    *,
+    included_kinds: set[str] | None = None,
+    directory_residue_kinds: set[str] | None = None,
+    file_residue_kinds: set[str] | None = None,
+) -> ManifestRemovalClassification:
+    """Classify files absent from desired state without authorizing removal.
+
+    A matching live hash proves only that the removal source still owns the file bytes.
+    Resource-family code must separately decide whether deactivation and removal are reversible
+    and supported.
+    Directories remain blocked because the manifest has no complete live identity for their
+    contents. Callers may explicitly classify known inert file or directory kinds as residue when
+    their resource-family lifecycle has already made them harmless.
+    """
+    desired = _load_manifest(desired_manifest_path, allow_missing=False)
+    removal_source = _load_manifest(removal_source_manifest_path, allow_missing=False)
+    if removal_source.host != desired.host:
+        raise DiffError(
+            "Manifest removal host mismatch: "
+            f"desired host={desired.host} removal-source host={removal_source.host}"
+        )
+
+    desired_targets = set(_index_entries(desired.entries))
+    removal_source_by_target = _index_entries(removal_source.entries)
+    identity_matches: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    blocked: list[dict[str, Any]] = []
+
+    for target_path in sorted(set(removal_source_by_target) - desired_targets):
+        removal_source_entry = removal_source_by_target[target_path]
+        if included_kinds is not None and removal_source_entry["kind"] not in included_kinds:
+            continue
+        classification = {
+            "target_path": target_path,
+            "render_path": removal_source_entry["render_path"],
+            "kind": removal_source_entry["kind"],
+            "owner_ref": removal_source_entry["owner_ref"],
+            "candidate_sha256": removal_source_entry["sha256"],
+            "apply_hints": removal_source_entry.get("apply_hints"),
+        }
+        if removal_source_entry.get("is_directory") is True:
+            if (
+                directory_residue_kinds is not None
+                and removal_source_entry["kind"] in directory_residue_kinds
+            ):
+                continue
+            blocked.append({**classification, "reason": "directory-identity-incomplete"})
+            continue
+        if file_residue_kinds is not None and removal_source_entry["kind"] in file_residue_kinds:
+            continue
+
+        live_sha = _live_file_sha256(target_path)
+        if live_sha is None:
+            missing.append({**classification, "live_sha256": None})
+        elif live_sha == removal_source_entry["sha256"]:
+            identity_matches.append({**classification, "live_sha256": live_sha})
+        else:
+            reason = (
+                "non-regular-live-path"
+                if live_sha == NON_REGULAR_LIVE_FILE
+                else "live-content-mismatch"
+            )
+            blocked.append({**classification, "live_sha256": live_sha, "reason": reason})
+
+    return {
+        "host": desired.host,
+        "identity_matches": identity_matches,
+        "missing": missing,
+        "blocked": blocked,
+    }
+
+
+def classify_candidate_only_files(
+    last_successful_manifest_path: Path,
+    candidate_manifest_path: Path,
+    *,
+    included_kinds: set[str] | None = None,
+    directory_residue_kinds: set[str] | None = None,
+    file_residue_kinds: set[str] | None = None,
+) -> ManifestRemovalClassification:
+    """Classify interrupted-candidate additions without authorizing removal."""
+    return classify_manifest_removals(
+        last_successful_manifest_path,
+        candidate_manifest_path,
+        included_kinds=included_kinds,
+        directory_residue_kinds=directory_residue_kinds,
+        file_residue_kinds=file_residue_kinds,
+    )
+
+
+def _canonical_uid(
+    value: str | int,
+    resolver: Callable[[str], int] | None = None,
+) -> str:
     """Resolve a username or numeric UID to a canonical numeric UID string."""
     text = str(value)
     if text.isdecimal():
         return str(int(text))
     try:
-        return str(pwd.getpwnam(text).pw_uid)
+        resolved = resolver(text) if resolver is not None else pwd.getpwnam(text).pw_uid
+        return str(resolved)
     except KeyError as exc:
         raise DiffError(f"User not found: {text}") from exc
 
 
-def _canonical_gid(value: str | int) -> str:
+def _canonical_gid(
+    value: str | int,
+    resolver: Callable[[str], int] | None = None,
+) -> str:
     """Resolve a group name or numeric GID to a canonical numeric GID string."""
     text = str(value)
     if text.isdecimal():
         return str(int(text))
     try:
-        return str(grp.getgrnam(text).gr_gid)
+        resolved = resolver(text) if resolver is not None else grp.getgrnam(text).gr_gid
+        return str(resolved)
     except KeyError as exc:
         raise DiffError(f"Group not found: {text}") from exc
 
@@ -242,15 +357,20 @@ def _live_directory_state(target_path: str) -> dict[str, Any]:
     return {"state": "type-conflict", "live_metadata": live_metadata}
 
 
-def _desired_directory_metadata(desired_entry: dict[str, Any]) -> dict[str, str]:
+def _desired_directory_metadata(
+    desired_entry: dict[str, Any],
+    *,
+    uid_resolver: Callable[[str], int] | None = None,
+    gid_resolver: Callable[[str], int] | None = None,
+) -> dict[str, str]:
     """Resolve desired directory metadata from the manifest entry."""
     metadata = resolve_directory_metadata(
         desired_entry["kind"],
         desired_entry.get("apply_hints"),
     )
     return {
-        "owner": _canonical_uid(metadata.owner),
-        "group": _canonical_gid(metadata.group),
+        "owner": _canonical_uid(metadata.owner, uid_resolver),
+        "group": _canonical_gid(metadata.group, gid_resolver),
         "mode": metadata.mode,
     }
 
@@ -258,9 +378,16 @@ def _desired_directory_metadata(desired_entry: dict[str, Any]) -> dict[str, str]
 def _directory_write_action(
     desired_entry: dict[str, Any],
     live_state: dict[str, Any],
+    *,
+    uid_resolver: Callable[[str], int] | None = None,
+    gid_resolver: Callable[[str], int] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Return write and changed entries for a desired directory artifact."""
-    desired_metadata = _desired_directory_metadata(desired_entry)
+    desired_metadata = _desired_directory_metadata(
+        desired_entry,
+        uid_resolver=uid_resolver,
+        gid_resolver=gid_resolver,
+    )
     state = live_state.get("state")
 
     if state == "missing":
@@ -789,7 +916,13 @@ def _build_managed_build_plan(
     return actions
 
 
-def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Path) -> PlanResult:
+def plan_manifest_drift(
+    rendered_manifest_path: Path,
+    applied_manifest_path: Path,
+    *,
+    uid_resolver: Callable[[str], int] | None = None,
+    gid_resolver: Callable[[str], int] | None = None,
+) -> PlanResult:
     """Compare desired and applied manifests and classify live drift."""
     desired = _load_manifest(rendered_manifest_path, allow_missing=False)
     applied = _load_manifest(
@@ -859,6 +992,8 @@ def plan_manifest_drift(rendered_manifest_path: Path, applied_manifest_path: Pat
             write, change = _directory_write_action(
                 desired_entry,
                 _live_directory_state(target),
+                uid_resolver=uid_resolver,
+                gid_resolver=gid_resolver,
             )
             if write is not None:
                 writes.append(write)
