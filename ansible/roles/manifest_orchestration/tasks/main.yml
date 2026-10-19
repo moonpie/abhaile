@@ -55,6 +55,7 @@
       {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_vault_agent_kinds) | list }}
     abhaile_quadlet_entries_all: >-
       {{ abhaile_manifest.entries | selectattr('kind', 'in', abhaile_quadlet_kinds) | list }}
+    abhaile_rootful_quadlet_owners: "{{ abhaile_manifest.owners | default({}) }}"
     abhaile_rootful_quadlet_cleanup_entries: >-
       {{ abhaile_candidate_cleanup_entries | default([]) | selectattr('kind', 'in', abhaile_quadlet_kinds) | list
       }}

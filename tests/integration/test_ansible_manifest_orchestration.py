@@ -403,6 +403,12 @@ def test_manifest_orchestration_uses_fixed_dependency_order() -> None:
     """Keep direct family calls explicit and production convergence quarantined."""
     role_path = Path("ansible/roles/manifest_orchestration/tasks/main.yml")
     tasks = yaml.safe_load(role_path.read_text(encoding="utf-8"))
+    selection = next(
+        task for task in tasks if task["name"] == "Select fixed manifest resource families"
+    )
+    assert selection["ansible.builtin.set_fact"]["abhaile_rootful_quadlet_owners"] == (
+        "{{ abhaile_manifest.owners | default({}) }}"
+    )
     calls = [
         task.get("ansible.builtin.include_role", {}).get("name")
         or task.get("ansible.builtin.include_tasks")
