@@ -102,32 +102,34 @@ class TestDryRunValidations:
         assert results == []
         assert calls == []
 
-    def test_systemd_verify_uses_isolated_root_not_render_source(
+    def test_systemd_verify_uses_complete_desired_unit_path(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        source = (
-            tmp_path / "system" / "etc" / "systemd" / "system" / "coredns-omada-install.service"
-        )
-        source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_text(
-            "[Unit]\nAfter=coredns-omada-build.service\nRequires=coredns-omada-build.service\n",
+        unit_root = tmp_path / "system/etc/systemd/system"
+        unit_root.mkdir(parents=True)
+        runner = unit_root / "abhaile-runner.service"
+        restore = unit_root / "abhaile-network-restore.service"
+        runner.write_text(
+            "[Unit]\nAfter=abhaile-network-restore.service\n[Service]\nExecStart=/bin/true\n",
             encoding="utf-8",
         )
+        restore.write_text("[Service]\nExecStart=/bin/true\n", encoding="utf-8")
 
-        build_source = (
-            tmp_path / "system" / "etc" / "containers" / "systemd" / "coredns-omada.build"
-        )
-        build_source.parent.mkdir(parents=True, exist_ok=True)
-        build_source.write_text("[Build]\nImageTag=example\n", encoding="utf-8")
-
-        calls: list[list[str]] = []
+        calls: list[tuple[list[str], dict[str, str]]] = []
 
         class _ValidationResult:
             success = True
             return_code = 0
 
-        def _fake_validation(argv: list[str], **_: object) -> _ValidationResult:
-            calls.append(argv)
+        def _fake_validation(
+            argv: list[str], *, env: dict[str, str], run_as_user: str | None, **_: object
+        ) -> _ValidationResult:
+            assert run_as_user is None
+            staged = Path(env["SYSTEMD_UNIT_PATH"].split(":", 1)[0])
+            assert (staged / runner.name).read_bytes() == runner.read_bytes()
+            assert (staged / restore.name).read_bytes() == restore.read_bytes()
+            assert not (staged / "opt/abhaile/scripts/abhaile-runner").exists()
+            calls.append((argv, env))
             return _ValidationResult()
 
         monkeypatch.setattr("abhaile.apply.dispatch.run_validation", _fake_validation)
@@ -137,31 +139,33 @@ class TestDryRunValidations:
             [
                 {
                     "kind": "systemd.unit",
-                    "render_path": "system/etc/systemd/system/coredns-omada-install.service",
-                    "target_path": "/etc/systemd/system/coredns-omada-install.service",
-                    "owner_ref": "unit:coredns-omada-install.service",
+                    "render_path": "system/etc/systemd/system/abhaile-runner.service",
+                    "target_path": "/etc/systemd/system/abhaile-runner.service",
+                    "owner_ref": "unit:abhaile-runner.service",
                 }
             ],
             desired_entries=[
                 {
                     "kind": "systemd.unit",
-                    "render_path": "system/etc/systemd/system/coredns-omada-install.service",
-                    "target_path": "/etc/systemd/system/coredns-omada-install.service",
-                    "owner_ref": "unit:coredns-omada-install.service",
+                    "render_path": "system/etc/systemd/system/abhaile-runner.service",
+                    "target_path": "/etc/systemd/system/abhaile-runner.service",
+                    "owner_ref": "unit:abhaile-runner.service",
                 },
                 {
-                    "kind": "quadlet.build",
-                    "render_path": "system/etc/containers/systemd/coredns-omada.build",
-                    "target_path": "/etc/containers/systemd/coredns-omada.build",
-                    "owner_ref": "unit:coredns-omada-build.service",
+                    "kind": "systemd.unit",
+                    "render_path": "system/etc/systemd/system/abhaile-network-restore.service",
+                    "target_path": "/etc/systemd/system/abhaile-network-restore.service",
+                    "owner_ref": "unit:abhaile-network-restore.service",
                 },
             ],
         )
 
         assert len(results) == 1
-        assert calls and calls[0][0] == "systemd-analyze"
-        assert any(part.startswith("--root=") for part in calls[0])
-        assert "system/etc/systemd/system/coredns-omada-install.service" not in calls[0]
+        assert calls[0][0] == ["systemd-analyze", "verify", "abhaile-runner.service"]
+        unit_path = calls[0][1]["SYSTEMD_UNIT_PATH"]
+        assert unit_path.endswith(":")
+        assert unit_path.count(":") == 1
+        assert "--root=" not in " ".join(calls[0][0])
 
     def test_systemd_verify_uses_user_context_for_rootless_units(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -180,14 +184,19 @@ class TestDryRunValidations:
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_text("[Unit]\nDescription=Example\n", encoding="utf-8")
 
-        calls: list[list[str]] = []
+        calls: list[tuple[list[str], dict[str, str]]] = []
+        user_info = type("Pwd", (), {"pw_uid": 1001})()
+        monkeypatch.setattr("abhaile.apply.dispatch.pwd.getpwnam", lambda _: user_info)
 
         class _ValidationResult:
             success = True
             return_code = 0
 
-        def _fake_validation(argv: list[str], **_: object) -> _ValidationResult:
-            calls.append(argv)
+        def _fake_validation(
+            argv: list[str], *, env: dict[str, str], run_as_user: str | None, **_: object
+        ) -> _ValidationResult:
+            assert run_as_user == "abhaile"
+            calls.append((argv, env))
             return _ValidationResult()
 
         monkeypatch.setattr("abhaile.apply.dispatch.run_validation", _fake_validation)
@@ -206,12 +215,68 @@ class TestDryRunValidations:
             ],
         )
 
-        assert calls and calls[0][0] == "systemd-analyze"
-        assert "--user" in calls[0]
+        argv, env = calls[0]
+        assert argv[-4:] == ["/usr/bin/systemd-analyze", "--user", "verify", "example.service"]
+        assert "HOME=/home/abhaile" in argv
+        assert "XDG_CONFIG_HOME=/home/abhaile/.config" in argv
+        assert "XDG_RUNTIME_DIR=/run/user/1001" in argv
+        assert any(value.startswith("SYSTEMD_UNIT_PATH=") for value in argv)
+        assert env["SYSTEMD_UNIT_PATH"].endswith(":")
+
+    def test_systemd_verify_stages_dropin_beneath_parent_unit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = tmp_path / "system/etc/systemd/system/example.service.d/override.conf"
+        source.parent.mkdir(parents=True)
+        source.write_text("[Service]\nEnvironment=EXAMPLE=1\n", encoding="utf-8")
+
+        class _ValidationResult:
+            success = True
+            return_code = 0
+
+        def _verify_dropin(
+            argv: list[str], *, env: dict[str, str], run_as_user: str | None, **_: object
+        ) -> _ValidationResult:
+            assert run_as_user is None
+            staged = Path(env["SYSTEMD_UNIT_PATH"].split(":", 1)[0])
+            assert (staged / "example.service.d/override.conf").read_bytes() == source.read_bytes()
+            assert argv[-1] == "example.service"
+            return _ValidationResult()
+
+        monkeypatch.setattr("abhaile.apply.dispatch.run_validation", _verify_dropin)
+        entry: dict[str, object] = {
+            "kind": "systemd.dropin",
+            "render_path": "system/etc/systemd/system/example.service.d/override.conf",
+            "target_path": "/etc/systemd/system/example.service.d/override.conf",
+            "owner_ref": "unit:example.service",
+        }
+
+        assert len(_run_dry_run_validations(tmp_path, [entry], desired_entries=[entry])) == 1
+
+    def test_systemd_verify_rejects_missing_rootless_user(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        source = tmp_path / "home/missing/.config/systemd/user/example.service"
+        source.parent.mkdir(parents=True)
+        source.write_text("[Unit]\nDescription=Example\n", encoding="utf-8")
+
+        def _missing_user(_: str) -> object:
+            raise KeyError("missing")
+
+        monkeypatch.setattr("abhaile.apply.dispatch.pwd.getpwnam", _missing_user)
+        entry: dict[str, object] = {
+            "kind": "systemd.unit",
+            "render_path": "home/missing/.config/systemd/user/example.service",
+            "target_path": "/home/missing/.config/systemd/user/example.service",
+            "owner_ref": "unit:example.service",
+        }
+
+        with pytest.raises(ApplyError, match="User not found: missing"):
+            _run_dry_run_validations(tmp_path, [entry], desired_entries=[entry])
 
 
 class TestValidationPathHelpers:
-    """Tests for isolated validation path/context helpers."""
+    """Tests for validation path and context helpers."""
 
     def test_rootless_user_detected_for_user_quadlet_path(self) -> None:
         path = "/home/abhaile/.config/containers/systemd/example.container"

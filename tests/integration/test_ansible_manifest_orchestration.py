@@ -412,6 +412,7 @@ def test_manifest_orchestration_uses_fixed_dependency_order() -> None:
 
     assert calls == [
         "managed_directories",
+        "rootful_unit_preflight",
         "rootful_systemd",
         "service_owner.yml",
         "vault_agent_config",

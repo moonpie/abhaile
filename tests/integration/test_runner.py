@@ -202,9 +202,18 @@ def _prepare_successful_runner(repo: Path) -> dict[str, str]:
         '#!/usr/bin/env bash\nset -euo pipefail\nexec "$@"\n',
     )
 
+    ssh_dir = repo.parent / "ssh"
+    ssh_dir.mkdir()
+    deploy_key = ssh_dir / "gitops_ed25519"
+    known_hosts = ssh_dir / "known_hosts"
+    deploy_key.write_text("test deploy key fixture\n")
+    known_hosts.write_text("test pinned host fixture\n")
+
     return {
         "ABHAILE_VENV_BIN": str(venv_bin),
         "ABHAILE_ANSIBLE_PLAYBOOK": str(venv_bin / "ansible-playbook"),
+        "ABHAILE_GIT_SSH_KEY": str(deploy_key),
+        "ABHAILE_GIT_KNOWN_HOSTS": str(known_hosts),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
     }
 
@@ -335,8 +344,16 @@ class TestRunnerExitCodes:
             'readonly ABHAILE_GIT_SSH_KEY="${ABHAILE_GIT_SSH_KEY:-/home/abhaile/.ssh/gitops_ed25519}"'
             in script
         )
-        assert 'export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -i ${ABHAILE_GIT_SSH_KEY}' in script
+        assert (
+            'readonly ABHAILE_GIT_KNOWN_HOSTS="${ABHAILE_GIT_KNOWN_HOSTS:-/home/abhaile/.ssh/known_hosts}"'
+            in script
+        )
+        assert 'export GIT_SSH_COMMAND="ssh -i ${ABHAILE_GIT_SSH_KEY}' in script
         assert "IdentitiesOnly=yes" in script
+        assert "StrictHostKeyChecking=yes" in script
+        assert "UserKnownHostsFile=${ABHAILE_GIT_KNOWN_HOSTS}" in script
+        assert "StrictHostKeyChecking=accept-new" not in script
+        assert "${GIT_SSH_COMMAND:-" not in script
 
     def test_unknown_host_exits_3(self, runner_repo: Path) -> None:
         """Runner exits 3 when hostname not in mapping.yaml."""

@@ -59,8 +59,9 @@ def _write_playbook(
                         "abhaile_rendered_root": str(rendered_root),
                         "abhaile_rootful_systemd_entries": entries,
                         "abhaile_rootful_systemd_cleanup_entries": cleanup_entries or [],
+                        "abhaile_rootful_quadlet_entries": [],
                     },
-                    "roles": ["rootful_systemd"],
+                    "roles": ["rootful_unit_preflight", "rootful_systemd"],
                 }
             ],
             sort_keys=False,

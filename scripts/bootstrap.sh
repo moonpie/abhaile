@@ -35,6 +35,7 @@ readonly ABHAILE_SHELL="/bin/bash"
 readonly SECRETS_DIR="secrets"
 readonly AGE_KEY_PATH="/home/abhaile/.config/sops/age/keys.txt"
 readonly DEPLOY_KEY_PATH="/home/abhaile/.ssh/gitops_ed25519"
+readonly KNOWN_HOSTS_PATH="/home/abhaile/.ssh/known_hosts"
 
 # --- Logging -----------------------------------------------------------------
 
@@ -424,6 +425,9 @@ stage_user_and_credentials() {
     if [[ ! -f "$DEPLOY_KEY_PATH" ]]; then
         die "Deploy key missing at ${DEPLOY_KEY_PATH}. Place the read-only deploy key first."
     fi
+    if [[ ! -s "$KNOWN_HOSTS_PATH" ]]; then
+        die "Pinned Git host keys missing at ${KNOWN_HOSTS_PATH}. Place known_hosts first."
+    fi
 
     log "Credentials OK"
 }
@@ -433,7 +437,7 @@ stage_user_and_credentials() {
 stage_repo_and_env() {
     log "=== Stage 4: Repo and Environment ==="
 
-    local git_ssh_cmd="ssh -i ${DEPLOY_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+    local git_ssh_cmd="ssh -i ${DEPLOY_KEY_PATH} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${KNOWN_HOSTS_PATH}"
 
     prepare_repo_ownership
 

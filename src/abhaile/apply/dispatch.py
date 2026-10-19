@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import pwd
 import shutil
 import tempfile
 from pathlib import Path
@@ -87,20 +88,29 @@ def _stage_validation_entry(
     target_path: str,
     context: tuple[bool, str | None],
 ) -> None:
-    """Copy one desired artifact into isolated validation root."""
+    """Copy one desired unit into its temporary systemd load path."""
     source = resolve_rendered_source(rendered_dir, render_path)
     canonical_target = canonical_validation_target_path(
         kind=kind,
         target_path=target_path,
         context=context,
     )
-    staged = temp_root / canonical_target.lstrip("/")
+    if kind == "systemd.dropin":
+        parent_dir = Path(canonical_target).parent.name
+        if not parent_dir.endswith(".d"):
+            raise ApplyError(f"Invalid systemd drop-in target: {target_path}")
+        parent_name = parent_dir[:-2]
+        staged = temp_root / f"{parent_name}.d" / Path(canonical_target).name
+    else:
+        staged = temp_root / Path(canonical_target).name
     staged.parent.mkdir(parents=True, exist_ok=True)
+    staged.parent.chmod(0o755)
     shutil.copy2(source, staged)
+    staged.chmod(0o644)
 
 
 def _systemd_verify_actions(writes: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Select write actions that need isolated systemd verification."""
+    """Select write actions that need systemd verification."""
     verify_actions: list[dict[str, object]] = []
     for action in writes:
         kind = action.get("kind")
@@ -123,8 +133,8 @@ def _stage_validation_contexts(
     temp_root: Path,
     staging_entries: list[dict[str, object]],
 ) -> dict[tuple[bool, str | None], Path]:
-    """Build isolated desired-state roots grouped by systemd execution context."""
-    context_roots: dict[tuple[bool, str | None], Path] = {}
+    """Build desired unit load paths grouped by systemd execution context."""
+    unit_paths: dict[tuple[bool, str | None], Path] = {}
     for entry in staging_entries:
         kind = entry.get("kind")
         render_path = entry.get("render_path")
@@ -135,6 +145,8 @@ def _stage_validation_contexts(
             or not isinstance(target_path, str)
         ):
             continue
+        if kind not in _SYSTEMD_VERIFY_KINDS:
+            continue
         context = validation_context_for_entry(
             kind=kind,
             target_path=target_path,
@@ -142,20 +154,22 @@ def _stage_validation_contexts(
         )
         if context is None:
             continue
-        context_root = context_roots.setdefault(
+        unit_path = unit_paths.setdefault(
             context,
-            temp_root
-            / ("rootless-" + (context[1] or "unknown") if context[0] else "rootful-system"),
+            temp_root / ("user-" + (context[1] or "unknown") if context[0] else "system"),
         )
         _stage_validation_entry(
             rendered_dir,
-            context_root,
+            unit_path,
             kind=kind,
             render_path=render_path,
             target_path=target_path,
             context=context,
         )
-    return context_roots
+        if context[0]:
+            temp_root.chmod(0o711)
+            unit_path.chmod(0o755)
+    return unit_paths
 
 
 def _systemd_verify_invocation(
@@ -164,9 +178,9 @@ def _systemd_verify_invocation(
     target_path: str,
     owner_ref: object,
     context: tuple[bool, str | None],
-    context_root: Path,
-) -> tuple[list[str], dict[str, str] | None]:
-    """Build argv/env for one isolated systemd-analyze verify call."""
+    unit_path: Path,
+) -> tuple[list[str], dict[str, str]]:
+    """Build argv and unit-path environment for systemd verification."""
     verify_target = canonical_validation_target_path(
         kind=kind,
         target_path=target_path,
@@ -176,29 +190,46 @@ def _systemd_verify_invocation(
         if not isinstance(owner_ref, str):
             raise ApplyError("Validation action missing owner_ref for dropin")
         parent_name = _resolve_parent_unit_name(verify_target, owner_ref)
-        verify_target = (
-            f"/home/{context[1]}/.config/systemd/user/{parent_name}"
-            if context[0]
-            else f"/etc/systemd/system/{parent_name}"
-        )
+        verify_target = parent_name
+    else:
+        verify_target = Path(verify_target).name
 
-    argv = ["systemd-analyze"]
-    if context[0]:
-        argv.append("--user")
-    argv.extend(["verify", f"--root={context_root.as_posix()}", verify_target])
-
-    if not context[0] or not context[1]:
-        return argv, None
+    argv = ["systemd-analyze", "verify", verify_target]
+    env = {
+        **os.environ,
+        # A trailing colon asks systemd to append its normal manager-specific
+        # load path, including generated, transient, attached, and XDG paths.
+        "SYSTEMD_UNIT_PATH": f"{unit_path.as_posix()}:",
+    }
+    if not context[0]:
+        return argv, env
+    if not context[1]:
+        raise ApplyError(f"Missing rootless user for validation target: {target_path}")
 
     home = f"/home/{context[1]}"
-    return argv, {**os.environ, "HOME": home, "XDG_CONFIG_HOME": f"{home}/.config"}
+    try:
+        uid = pwd.getpwnam(context[1]).pw_uid
+    except KeyError as exc:
+        raise ApplyError(f"User not found: {context[1]}") from exc
+    argv = [
+        "/usr/bin/env",
+        f"HOME={home}",
+        f"XDG_CONFIG_HOME={home}/.config",
+        f"XDG_RUNTIME_DIR=/run/user/{uid}",
+        f"SYSTEMD_UNIT_PATH={unit_path.as_posix()}:",
+        "/usr/bin/systemd-analyze",
+        "--user",
+        "verify",
+        verify_target,
+    ]
+    return argv, env
 
 
 def _run_systemd_verify_actions(
     verify_actions: list[dict[str, object]],
-    context_roots: dict[tuple[bool, str | None], Path],
+    unit_paths: dict[tuple[bool, str | None], Path],
 ) -> dict[str, dict[str, object]]:
-    """Execute isolated systemd verification actions and fold results by target."""
+    """Verify changed units against the complete staged desired unit context."""
     results: dict[str, dict[str, object]] = {}
     for action in verify_actions:
         kind = action.get("kind")
@@ -213,30 +244,24 @@ def _run_systemd_verify_actions(
         if context is None:
             raise ApplyError(f"Unsupported systemd validation target path: {target_path}")
 
-        context_root = context_roots.get(context)
-        if context_root is None:
-            raise ApplyError(f"Missing isolated validation context for target path: {target_path}")
+        unit_path = unit_paths.get(context)
+        if unit_path is None:
+            raise ApplyError(f"Missing systemd validation context for target path: {target_path}")
 
         argv, env = _systemd_verify_invocation(
             kind=kind,
             target_path=target_path,
             owner_ref=action.get("owner_ref"),
             context=context,
-            context_root=context_root,
+            unit_path=unit_path,
         )
-        if env is None:
-            validation = run_validation(
-                argv,
-                action_id=f"validate:{target_path}",
-                is_blocker=True,
-            )
-        else:
-            validation = run_validation(
-                argv,
-                action_id=f"validate:{target_path}",
-                is_blocker=True,
-                env=env,
-            )
+        validation = run_validation(
+            argv,
+            action_id=f"validate:{target_path}",
+            is_blocker=True,
+            run_as_user=context[1] if context[0] else None,
+            env=env,
+        )
         results[target_path] = {
             "target_path": target_path,
             "kind": kind,
@@ -246,21 +271,21 @@ def _run_systemd_verify_actions(
     return results
 
 
-def _run_isolated_systemd_validations(
+def _run_systemd_validations(
     rendered_dir: Path,
     writes: list[dict[str, object]],
     *,
     desired_entries: list[dict[str, object]] | None = None,
 ) -> dict[str, dict[str, object]]:
-    """Run `systemd-analyze verify` in isolated desired-state roots."""
+    """Run systemd verification with desired units ahead of installed base units."""
     verify_actions = _systemd_verify_actions(writes)
     if not verify_actions:
         return {}
 
     staging_entries = desired_entries if isinstance(desired_entries, list) else writes
     with tempfile.TemporaryDirectory(prefix="abhaile-validate-systemd-") as td:
-        context_roots = _stage_validation_contexts(rendered_dir, Path(td), staging_entries)
-        return _run_systemd_verify_actions(verify_actions, context_roots)
+        unit_paths = _stage_validation_contexts(rendered_dir, Path(td), staging_entries)
+        return _run_systemd_verify_actions(verify_actions, unit_paths)
 
 
 def _run_dry_run_validations(
@@ -271,7 +296,7 @@ def _run_dry_run_validations(
 ) -> list[dict[str, object]]:
     """Execute read-only validations for changed systemd-family artifacts."""
     results: list[dict[str, object]] = []
-    systemd_results = _run_isolated_systemd_validations(
+    systemd_results = _run_systemd_validations(
         rendered_dir,
         writes,
         desired_entries=desired_entries,
@@ -387,7 +412,7 @@ def _run_dry_run_validations(
         if kind in _SYSTEMD_VERIFY_KINDS:
             payload_opt = systemd_results.get(target_path)
             if payload_opt is None:
-                raise ApplyError(f"Missing isolated validation result for {target_path}")
+                raise ApplyError(f"Missing systemd validation result for {target_path}")
             results.append(payload_opt)
 
     return results

@@ -8,6 +8,3 @@ Type=oneshot
 ExecCondition=/usr/bin/systemctl is-active --quiet coredns.service
 ExecStart=/usr/bin/systemctl reload coredns.service
 ExecStartPost=/usr/bin/systemctl is-active coredns.service
-
-[Install]
-WantedBy=multi-user.target

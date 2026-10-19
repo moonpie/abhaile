@@ -226,6 +226,7 @@ def run_validation(
     *,
     action_id: str,
     is_blocker: bool = True,
+    run_as_user: str | None = None,
     env: dict[str, str] | None = None,
     cwd: Path | None = None,
 ) -> ExecutionResult:
@@ -237,6 +238,7 @@ def run_validation(
         argv,
         action_id=action_id,
         action_type="validation",
+        run_as_user=run_as_user,
         check=is_blocker,
         env=env,
         cwd=cwd,

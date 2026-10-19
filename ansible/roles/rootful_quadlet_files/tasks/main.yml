@@ -171,45 +171,6 @@
     label: "{{ item.item.target_path }}"
   when: not item.skipped | default(false)
   tags: [quadlet_preflight]
-- name: Validate the complete rootful Quadlet selection in isolation
-  block:
-    - name: Create disposable Quadlet validation directory
-      ansible.builtin.tempfile:
-        state: directory
-        prefix: abhaile-quadlet-verify-
-      check_mode: false
-      changed_when: false
-      register: abhaile_quadlet_validation_root
-    - name: Stage rootful Quadlet validation sources
-      ansible.builtin.copy:
-        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
-        dest: "{{ abhaile_quadlet_validation_root.path }}/{{ item.target_path | basename }}"
-        remote_src: true
-        mode: "0600"
-      check_mode: false
-      changed_when: false
-      loop: "{{ abhaile_rootful_quadlet_entries }}"
-      loop_control:
-        label: "{{ item.target_path }}"
-    - name: Run the rootful Quadlet generator dry-run
-      ansible.builtin.command:
-        argv:
-          - /usr/lib/systemd/system-generators/podman-system-generator
-          - -dryrun
-      environment:
-        QUADLET_UNIT_DIRS: "{{ abhaile_quadlet_validation_root.path }}"
-      check_mode: false
-      changed_when: false
-  always:
-    - name: Remove disposable Quadlet validation directory
-      ansible.builtin.file:
-        path: "{{ abhaile_quadlet_validation_root.path }}"
-        state: absent
-      check_mode: false
-      changed_when: false
-      when: abhaile_quadlet_validation_root.path is defined
-  when: abhaile_rootful_quadlet_entries | length > 0
-  tags: [quadlet_preflight]
 - name: Inspect candidate-only rootful Quadlet generated units
   ansible.builtin.command:
     argv:

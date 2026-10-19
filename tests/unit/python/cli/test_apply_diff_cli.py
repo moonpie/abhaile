@@ -855,8 +855,15 @@ class TestApplyCli:
             return_code = 0
 
         def _fake_validation(
-            argv: list[str], *, action_id: str, is_blocker: bool
+            argv: list[str],
+            *,
+            action_id: str,
+            is_blocker: bool,
+            run_as_user: str | None,
+            env: dict[str, str],
         ) -> _ValidationResult:
+            assert "SYSTEMD_UNIT_PATH" in env
+            assert run_as_user is None
             calls.append(argv)
             return _ValidationResult()
 

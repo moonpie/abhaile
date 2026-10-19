@@ -1,0 +1,104 @@
+- name: Validate common rootful unit manifest fields
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: >-
+      {{ abhaile_rootful_systemd_entries | selectattr('kind', 'in', ['systemd.unit', 'systemd.dropin']) | list +
+      abhaile_rootful_quadlet_entries }}
+- name: Validate the complete rootful unit graph in isolation
+  when: >-
+    abhaile_rootful_systemd_entries | selectattr('kind', 'in', ['systemd.unit', 'systemd.dropin']) | list | length
+    > 0 or abhaile_rootful_quadlet_entries | length > 0
+  block:
+    - name: Create disposable rootful unit validation directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: abhaile-rootful-unit-verify-
+      check_mode: false
+      changed_when: false
+      register: abhaile_rootful_unit_validation_root
+    - name: Create disposable rootful unit validation paths
+      ansible.builtin.file:
+        path: "{{ abhaile_rootful_unit_validation_root.path }}/{{ item }}"
+        state: directory
+        mode: "0700"
+      check_mode: false
+      changed_when: false
+      loop: [units, quadlets, generated, generated-early, generated-late]
+    - name: Create disposable rootful systemd drop-in parents
+      ansible.builtin.file:
+        path: >-
+          {{ abhaile_rootful_unit_validation_root.path }}/units/{{ item.owner_ref | regex_replace('^unit:', '')
+          }}.d
+        state: directory
+        mode: "0700"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_rootful_systemd_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      when: item.kind == 'systemd.dropin'
+    - name: Stage complete desired rootful systemd unit context
+      ansible.builtin.copy:
+        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+        dest: >-
+          {{ abhaile_rootful_unit_validation_root.path }}/units/{{ (item.owner_ref | regex_replace('^unit:', ''))
+          ~ '.d/' ~ (item.target_path | basename) if item.kind == 'systemd.dropin' else (item.target_path | basename)
+          }}
+        remote_src: true
+        mode: "0600"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_rootful_systemd_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+      when: item.kind in ['systemd.unit', 'systemd.dropin']
+    - name: Stage complete desired rootful Quadlet context
+      ansible.builtin.copy:
+        src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
+        dest: "{{ abhaile_rootful_unit_validation_root.path }}/quadlets/{{ item.target_path | basename }}"
+        remote_src: true
+        mode: "0600"
+      check_mode: false
+      changed_when: false
+      loop: "{{ abhaile_rootful_quadlet_entries }}"
+      loop_control:
+        label: "{{ item.target_path }}"
+    - name: Generate candidate rootful Quadlet units
+      ansible.builtin.command:
+        argv:
+          - /usr/lib/systemd/system-generators/podman-system-generator
+          - "{{ abhaile_rootful_unit_validation_root.path }}/generated"
+          - "{{ abhaile_rootful_unit_validation_root.path }}/generated-early"
+          - "{{ abhaile_rootful_unit_validation_root.path }}/generated-late"
+      environment:
+        QUADLET_UNIT_DIRS: "{{ abhaile_rootful_unit_validation_root.path }}/quadlets"
+      check_mode: false
+      changed_when: false
+      when: abhaile_rootful_quadlet_entries | length > 0
+    - name: Verify complete desired rootful unit graph
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-analyze
+          - verify
+          - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+      environment:
+        SYSTEMD_UNIT_PATH: >-
+          {{ [abhaile_rootful_unit_validation_root.path ~ '/units', abhaile_rootful_unit_validation_root.path ~
+          '/generated', abhaile_rootful_unit_validation_root.path ~ '/generated-early', abhaile_rootful_unit_validation_root.path
+          ~ '/generated-late', ''] | join(':') }}
+      changed_when: false
+      check_mode: false
+      loop: >-
+        {{ abhaile_rootful_systemd_entries | selectattr('kind', 'in', ['systemd.unit', 'systemd.dropin']) | list
+        + abhaile_rootful_quadlet_entries }}
+      loop_control:
+        label: "{{ item.owner_ref }}"
+  always:
+    - name: Remove disposable rootful unit validation directory
+      ansible.builtin.file:
+        path: "{{ abhaile_rootful_unit_validation_root.path }}"
+        state: absent
+      check_mode: false
+      changed_when: false
+      when: abhaile_rootful_unit_validation_root.path is defined

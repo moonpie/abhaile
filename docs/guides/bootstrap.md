@@ -313,7 +313,6 @@ access, and reach the machine through its console or other recovery path. Do not
 Use ordinary Ansible facts for the platform baseline:
 
 ```bash
-cd /opt/abhaile
 sudo /usr/bin/ansible localhost -i localhost, -c local \
   -m ansible.builtin.setup \
   -a '{"gather_subset":["!all","min","network","virtual"],"filter":["ansible_hostname","ansible_distribution*","ansible_architecture","ansible_virtualization_*","ansible_default_ipv4","ansible_interfaces"]}'
@@ -343,32 +342,37 @@ systemctl show abhaile-runner.service abhaile-runner.timer \
 systemctl list-timers abhaile-runner.timer --no-pager
 loginctl show-user abhaile -p Linger -p RuntimePath -p State
 
-sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
-  systemctl --user show vault-agent.service \
-  -p Id -p LoadState -p UnitFileState -p ActiveState -p SubState
-sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
-  podman ps --all --format '{{.Names}} {{.Status}}'
+sudo -u abhaile env HOME=/home/abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  bash -c 'cd /tmp && exec systemctl --user show vault-agent.service \
+    -p Id -p LoadState -p UnitFileState -p ActiveState -p SubState'
+sudo -u abhaile env HOME=/home/abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
+  bash -c "cd /tmp && exec podman ps --all --format '{{.Names}} {{.Status}}'"
 
 networkctl list --no-pager
 networkctl status --no-pager
 find /etc/systemd/network -maxdepth 2 -mindepth 1 -printf '%y %p\n' | sort
 
-sudo awk 'NF == 1 && $1 ~ /^[0-9a-f]{40}$/ {print FILENAME, $1}' \
+sudo awk 'NR == 1 && $1 ~ /^[0-9a-f]{40}$/ {print FILENAME, $1, "fields=" NF}' \
   /var/lib/abhaile/runner/last-successful-commit \
   /var/lib/abhaile/runner/current-run \
-  /var/lib/abhaile/runner/failed-target
+  /var/lib/abhaile/runner/failed-target 2>/dev/null
 ```
 
-The `awk` command intentionally reports only SHA-shaped runner records and does not read
-secret-bearing environment, SSH identity, age, SOPS, Vault, or service configuration files.
-Missing optional runner records are valid observations. A missing or malformed
-`last-successful-commit` blocks unattended Ansible reconciliation until the initial baseline is
-established through the disposable-VM-proven adoption procedure.
+The `awk` command intentionally reports only each record's SHA-shaped first field and field count;
+it does not read secret-bearing environment, SSH identity, age, SOPS, Vault, or service
+configuration files. A legacy three-field last-successful record is expected before adoption. The
+one-writer procedure replaces it with the candidate's verified SHA-only baseline after the
+candidate legacy apply succeeds. Missing optional runner records are valid observations. A
+missing, malformed, or unexpected last-successful record blocks unattended Ansible reconciliation
+until the initial baseline is established through the disposable-VM-proven adoption procedure.
 
 Finally, verify repository authentication without changing the checkout:
 
 ```bash
-sudo -u abhaile git -C /opt/abhaile ls-remote --exit-code origin HEAD
+sudo -u abhaile env \
+  HOME=/home/abhaile \
+  GIT_SSH_COMMAND='ssh -i /home/abhaile/.ssh/gitops_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/abhaile/.ssh/known_hosts' \
+  git -C /opt/abhaile ls-remote --exit-code origin HEAD
 ```
 
 This last command requires GitHub connectivity and is therefore recorded separately from the
@@ -408,24 +412,20 @@ has a reviewed copy of the legacy revision available for exact restoration. Do n
 runner and then describe the result as a reversible proof without that copy.
 
 Prepare the candidate on an exact reviewed non-polled ref. Keep `main` and `origin/main` at the
-exact legacy revision throughout the reversible proof. Before aligning the checkout or installing
-candidate units, record both revisions, stop scheduling and execution, and prove that the runner
-and its shared lock are quiescent:
+exact legacy revision throughout the reversible proof. Set `EXPECTED_LEGACY_REVISION` and
+`EXPECTED_CANDIDATE_REVISION` from the reviewed handoff; do not infer either value from a moving
+branch. Stop scheduling and execution before fetching or aligning the candidate, then prove that
+the runner and its shared lock are quiescent:
 
 ```bash
 cd /opt/abhaile
 legacy_branch=main
-candidate_branch=review/phase-5.2
-sudo -u abhaile git fetch origin "$candidate_branch"
-candidate_ref="refs/remotes/origin/${candidate_branch}"
-legacy_revision=$(sudo -u abhaile git rev-parse "refs/heads/${legacy_branch}")
-remote_legacy_revision=$(sudo -u abhaile git rev-parse "refs/remotes/origin/${legacy_branch}")
-candidate_revision=$(sudo -u abhaile git rev-parse "$candidate_ref")
-test "$legacy_revision" = "$remote_legacy_revision"
-test "$candidate_revision" != "$legacy_revision"
-sudo -u abhaile git cat-file -e "${legacy_revision}^{commit}"
-sudo -u abhaile git cat-file -e "${candidate_revision}^{commit}"
-sudo -u abhaile git merge-base --is-ancestor "$legacy_revision" "$candidate_revision"
+candidate_branch=review/phase-6-deimos
+legacy_revision=${EXPECTED_LEGACY_REVISION:?set the exact reviewed legacy SHA}
+candidate_revision=${EXPECTED_CANDIDATE_REVISION:?set the exact reviewed candidate SHA}
+test "$(sudo -u abhaile git rev-parse "refs/heads/${legacy_branch}")" = "$legacy_revision"
+test "$(sudo -u abhaile git rev-parse "refs/remotes/origin/${legacy_branch}")" = \
+  "$legacy_revision"
 sudo systemctl disable --now abhaile-runner.timer
 sudo systemctl stop abhaile-runner.service
 sudo systemctl reset-failed abhaile-runner.service
@@ -434,11 +434,20 @@ test "$(systemctl is-active abhaile-runner.timer)" = inactive
 test "$(systemctl is-active abhaile-runner.service)" = inactive
 test -z "$(systemctl list-jobs --no-legend | awk '$2 ~ /^abhaile-runner[.]/ {print}')"
 sudo -u abhaile flock --nonblock /var/lib/abhaile/runner/lock true
+sudo -u abhaile git fetch origin "$candidate_branch"
+candidate_ref="refs/remotes/origin/${candidate_branch}"
+test "$(sudo -u abhaile git rev-parse "$candidate_ref")" = "$candidate_revision"
+test "$candidate_revision" != "$legacy_revision"
+sudo -u abhaile git cat-file -e "${legacy_revision}^{commit}"
+sudo -u abhaile git cat-file -e "${candidate_revision}^{commit}"
 ```
 
 Replace `candidate_branch` with the exact reviewed remote review branch; it must not be the polled
-branch. The final assertion acquires and releases the same lock used by the runner without
-blocking. Keep `abhaile-runner.timer` stopped for the entire dry-run and live proof.
+branch. The lock assertion acquires and releases the same lock used by the runner without
+blocking. This migration candidate intentionally replaces already-pushed Phase 1-4 history, so it
+is not a descendant of the legacy revision. Exact reviewed SHAs, not ancestry, bind this one-time
+proof. Routine runner updates remain fast-forward-only. Keep `abhaile-runner.timer` stopped for
+the entire dry-run and live proof.
 
 First detach at the candidate, render it, and prove the retained legacy apply plan. With explicit
 live-mutation approval, run that legacy apply before changing recovery authority. Only after it
@@ -486,15 +495,35 @@ The service environment remains configured for `main`; only this manual, lock-se
 selects the non-polled candidate branch.
 
 If the proof is accepted, keep scheduling stopped while the repository owner promotes exactly
-`candidate_revision` to `origin/main`. Fetch, align the local polled branch, and verify both refs
-name that exact SHA. Enable the new timer only after reconciliation, local health,
-`last-successful-commit`, recovery-unit dependency, and administrator access checks pass:
+`candidate_revision` to `origin/main`. Because this migration deliberately rewrote the pushed
+Phase 1-4 history, the repository owner must perform this one-time promotion from an administrator
+workstation with a write credential. Bind the rewrite to the observed legacy tip and the reviewed
+candidate with `--force-with-lease`; never grant write access to the host deploy key for this step:
+
+```bash
+legacy_revision=${EXPECTED_LEGACY_REVISION:?set the exact reviewed legacy SHA}
+candidate_revision=${EXPECTED_CANDIDATE_REVISION:?set the exact proven candidate SHA}
+candidate_branch=review/phase-6-deimos
+git fetch origin main "$candidate_branch"
+test "$(git rev-parse refs/remotes/origin/main)" = "$legacy_revision"
+test "$(git rev-parse "refs/remotes/origin/${candidate_branch}")" = "$candidate_revision"
+git push --force-with-lease="refs/heads/main:${legacy_revision}" \
+  origin "${candidate_revision}:refs/heads/main"
+test "$(git ls-remote --refs origin refs/heads/main | awk '{print $1}')" = \
+  "$candidate_revision"
+```
+
+Run that block only with separate explicit cutover approval. It is a migration-only history
+replacement, not permission for routine non-fast-forward publication. Then, on the host, fetch,
+align the local polled branch explicitly, and verify both refs name that exact SHA. Enable the new
+timer only after reconciliation, local health, `last-successful-commit`, recovery-unit dependency,
+and administrator access checks pass:
 
 ```bash
 sudo -u abhaile git fetch --prune origin
 test "$(sudo -u abhaile git rev-parse refs/remotes/origin/main)" = "$candidate_revision"
+sudo -u abhaile git branch --force main "$candidate_revision"
 sudo -u abhaile git checkout main
-sudo -u abhaile git merge --ff-only "$candidate_revision"
 test "$(sudo -u abhaile git rev-parse refs/heads/main)" = "$candidate_revision"
 # Complete the reviewed cutover checks before enabling scheduling.
 sudo systemctl enable --now abhaile-runner.timer

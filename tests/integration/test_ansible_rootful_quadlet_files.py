@@ -62,6 +62,7 @@ def _write_playbook(
     *,
     owners: dict[str, object] | None = None,
     cleanup_entries: list[dict[str, object]] | None = None,
+    validate_native_graph: bool = False,
 ) -> Path:
     """Write an isolated localhost play invoking the production role."""
     playbook = tmp_path / "rootful-quadlet.yml"
@@ -79,8 +80,14 @@ def _write_playbook(
                         "abhaile_rootful_quadlet_entries": [entry] if entry else [],
                         "abhaile_rootful_quadlet_cleanup_entries": cleanup_entries or [],
                         "abhaile_rootful_quadlet_owners": owners or {},
+                        "abhaile_rootful_systemd_entries": [],
                     },
-                    "roles": ["rootful_quadlet_files"],
+                    "roles": (
+                        [{"role": "rootful_unit_preflight", "tags": ["quadlet_preflight"]}]
+                        if validate_native_graph
+                        else []
+                    )
+                    + ["rootful_quadlet_files"],
                 }
             ],
             sort_keys=False,
@@ -113,18 +120,18 @@ def _run_playbook(tmp_path: Path, playbook: Path) -> tuple[int, str, str]:
 
 @pytest.mark.integration
 def test_rootful_quadlet_validates_without_publication(tmp_path: Path) -> None:
-    """Run the real generator dry-run while check mode preserves the target."""
+    """Generate and verify the unit while check mode preserves the target."""
     rendered = tmp_path / "rendered"
     entry = _entry(
         rendered,
         content="[Container]\nImage=docker.io/library/busybox:latest\nExec=sleep infinity\n",
     )
-    playbook = _write_playbook(tmp_path, rendered, entry)
+    playbook = _write_playbook(tmp_path, rendered, entry, validate_native_graph=True)
 
     code, stdout, stderr = _run_playbook(tmp_path / "valid", playbook)
 
     assert code == 0, stdout + stderr
-    assert "Run the rootful Quadlet generator dry-run" in stdout
+    assert "Generate candidate rootful Quadlet units" in stdout
     assert "changed=0" in stdout
 
 
@@ -133,7 +140,7 @@ def test_rootful_quadlet_rejects_invalid_generator_input(tmp_path: Path) -> None
     """Reject malformed Quadlet content before publication."""
     rendered = tmp_path / "rendered"
     entry = _entry(rendered, content="[NotAQuadletSection]\nInvalid=true\n")
-    playbook = _write_playbook(tmp_path, rendered, entry)
+    playbook = _write_playbook(tmp_path, rendered, entry, validate_native_graph=True)
 
     code, _stdout, _stderr = _run_playbook(tmp_path / "invalid", playbook)
 

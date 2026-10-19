@@ -153,10 +153,13 @@ class TestBootstrapPreflight:
         """Document one exact non-polled proof with complete accept and reject boundaries."""
         guide = BOOTSTRAP_GUIDE.read_text(encoding="utf-8")
 
-        assert "candidate_branch=review/phase-5.2" in guide
+        assert "candidate_branch=review/phase-6-deimos" in guide
         assert 'ABHAILE_BRANCH="$candidate_branch"' in guide
         assert "establish_last_successful(Path(sys.argv[1]), sys.argv[2])" in guide
         assert guide.index("abhaile-apply") < guide.index("establish_last_successful")
+        assert '--force-with-lease="refs/heads/main:${legacy_revision}"' in guide
+        assert 'git branch --force main "$candidate_revision"' in guide
+        assert 'git merge --ff-only "$candidate_revision"' not in guide
         assert 'git rev-parse refs/remotes/origin/main)" = "$candidate_revision"' in guide
         rejection = guide.index("If cutover is refused")
         disable_restore = guide.index(
@@ -250,10 +253,15 @@ class TestBootstrapPreflight:
         assert "User ${ABHAILE_USER} has shell=" in script
 
     def test_deploy_key_is_mandatory_for_repo_access(self) -> None:
-        """Bootstrap does not advertise an unimplemented repo-token fallback."""
+        """Bootstrap requires the dedicated key and pre-pinned Git host identity."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         assert "repo-bootstrap" not in script
         assert "Deploy key missing" in script
+        assert 'readonly KNOWN_HOSTS_PATH="/home/abhaile/.ssh/known_hosts"' in script
+        assert "Pinned Git host keys missing" in script
+        assert "StrictHostKeyChecking=yes" in script
+        assert "UserKnownHostsFile=${KNOWN_HOSTS_PATH}" in script
+        assert "StrictHostKeyChecking=accept-new" not in script
 
     def test_secret_id_handoff_requires_input(self) -> None:
         """SecretID handoff acquisition fails without any credential source."""
@@ -434,9 +442,7 @@ def test_network_restore_required_by_creates_effective_networkd_dependency(
         text=True,
         env={
             **os.environ,
-            "SYSTEMD_UNIT_PATH": (
-                f"{etc_units}:/etc/systemd/system:/usr/lib/systemd/system:/lib/systemd/system"
-            ),
+            "SYSTEMD_UNIT_PATH": f"{etc_units}:",
         },
     )
     assert verified.returncode == 0, verified.stdout + verified.stderr

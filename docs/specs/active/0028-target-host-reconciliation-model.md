@@ -8,7 +8,7 @@ title: Target Host Reconciliation Model
 status: active
 owner: moonpie
 created: 2026-09-04
-updated: 2026-10-18
+updated: 2026-10-19
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -105,6 +105,13 @@ Roles consume entries already selected from the complete manifest. They may use 
 validators such as `visudo`, `systemd-analyze`, and the Podman system generator. They do not
 interpret arbitrary commands or operations. A custom module requires evidence that built-ins and
 fixed commands cannot provide a necessary safety property.
+
+Rootful unit validation treats ordinary systemd units and units generated from rootful Quadlets as
+one dependency graph. A disposable preflight stages the complete desired ordinary-unit and
+Quadlet inputs, runs the installed Podman system generator into disposable output directories,
+and gives those outputs plus the ordinary units to `systemd-analyze verify`. Family roles retain
+their publication and lifecycle responsibilities; they do not repeat isolated validators that
+cannot resolve cross-family dependencies.
 
 Rootful and named-user resources retain separate systemd managers and Podman contexts. Required
 handlers complete synchronously and pass bounded local readiness checks. Runtime secrets remain
@@ -283,6 +290,24 @@ apply is retained if the replacement fails that gate.
 
 ## Decision Notes
 
+- 2026-10-19: Legacy `--dry-run-validations` verifies changed systemd units by unit name against
+  the complete rendered desired unit set prepended to systemd's normal manager-specific unit load
+  path. It does not construct an empty alternate operating-system root or copy selected executable
+  dependencies into one. The former model failed closed first on an absent runner executable and
+  then on standard `sysinit.target`, proving that dependency-by-dependency staging was incomplete.
+  The replacement retains native executable and installed-unit checks against the real host,
+  includes unchanged desired peer units, preserves separate system and named-user contexts, and
+  leaves publication untouched. Accepted Spec 0009 remains the deployed legacy reference until
+  this active migration spec is accepted; its per-source validation description is not authority
+  for the migration implementation.
+- 2026-10-19: The one-time migration candidate intentionally replaces already-pushed Phase 1-4
+  history and is therefore not a descendant of the deployed legacy revision. Existing-host proof
+  binds exact reviewed legacy and candidate SHAs while scheduling is stopped; it does not weaken
+  the routine runner's fast-forward-only rule. After successful proof and separate cutover
+  approval, an administrator write credential promotes the exact candidate with
+  `--force-with-lease` bound to the observed legacy remote tip, verifies the remote result, and
+  explicitly aligns the stopped host's local `main`. The read-only host deploy key is not granted
+  promotion authority. Refusal before promotion leaves the polled branch at the legacy revision.
 - 2026-10-18: Final Phase 5.2 review preserved the interrupted candidate marker throughout
   last-successful recovery and clears it only after successful recovery, so interruption during
   recovery retains candidate-only cleanup authority. The pre-networkd no-op path now admits state

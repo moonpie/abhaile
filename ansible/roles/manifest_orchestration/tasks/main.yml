@@ -208,6 +208,12 @@
   ansible.builtin.include_role:
     name: managed_directories
   when: abhaile_directory_entries | length > 0
+- name: Validate the complete rootful unit graph
+  ansible.builtin.include_role:
+    name: rootful_unit_preflight
+  when: >-
+    abhaile_rootful_systemd_entries | selectattr('kind', 'in', ['systemd.unit', 'systemd.dropin']) | list | length
+    > 0 or abhaile_rootful_quadlet_entries | length > 0
 - name: Converge rootful systemd and resolved files
   ansible.builtin.include_role:
     name: rootful_systemd

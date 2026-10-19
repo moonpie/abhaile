@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from abhaile.cli.render import load_and_validate, render_host
+from abhaile.apply.dispatch import _run_dry_run_validations
 from abhaile.models.kinds import ALL_KINDS
 from abhaile.plan.diff import plan_manifest_drift
 from abhaile.utils.config import clear_config_cache
+from abhaile.utils.errors import ApplyError
 from abhaile.utils.paths import load_paths
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
@@ -426,6 +429,60 @@ class TestRenderApplyE2E:
                 "activation_mode": "start",
                 "enable_mode": "enable",
             }
+
+        if shutil.which("systemd-analyze") is None:
+            pytest.skip("systemd-analyze is required for recovery-unit validation")
+        validation_root = tmp_path / "systemd-validation"
+        validation_entries: list[dict[str, Any]] = []
+        for target in (
+            "/etc/systemd/system/abhaile-network-restore.service",
+            "/etc/systemd/system/abhaile-runner.service",
+        ):
+            original = deimos_entries[target]
+            source = manifests["deimos"].parent / original["render_path"]
+            relative = Path(original["render_path"])
+            staged = validation_root / relative
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            staged.write_text(
+                source.read_text(encoding="utf-8").replace(
+                    "/opt/abhaile/scripts/abhaile-runner", "/bin/true"
+                ),
+                encoding="utf-8",
+            )
+            validation_entries.append(dict(original))
+        validation_results = _run_dry_run_validations(
+            validation_root,
+            validation_entries,
+            desired_entries=validation_entries,
+        )
+        assert validation_results == [
+            {
+                "target_path": "/etc/systemd/system/abhaile-network-restore.service",
+                "kind": "systemd.unit",
+                "success": True,
+                "return_code": 0,
+            },
+            {
+                "target_path": "/etc/systemd/system/abhaile-runner.service",
+                "kind": "systemd.unit",
+                "success": True,
+                "return_code": 0,
+            },
+        ]
+        runner_entry = deimos_entries["/etc/systemd/system/abhaile-runner.service"]
+        runner_source = validation_root / runner_entry["render_path"]
+        runner_source.write_text(
+            runner_source.read_text(encoding="utf-8").replace(
+                "/bin/true", "/definitely/missing/abhaile-runner"
+            ),
+            encoding="utf-8",
+        )
+        with pytest.raises(ApplyError, match="Command failed.*abhaile-runner.service"):
+            _run_dry_run_validations(
+                validation_root,
+                [runner_entry],
+                desired_entries=validation_entries,
+            )
 
         assert phobos_entries["/etc/systemd/system/abhaile-vault-unseal.service"][
             "apply_hints"
