@@ -90,9 +90,7 @@ def _run_runner(
     env["ABHAILE_REMOTE"] = "origin"
     env["ABHAILE_PYTHON"] = sys.executable
     source_root = RUNNER_SCRIPT.parents[1] / "src"
-    env["PYTHONPATH"] = os.pathsep.join(
-        value for value in (str(source_root), env.get("PYTHONPATH", "")) if value
-    )
+    env["ABHAILE_SRC"] = str(source_root)
     if env_overrides:
         env.update(env_overrides)
     return subprocess.run(
@@ -319,6 +317,8 @@ class TestRunnerExitCodes:
         script = RUNNER_SCRIPT.read_text(encoding="utf-8")
         assert 'readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"' in script
         assert 'readonly ABHAILE_PYTHON="${ABHAILE_PYTHON:-${ABHAILE_VENV_BIN}/python}"' in script
+        assert 'readonly ABHAILE_SRC="${ABHAILE_SRC:-${PWD}/src}"' in script
+        assert 'export PYTHONPATH="${ABHAILE_SRC}${PYTHONPATH:+:${PYTHONPATH}}"' in script
         assert 'readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"' in script
         assert (
             'readonly ABHAILE_ANSIBLE_PLAYBOOK="${ABHAILE_ANSIBLE_PLAYBOOK:-/usr/bin/ansible-playbook}"'

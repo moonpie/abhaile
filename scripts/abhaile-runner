@@ -9,6 +9,7 @@ readonly ABHAILE_REMOTE="${ABHAILE_REMOTE:-origin}"
 readonly ABHAILE_OUTPUT="${ABHAILE_OUTPUT:-/var/lib/abhaile}"
 readonly ABHAILE_VENV_BIN="${ABHAILE_VENV_BIN:-${PWD}/.venv/bin}"
 readonly ABHAILE_PYTHON="${ABHAILE_PYTHON:-${ABHAILE_VENV_BIN}/python}"
+readonly ABHAILE_SRC="${ABHAILE_SRC:-${PWD}/src}"
 readonly ABHAILE_GIT_SSH_KEY="${ABHAILE_GIT_SSH_KEY:-/home/abhaile/.ssh/gitops_ed25519}"
 readonly ABHAILE_GIT_KNOWN_HOSTS="${ABHAILE_GIT_KNOWN_HOSTS:-/home/abhaile/.ssh/known_hosts}"
 ABHAILE_VERBOSE="${ABHAILE_VERBOSE:-0}"
@@ -29,6 +30,8 @@ RUN_STARTED_SECONDS=""
 CURRENT_PHASE="start"
 RECOVERED_LAST_SUCCESSFUL=0
 RUN_CONTEXT_DIR=""
+
+export PYTHONPATH="${ABHAILE_SRC}${PYTHONPATH:+:${PYTHONPATH}}"
 
 log() { printf '[abhaile-runner] %s\n' "$*"; }
 die() { log "FATAL: $*"; exit 1; }
