@@ -42,7 +42,6 @@ def tmp_repo():
             "hosts_subdir = hosts\n"
             "services_subdir = services\n"
             "rendered_dir_name = rendered\n"
-            "state_dir_name = state\n"
             "system_dir_name = system\n"
             "software_dir_name = software\n"
             "users_dir_name = users\n"

@@ -133,7 +133,7 @@ def test_real_ansible_loader_and_syntax_are_closed(
             "-i",
             "localhost,",
             "--connection=local",
-            str(REPO_ROOT / "ansible/playbooks/converge.yml"),
+            str(REPO_ROOT / "ansible/playbooks/reconcile.yml"),
         ],
         environment,
     )

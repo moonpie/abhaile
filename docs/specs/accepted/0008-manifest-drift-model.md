@@ -23,6 +23,10 @@ scope:
 
 ## Context
 
+> Historical implementation record: active Spec 0028 and ADR 0013 replaced the applied-manifest,
+> diff CLI, and Python mutation contracts described below. Manifest v1 remains the rendered
+> inventory, while current drift repair and recovery use Ansible plus `last-successful-commit`.
+
 The manifest and drift model is implemented and is part of the current render,
 diff, and apply workflow. This accepted spec records the implemented contracts
 so future work can treat them as reference behavior rather than rediscovering

@@ -180,7 +180,7 @@ def _prepare_successful_runner(repo: Path) -> dict[str, str]:
             "#!/usr/bin/env bash\n"
             "set -euo pipefail\n"
             "mkdir -p .venv/bin\n"
-            "for cmd in abhaile-render abhaile-apply abhaile-diff abhaile-inventory abhaile-health; do\n"
+            "for cmd in abhaile-render abhaile-inventory abhaile-health; do\n"
             "  :\n"
             "done\n"
         ),

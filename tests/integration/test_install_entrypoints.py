@@ -17,8 +17,6 @@ RUNNER_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "abhaile-runne
 
 ENTRYPOINTS: dict[str, str] = {
     "abhaile-render": "abhaile.cli.render",
-    "abhaile-apply": "abhaile.cli.apply",
-    "abhaile-diff": "abhaile.cli.diff",
     "abhaile-inventory": "abhaile.cli.inventory",
     "abhaile-health": "abhaile.cli.health",
 }
@@ -123,7 +121,7 @@ class TestInstallEntrypoints:
     def test_newly_added_wrapper_is_created_on_existing_host(self, installer_repo: Path) -> None:
         """Installer adds missing wrappers while keeping existing ones."""
         venv_bin = installer_repo / ".venv" / "bin"
-        for name in ("abhaile-render", "abhaile-apply"):
+        for name in ("abhaile-render", "abhaile-inventory"):
             path = venv_bin / name
             path.write_text("#!/usr/bin/env bash\nexit 0\n")
             path.chmod(0o755)
@@ -132,7 +130,26 @@ class TestInstallEntrypoints:
         assert result.returncode == 0, result.stdout + result.stderr
         assert (venv_bin / "abhaile-health").exists()
         assert (venv_bin / "abhaile-inventory").exists()
-        assert (venv_bin / "abhaile-diff").exists()
+        assert (venv_bin / "abhaile-render").exists()
+
+    def test_retired_apply_and_diff_wrappers_are_removed(self, installer_repo: Path) -> None:
+        """Remove legacy wrappers recorded by an earlier managed manifest."""
+        venv_bin = installer_repo / ".venv" / "bin"
+        for name in ("abhaile-apply", "abhaile-diff"):
+            wrapper = venv_bin / name
+            wrapper.write_text(
+                "#!/usr/bin/env bash\n# managed-by: abhaile-entrypoints-v1\nexit 0\n"
+            )
+            wrapper.chmod(0o755)
+        (venv_bin / ".abhaile-managed-entrypoints").write_text(
+            "abhaile-render\nabhaile-apply\nabhaile-diff\n"
+        )
+
+        result = _run_installer(installer_repo)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (venv_bin / "abhaile-apply").exists()
+        assert not (venv_bin / "abhaile-diff").exists()
 
     def test_obsolete_managed_wrappers_are_removed(self, installer_repo: Path) -> None:
         """Installer removes obsolete wrappers listed in prior managed manifest."""

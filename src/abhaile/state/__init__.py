@@ -1,1 +1,1 @@
-"""Durable state tracking and history rotation for applied manifests."""
+"""Runner recovery state and removal identity helpers."""

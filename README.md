@@ -21,26 +21,30 @@ All intent lives in `config/`:
 ## High-Level Flow
 
 1. Render: generate host-specific configs and templates from `config/`.
-1. Apply: validate, stage, and apply changes with drift detection.
+1. Reconcile: validate and converge rendered inventory through dependency-ordered Ansible roles.
 
 ## Reconciliation
 
-Abhaile follows a reconciliation pattern: the desired state lives in git, the current state is read and compared for drift, and apply actions are idempotent. This keeps hosts converging toward the declared intent without relying on manual changes.
+Abhaile follows a reconciliation pattern: desired state lives in git and idempotent Ansible roles
+converge each host on every scheduled run. The runner records the last successful commit and uses
+it for bounded recovery after failure or interruption.
 
 ## How It Works
 
-Render transforms `config/` into host-scoped artifacts. Apply compares them against live state using SHA-256 drift detection and reconciles atomically. See [Architecture](docs/ARCHITECTURE.md) for diagrams and detail.
+Render transforms `config/` into host-scoped artifacts. Ansible validates the manifest and live
+targets, converges resource families in dependency order, and runs bounded local acceptance. See
+[Architecture](docs/ARCHITECTURE.md) for diagrams and detail.
 
 Key rules:
 
 - No secrets in git or rendered output — see [Secrets](docs/reference/secrets.md)
 - Environment paths are configurable — see [ADR 0001](docs/adr/0001-output-root-and-environment-paths.md)
-- State is apply-owned, updated only after success — see [ADR 0002](docs/adr/0002-hash-based-drift-detection-and-state-model.md)
+- Reconciliation authority advances only after success — see [ADR 0013](docs/adr/0013-last-successful-ansible-reconciliation.md)
 
 ## Design Principles
 
-- Unprivileged render phase; privileged apply phase
-- Atomic apply with validation and rollback safety
+- Unprivileged render phase; privileged Ansible reconciliation
+- Validation before publication and last-successful recovery for supported effects
 - Deterministic `/32` service addressing (ipvlan-l2)
 - Split-horizon DNS for internal vs external resolution
 - Secrets boundary between bootstrap (encrypted) and runtime (templated)
@@ -61,7 +65,7 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
 
 ## Repository Layout
 
-- `src/abhaile/` - Python package implementation (CLI, renderers, validation, DNS, apply planning)
+- `src/abhaile/` - Python package implementation (CLI, renderers, validation, DNS, runner state)
 - `config/` - authoritative intent (source of truth)
   - `mapping.yaml` - service-to-host assignments
   - `network.yaml` - VLANs, addresses, DNS zones/records
@@ -76,16 +80,16 @@ Runtime dependencies live in requirements.txt. Development tooling lives in requ
   - `runbooks/` - operational and recovery procedures
 - `scripts/` - executable shell utilities/wrappers
 - `paths.ini` - project-wide tooling path configuration
-- `out/` - generated artifacts and state (disposable, not source of truth)
+- `out/` - generated artifacts and runner state (not source of truth)
   - `rendered/` - ephemeral desired-state artifacts (overwritten on each render)
-  - `state/` - persistent metadata (manifests, commit tracking)
+  - `runner/` - recovery authority and diagnostic records
 - `policies/` - Vault policies for secret management
 
 ## CLI Entrypoints
 
 - `abhaile-render` (`abhaile.cli.render:main`) — render desired artifacts (`--host` or `--all`, optional `--output`)
-- `abhaile-diff` (`abhaile.cli.diff:main`) — read-only desired vs applied drift summary
-- `abhaile-apply` (`abhaile.cli.apply:main`) — reconcile desired state with dry-run and prune safety gates
+- `abhaile-inventory` (`abhaile.cli.inventory:main`) — report configured host/service inventory
+- `abhaile-health` (`abhaile.cli.health:main`) — run bounded local or optional cluster checks
 
 ## Operator Make Targets
 
@@ -96,15 +100,16 @@ make render
 make render-host HOST=phobos
 make validate
 make validate-host HOST=phobos
-make apply HOST=phobos
+make check HOST=phobos
 ```
 
 - `make render` renders all hosts only.
 - `make render-host HOST=x` renders one host only.
-- `make validate` renders all hosts, then dry-run applies `phobos` and `deimos`.
-- `make validate-host HOST=x` renders one host, then dry-run applies that host.
-- `make apply HOST=x` remains the host-scoped render plus dry-run apply workflow.
-- `ALLOW_HOST_MISMATCH=1` adds only `--allow-host-mismatch` to dry-run apply commands and prints a dry-run-only override notice.
+- `make validate` renders all hosts and syntax-checks the reconciliation playbook without
+  impersonating either host.
+- `make validate-host HOST=x` renders one host, then runs host-local Ansible check mode; run it on
+  that host.
+- `make check HOST=x` is the equivalent explicit host-scoped workflow.
 
 **Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 

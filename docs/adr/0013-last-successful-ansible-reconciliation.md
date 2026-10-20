@@ -4,6 +4,9 @@
 
 2026-10-08: Accepted
 
+2026-10-20: Implemented on both hosts; the legacy Python mutation backend and applied-manifest
+history were retired during Phase 8. Fresh bootstrap now uses the same Ansible check/live path.
+
 Supersedes ADR 0012.
 
 ## Context
@@ -28,10 +31,11 @@ outside the migration's intended scope.
   original command-oriented content and remain future-facing render input.
 - `rendered/software/` remains deterministic but is not applied in this migration.
 - The existing `manifest.json` is the sole inventory for resource families already managed by the
-  legacy apply path. Manifest v2, typed software operations, and the generic operation compiler are
+  deployed resource inventory. Manifest v2, typed software operations, and the generic operation compiler are
   removed.
-- Rendering remains unprivileged and deterministic. Apply remains privileged, validated, atomic
-  where the resource family permits it, dry-run by default, and explicitly authorized for mutation.
+- Rendering remains unprivileged and deterministic. Ansible check mode is non-mutating; live
+  reconciliation is privileged, validated, and explicitly authorized. Atomicity and recovery are
+  claimed only where the resource family permits them.
 
 ### Reconciliation state and flow
 

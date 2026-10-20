@@ -15,7 +15,6 @@ REQUIRED_PATH_KEYS = {
     "hosts_subdir",
     "services_subdir",
     "rendered_dir_name",
-    "state_dir_name",
     "system_dir_name",
     "software_dir_name",
     "users_dir_name",
@@ -89,7 +88,7 @@ def resolve_output_root(
 ) -> Path:
     """Resolve output root per ADR 0001.
 
-    The output root is the parent directory of rendered/ and state/ subdirectories.
+    The output root is the parent directory of the rendered/ subdirectory.
 
     Args:
         host: Host name.

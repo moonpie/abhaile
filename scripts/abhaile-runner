@@ -271,7 +271,7 @@ import json
 from pathlib import Path
 import sys
 
-from abhaile.plan.diff import classify_manifest_removals
+from abhaile.state.removals import classify_manifest_removals
 
 host, rendered_root, config_root, destination, desired, removal_source, cleanup_scope = sys.argv[1:]
 cleanup = []

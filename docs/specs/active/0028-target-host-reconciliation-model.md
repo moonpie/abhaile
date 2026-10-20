@@ -32,9 +32,8 @@ locally. This migration replaces the legacy Python mutation backend with convent
 does not create a second release, trust, transaction, or configuration-management platform.
 
 The existing account, clone, credentials, virtual environment, runner service and timer, host
-lock, bootstrap path, and privilege model remain in place during migration. The legacy apply path
-remains authoritative until the replacement proves parity on a disposable Debian VM and is
-explicitly cut over.
+lock, bootstrap path, and privilege model remained in place during migration. Both hosts have now
+cut over to the replacement after disposable-VM and production proof.
 
 ```text
 trusted desired commit in the existing clone
@@ -79,7 +78,7 @@ migration.
 Rendering runs unprivileged from the selected trusted commit. It is deterministic and does not
 depend on timestamps, ambient Git state, the current date, network access, or other external state.
 `out/rendered/<host>/manifest.json` is the sole inventory for resource families managed by the
-legacy apply path. `rendered/software/` remains deterministic output but is excluded from the
+deployed resource inventory. `rendered/software/` remains deterministic output but is excluded from the
 manifest and Ansible convergence.
 
 Each selected manifest file entry binds a relative render path, absolute target path, artifact
@@ -224,8 +223,9 @@ does not add a second installed execution platform to repair it automatically.
 
 ## Migration and Proof
 
-Apply remains dry-run by default and live mutation remains explicitly authorized. During Phase
-5.2, `ansible/playbooks/converge.yml` stays fail-closed and legacy Python apply stays authoritative.
+Ansible check mode remains non-mutating and live mutation remains explicitly authorized. During
+Phase 5.2, the replacement stayed fail-closed until its proof gates passed. That migration-only
+quarantine playbook and the legacy mutation backend are now removed.
 
 Direct roles are tested in isolation and on a disposable Debian 13 VM before receiving a production
 caller. VM evidence covers drift repair, candidate success, apply and health failure recovery,
@@ -293,6 +293,15 @@ apply is retained if the replacement fails that gate.
 
 ## Decision Notes
 
+- 2026-10-20: Phase 8 repository cleanup removed the legacy Python executor package, apply/diff
+  entrypoints, applied-manifest history, unused quarantine playbook, and unused migration roles.
+  The runner's exact-identity removal classifier moved to `state/removals.py`. Fresh bootstrap now
+  renders, runs Ansible check mode, performs an explicitly authorized live reconciliation, and only
+  then establishes the first last-successful baseline. The unrestricted automation-account model
+  and five-minute timer are intentionally retained; access-policy redesign and alternative
+  scheduling remain separate future decisions. Live-host artifact removal remains separately
+  approval-gated.
+
 - 2026-10-20: Both production hosts now use Ansible reconciliation at exact revision
   `19e113c60f89770706ec2a87069187d41908bd34`. Phobos separately proved its physical/VLAN/ipvlan
   network, Coral TPU, Vault and Vault Agent, CoreDNS, Caddy, Authelia and Omada pods, reboot,
@@ -305,6 +314,7 @@ apply is retained if the replacement fails that gate.
   destructively on Phobos; host-specific Phobos boot and network behavior was proven separately.
   The five-minute full-reconciliation cadence remains intentionally deployed on both hosts, with
   alternative scheduling or execution approaches deferred to Phase 8 review.
+
 - 2026-10-19: Legacy `--dry-run-validations` verifies changed systemd units by unit name against
   the complete rendered desired unit set prepended to systemd's normal manager-specific unit load
   path. It does not construct an empty alternate operating-system root or copy selected executable
@@ -315,6 +325,7 @@ apply is retained if the replacement fails that gate.
   leaves publication untouched. Accepted Spec 0009 remains the deployed legacy reference until
   this active migration spec is accepted; its per-source validation description is not authority
   for the migration implementation.
+
 - 2026-10-19: The one-time migration candidate intentionally replaces already-pushed Phase 1-4
   history and is therefore not a descendant of the deployed legacy revision. Existing-host proof
   binds exact reviewed legacy and candidate SHAs while scheduling is stopped; it does not weaken
@@ -323,49 +334,62 @@ apply is retained if the replacement fails that gate.
   `--force-with-lease` bound to the observed legacy remote tip, verifies the remote result, and
   explicitly aligns the stopped host's local `main`. The read-only host deploy key is not granted
   promotion authority. Refusal before promotion leaves the polled branch at the legacy revision.
+
 - 2026-10-18: Final Phase 5.2 review preserved the interrupted candidate marker throughout
   last-successful recovery and clears it only after successful recovery, so interruption during
   recovery retains candidate-only cleanup authority. The pre-networkd no-op path now admits state
   with fixed shell checks before Python, Git, rendering, or Ansible. Fresh bootstrap and explicit
   existing-host adoption enable and verify the restore unit's effective networkd dependency only
   after a valid last-successful baseline exists.
+
 - 2026-10-18: Existing-host proof uses an exact non-polled candidate under the shared lock while
   production scheduling remains stopped. An approved legacy apply establishes the candidate state
   before its exact SHA-only recovery baseline, recovery installation, network adoption, and direct
   Ansible proof. Acceptance promotes only that proven SHA; rejection restores exact legacy files,
   baseline, branch, units, and boot-network authority. Architect, SysAdmin, and Code Reviewer
   approved the resulting Phase 5.2 design and implementation with no remaining must-fix finding.
+
 - 2026-10-08: ADR 0013 replaced the protected-bundle and accepted/pending/rejected design with the
   existing runner, last-successful commit, one mutation marker, and failed-target.
+
 - 2026-10-10: Host identity and access artifacts remain bootstrap/adoption-owned foundations;
   ordinary reconciliation validates their fixed inventory but does not mutate them.
+
 - 2026-10-10: Successful explicit bootstrap apply establishes the initial last-successful commit;
   routine runner execution continues to fail closed without that baseline.
+
 - 2026-10-10: Candidate-only rootful Quadlet files receive bounded lifecycle cleanup, while known
   inactive directories/files and irreversible Podman/build effects may remain honest residue.
+
 - 2026-10-10: Disposable-VM proof rejected ICMP response from the canonical gateway as a portable
   health invariant: Hyper-V provided a valid route and reachable neighbour while its gateway
   refused ICMP and external connectivity remained healthy. Phase 5.2 must select one bounded
   canonical management-path check without recreating configurable probe machinery.
+
 - 2026-10-10: Disposable-VM recovery proved that last-successful reconciliation executes the
   retained revision's implementation as well as its desired state. Installation and cutover must
   therefore prove that the boot/runtime reader can execute every retained recovery revision across
   supported updates; a fix available only in a newer rejected candidate is not a recovery path.
+
 - 2026-10-10: Network promotion validates only locally controlled management-path state: the
   canonical physical interface must be online and structured route lookup must select its declared
   source for the canonical gateway. ICMP, ARP, SSH, Internet, and peer reachability remain
   diagnostics rather than promotion authority.
+
 - 2026-10-10: Pre-networkd restoration is required only when `current-run` differs from
   `last-successful-commit`; ordinary and stale-committed-marker boots must not depend on the Git
   checkout, renderer, virtual environment, or Ansible before networking starts.
+
 - 2026-10-10: Recovery-affecting implementation changes use a state-neutral N then dependent N+1
   rollout. Accepted recovery defects require operator repair rather than another installed runtime.
+
 - 2026-10-10: A disposable-VM reboot with valid static networkd files left `eth0` down because the
   legacy backend had been disabled while networkd was active but not enabled. Enabling networkd
   immediately restored the expected address and route; a second reboot returned automatically and
   proved restore-before-networkd ordering. Backend adoption is therefore an explicit one-time
   operator procedure. The recurring runner may repair an already adopted backend but must not
   autonomously replace an enabled legacy backend.
+
 - 2026-10-11: Disposable-VM execution found that adoption initially reused change-triggered local
   acceptance and therefore skipped management-path checks when the network file was already
   correct. Explicit adoption now requires those checks independently of file drift. Candidate-bound
@@ -374,6 +398,7 @@ apply is retained if the replacement fails that gate.
   invalid source failed while retaining legacy enablement; a second live run was idempotent; and
   reboot returned automatically with restore-before-networkd ordering. VM-local revision
   `c4daabe` then reconciled unchanged and became last-successful before later dependence.
+
 - 2026-10-11: With `c4daabe` retained as last-successful, disposable candidate `4c03693` supplied
   distinct live network bytes and an interruption marker across reboot. The early runner restored
   the accepted bytes before networkd started, while ordinary reconciliation subsequently cleared
@@ -381,11 +406,13 @@ apply is retained if the replacement fails that gate.
   first exercised the fail-closed console-repair path; real runner records remain owned by
   `abhaile`. Review of the completed flow removed an unnecessary second reconciliation when fetch
   selects the revision already reconciled during startup recovery.
+
 - 2026-10-11: Disposable candidate `e342db8` added one inert candidate-only `.network` file.
   Early recovery classified its live identity against the retained candidate manifest, rechecked
   the exact hash immediately before removal, removed only that file in check/live proof, and did
   not invoke networkd. The VM remained on accepted `c4daabe`; focused repository tests, rather than
   the installed older runner, prove the subsequent duplicate-reconciliation optimization.
+
 - 2026-10-12: A malformed disposable-VM `current-run` record made the enabled early restore
   oneshot fail with a concise domain error before Ansible while networkd remained active. Removing
   exactly the proof record restored a successful no-op. Focused integration coverage applies the
@@ -393,11 +420,13 @@ apply is retained if the replacement fails that gate.
   removed only a protected backup of last-successful while preserving a valid interruption marker:
   restore failed without mutation, retained the marker, created no authority, and left networkd
   active. Exact restoration removed all proof state and returned the oneshot to success.
+
 - 2026-10-12: A disposable-VM runner invocation named a nonexistent remote without changing clone
   configuration. Fetch failed as intended, after which the runner rendered retained `c4daabe` from
   local Git objects and completed real Ansible check/live reconciliation unchanged. It returned
   success with last-successful unchanged, no current-run or failed-target, an active network, and a
   clean checkout.
+
 - 2026-10-13: Check mode against the complete real Deimos manifest on the otherwise minimal proof
   host stopped before publication because native systemd validation could not resolve the generated
   `coredns-omada-build.service` or the installed `/usr/local/bin/coredns` output. Those are existing-
@@ -405,6 +434,7 @@ apply is retained if the replacement fails that gate.
   The run left no managed files, validation scratch, runner records, or network impact. Phase 6
   assessment must verify them before Deimos cutover; representative family proofs may install only
   explicit disposable fixtures and must not broaden the recurring runner into bootstrap.
+
 - 2026-10-13: Review of the same blank-host boundary found that a new manifest-managed directory
   remained absent during check mode, causing a later built-in `copy` to fail before the live run
   that would create it. Ordinary service and Vault roles receive only the exact declared directory
@@ -417,6 +447,7 @@ apply is retained if the replacement fails that gate.
   Disposable-VM check mode subsequently passed both the real Deimos managed-build projection
   (`changed=1`) and complete Vault projection (`ok=48 changed=4 failed=0`), including the installed
   rootless Quadlet generator, without publication or runtime activation.
+
 - 2026-10-13: Isolated live rootful and Vault-owned rootless Quadlets on Debian 13 passed check,
   first, unchanged, and stopped-unit repair runs against the installed Podman generators and real
   system/user managers. Exact-hash rootful candidate cleanup left systemd's removed generated unit
@@ -424,9 +455,11 @@ apply is retained if the replacement fails that gate.
   after daemon reload; a cleanup retry was `changed=0` and left the unit
   `not-found/inactive/dead`. Rootless cleanup remains outside ordinary reconciliation as designed.
   Both Podman stores, all proof paths, units, containers, images, and scratch were then clean.
+
 - 2026-10-13: A real rendered Deimos inventory invoked with expected host `phobos` exited before
   family selection with `changed=0`; only input validation, manifest loading, and the host-envelope
   assertion ran. Wrong-host inventory therefore cannot reach native validators or mutation roles.
+
 - 2026-10-13: The runner intentionally records no execution phase between mutation-marker
   publication and success commit. A strengthened recovery test seeds candidate-managed effects
   with `current-run=candidate` and `last-successful=old`, then proves startup restores only old
@@ -434,6 +467,7 @@ apply is retained if the replacement fails that gate.
   state covers interruption during publication, after mutation, and after family readiness. The
   complementary matching-marker test covers interruption after last-successful advancement and
   before marker cleanup.
+
 - 2026-10-13: Disposable Caddy proof showed that Ansible check mode skipped the role's read-only
   installed-container and native candidate-validation commands; they now use explicit
   `check_mode: false`. It also proved that atomic replacement of a single-file bind mount leaves
@@ -447,6 +481,7 @@ apply is retained if the replacement fails that gate.
   reload, resets only units that remain `failed`, and skips missing units that are already
   `inactive`. This avoids treating systemd's generic status `1` for an unloaded unit as proof that
   no genuine failed-state residue exists elsewhere in the same cleanup batch.
+
 - 2026-10-13: Isolated CoreDNS proof on Debian 13 passed non-mutating check mode, first live
   publication, unchanged reconciliation, and zone-only reload through the real system manager.
   The first run changed both the Corefile and zone, restarted CoreDNS, restored its path watcher,
@@ -457,6 +492,7 @@ apply is retained if the replacement fails that gate.
   watcher shutdown or publication; the live hash, DNS answer, service, and watcher were unchanged.
   The disposable units, configuration, extracted validator/runtime binary, container image,
   listener, and proof bundles were then removed and verified absent.
+
 - 2026-10-13: An isolated rootful Quadlet managed-build fixture on Debian 13 passed non-mutating
   check mode, first live build, and an unchanged `changed=0` rerun. The generated build oneshot
   completed successfully to `inactive/dead`, and an unchanged `.build` file plus a declared owner-
@@ -465,6 +501,7 @@ apply is retained if the replacement fails that gate.
   verified the resulting regular executable, advanced the image to `v3`, and left the consumer
   active. Exact teardown removed the generated unit, consumer and install fixtures, Quadlet,
   installed artifact, output and base images, containers, and proof bundle.
+
 - 2026-10-14: An isolated manual pod-member fixture on Debian 13 passed non-mutating check mode,
   first live activation through its parent pod, and an unchanged `changed=0` rerun. Changing only
   the member Quadlet restarted the unchanged parent, recreated the member container, and exposed
@@ -476,6 +513,7 @@ apply is retained if the replacement fails that gate.
   `inactive` missing units. Absent retry, residue repair, and a fresh recreate-and-cleanup cycle all
   completed successfully; final units were `not-found/inactive/dead` with `Result=success`, and all
   Quadlets, Podman objects, images, and proof files were removed.
+
 - 2026-10-15: Ordinary changed-revision reconciliation now renders last-successful once before the
   candidate and reuses the existing exact-identity removal classifier in the opposite direction.
   Supported resources present only in last-successful are passed to their existing direct cleanup
@@ -487,6 +525,7 @@ apply is retained if the replacement fails that gate.
   role, or custom module was added. Directories and Caddy candidate residue remain explicitly
   ignored only under their existing inert-residue policy; unsupported Vault/rootless, drop-in,
   persistent Podman-object, and other destructive removals remain fail-closed or maintenance-gated.
+
 - 2026-10-17: A disposable Debian 13 real-systemd proof exercised forward removal through the
   runner rather than an isolated family playbook. An accepted active oneshot was removed from the
   next revision, exact last-successful identity authorized its cleanup, and last-successful advanced
@@ -502,7 +541,9 @@ apply is retained if the replacement fails that gate.
   both fixtures and every proof namespace; both units finished `not-found/inactive` with
   `Result=success`, networkd and SSH remained active on the DHCP address, and the production runner
   retained no `current-run` marker.
+
 - 2026-10-08: Software declarations returned to Phase 0 and were deferred from this migration.
+
 - 2026-10-09: Superseded architecture text was removed instead of retained behind an authority
   note.
 

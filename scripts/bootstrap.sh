@@ -141,9 +141,7 @@ prepare_output_ownership() {
     install -d -m 0750 -o "$ABHAILE_USER" -g "$ABHAILE_GROUP" \
         "${OUTPUT_DIR}/rendered" \
         "${OUTPUT_DIR}/runner"
-    install -d -m 0750 -o root -g root "${OUTPUT_DIR}/state"
     chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}" "${OUTPUT_DIR}/rendered" "${OUTPUT_DIR}/runner"
-    chown -R root:root "${OUTPUT_DIR}/state"
 }
 
 enable_network_restore() {
@@ -579,11 +577,11 @@ print(data.get('role_id', ''), end='')
     log "Sealed Vault Agent artifact handoff OK"
 }
 
-# --- Stage 7: First Render and Apply -----------------------------------------
+# --- Stage 7: First Render and Reconciliation -------------------------------
 
 stage_render_apply() {
     local hostname="$1"
-    log "=== Stage 7: First Render and Apply ==="
+    log "=== Stage 7: First Render and Reconciliation ==="
 
     cd "$REPO_DIR"
     export PATH="${REPO_DIR}/.venv/bin:${PATH}"
@@ -621,11 +619,28 @@ stage_render_apply() {
     run_as_abhaile "${REPO_DIR}/.venv/bin/abhaile-render" --host "$hostname" \
         --output "$OUTPUT_DIR"
 
-    # Apply
-    log "Running abhaile-apply (live)"
-    "${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname" --output "$OUTPUT_DIR"
+    # Check the complete desired state before crossing the first mutation boundary, then invoke
+    # the same explicitly authorized Ansible playbook used by routine reconciliation.
+    local ansible_vars ansible_live_vars
+    ansible_vars=$(printf \
+        '{"abhaile_rendered_root":"%s/rendered","abhaile_config_root":"%s/config","abhaile_expected_host":"%s"}' \
+        "$OUTPUT_DIR" "$REPO_DIR" "$hostname")
+    ansible_live_vars=$(printf \
+        '{"abhaile_rendered_root":"%s/rendered","abhaile_config_root":"%s/config","abhaile_expected_host":"%s","abhaile_live_apply":true}' \
+        "$OUTPUT_DIR" "$REPO_DIR" "$hostname")
+    log "Running initial Ansible reconciliation check"
+    ANSIBLE_CONFIG="${REPO_DIR}/ansible/ansible.cfg" /usr/bin/ansible-playbook \
+        -i localhost, --connection=local --check \
+        --extra-vars "$ansible_vars" \
+        "${REPO_DIR}/ansible/playbooks/reconcile.yml"
 
-    # The explicit bootstrap apply is the enrollment commit boundary. Ordinary runner execution
+    log "Running initial Ansible reconciliation (live)"
+    ANSIBLE_CONFIG="${REPO_DIR}/ansible/ansible.cfg" /usr/bin/ansible-playbook \
+        -i localhost, --connection=local \
+        --extra-vars "$ansible_live_vars" \
+        "${REPO_DIR}/ansible/playbooks/reconcile.yml"
+
+    # The explicit bootstrap reconciliation is the enrollment commit boundary. Ordinary runner execution
     # must never invent this first recovery baseline for itself.
     local enrolled_sha
     enrolled_sha=$(run_as_abhaile git -C "$REPO_DIR" rev-parse HEAD)
@@ -665,7 +680,7 @@ establish_last_successful(Path(sys.argv[1]), sys.argv[2])
         log "Runner will handle convergence on next run"
     fi
 
-    log "Render and apply OK"
+    log "Render and reconciliation OK"
 }
 
 # --- Stage 8: GitOps Runner Registration -------------------------------------

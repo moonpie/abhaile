@@ -8,7 +8,7 @@ title: Network Device Configuration
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-07-28
+updated: 2026-10-20
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -21,6 +21,10 @@ scope:
 ```
 
 ## Context
+
+> **Reconciliation drift note (2026-10-20):** This proposal predates ADR 0013 and the retirement of
+> apply-owned `out/state/`. Before activation, its write and state-safety language must be rebased
+> onto the Ansible reconciliation and runner recovery model.
 
 Phase 4 covers the network infrastructure managed via Omada Controller — the
 ER605 gateway, managed switches (SG2218, SG2016P, SG2008P), and four EAP653

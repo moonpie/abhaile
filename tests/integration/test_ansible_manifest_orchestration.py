@@ -428,6 +428,3 @@ def test_manifest_orchestration_uses_fixed_dependency_order() -> None:
         "networkd_config",
         "local_acceptance",
     ]
-    converge = Path("ansible/playbooks/converge.yml").read_text(encoding="utf-8")
-    assert "manifest_orchestration" not in converge
-    assert "Refuse host mutation" in converge

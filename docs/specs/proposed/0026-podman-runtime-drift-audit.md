@@ -8,7 +8,7 @@ title: Podman Runtime Drift Audit
 status: proposed
 owner: moonpie
 created: 2026-06-25
-updated: 2026-06-25
+updated: 2026-10-20
 related_adrs:
   - 0004-apply-execution-model
   - 0005-service-authoring-model
@@ -20,6 +20,11 @@ scope:
 ```
 
 ## Context
+
+> **Reconciliation drift note (2026-10-20):** This proposal is not implementation-ready. It
+> predates ADR 0013 and repeatedly assumes the retired `abhaile-apply` file-manifest engine. Before
+> activation, its audit and remediation design must be rebased onto Ansible reconciliation, owner
+> orchestration, and runner recovery records without restoring the removed Python mutation path.
 
 During clean-room bootstrap and post-reboot recovery, phobos exposed a runtime drift class that the
 file-manifest apply model does not fully detect. The rendered Authelia quadlet volume file correctly

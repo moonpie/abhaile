@@ -8,7 +8,7 @@ title: CI and Dependency Automation
 status: proposed
 owner: moonpie
 created: 2026-06-21
-updated: 2026-06-21
+updated: 2026-10-20
 related_adrs: []
 supersedes: null
 superseded_by: null
@@ -18,6 +18,10 @@ scope:
 ```
 
 ## Context
+
+> **Reconciliation drift note (2026-10-20):** This proposal predates ADR 0013 and the retirement of
+> the standalone Python apply/state-history commands. Before activation, CI prohibitions and
+> validation examples must refer to Ansible check-mode reconciliation and runner recovery state.
 
 Abhaile currently has strong local validation commands, but no repository-level
 CI workflow and no dependency update automation. Local checks include

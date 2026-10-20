@@ -196,13 +196,9 @@ systemctl restart systemd-networkd
    ```bash
    cd /opt/abhaile
    sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
-   sudo -H -u abhaile env HOME=/home/abhaile \
-     /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-   sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
+   sudo systemctl start abhaile-runner.service
+   systemctl status abhaile-runner.service --no-pager
    ```
-
-1. If dry-run looks clean, live apply:
-   `sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile`
 
 1. Re-enable timer: `systemctl start abhaile-runner.timer`
 
@@ -273,9 +269,8 @@ systemctl restart systemd-networkd
    sudo -H -u abhaile env HOME=/home/abhaile git fetch origin main
    sudo -H -u abhaile env HOME=/home/abhaile git checkout main
    sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
-   sudo -H -u abhaile env HOME=/home/abhaile \
-     /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-   sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
+   sudo systemctl start abhaile-runner.service
+   systemctl status abhaile-runner.service --no-pager
    ```
 
 1. **Re-enable runner:** `systemctl start abhaile-runner.timer`

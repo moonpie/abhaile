@@ -94,9 +94,9 @@ curl -fsS --connect-timeout 10 https://github.com >/dev/null
 curl -fsS --connect-timeout 10 <vault-health-or-seal-status-url> >/dev/null
 ```
 
-Warning: bootstrap performs a live apply in Stage 7. Once apply runs, host networking is
-reconfigured from rendered `systemd-networkd` artifacts. Keep console access available until the
-host is verified.
+Warning: bootstrap performs live Ansible reconciliation in Stage 7. Once reconciliation runs, host
+networking is reconfigured from rendered `systemd-networkd` artifacts. Keep console access
+available until the host is verified.
 
 ## 5. Sealed Bootstrap Artifact
 
@@ -200,19 +200,17 @@ This is the recommended path when replacing manual service management with GitOp
    sudo install -d -m 0750 -o root -g abhaile /var/lib/abhaile
    sudo install -d -m 0750 -o abhaile -g abhaile /var/lib/abhaile/rendered
    sudo install -d -m 0750 -o abhaile -g abhaile /var/lib/abhaile/runner
-   sudo install -d -m 0750 -o root -g root /var/lib/abhaile/state
    sudo -H -u abhaile env HOME=/home/abhaile \
      /opt/abhaile/.venv/bin/abhaile-render --host "$(hostname -s)" --output /var/lib/abhaile
    ```
 
-1. Run a dry-run apply with validations.
+1. Run Ansible check mode with native validations.
 
    ```bash
-   sudo /opt/abhaile/.venv/bin/abhaile-apply \
-     --host "$(hostname -s)" \
-     --output /var/lib/abhaile \
-     --dry-run \
-     --dry-run-validations
+   sudo env ANSIBLE_CONFIG=/opt/abhaile/ansible/ansible.cfg \
+     /usr/bin/ansible-playbook -i localhost, --connection=local --check \
+     --extra-vars '{"abhaile_rendered_root":"/var/lib/abhaile/rendered","abhaile_config_root":"/opt/abhaile/config","abhaile_expected_host":"'"$(hostname -s)"'"}' \
+     /opt/abhaile/ansible/playbooks/reconcile.yml
    ```
 
 1. Review the reported changes. Confirm that only the intended files, units, services, and
@@ -360,9 +358,9 @@ sudo awk 'NR == 1 && $1 ~ /^[0-9a-f]{40}$/ {print FILENAME, $1, "fields=" NF}' \
 
 The `awk` command intentionally reports only each record's SHA-shaped first field and field count;
 it does not read secret-bearing environment, SSH identity, age, SOPS, Vault, or service
-configuration files. A legacy three-field last-successful record is expected before adoption. The
-one-writer procedure replaces it with the candidate's verified SHA-only baseline after the
-candidate legacy apply succeeds. Missing optional runner records are valid observations. A
+configuration files. During the completed migration, a three-field last-successful record was
+replaced with the candidate's verified SHA-only baseline after its approved publication succeeded.
+Missing optional runner records are valid observations. A
 missing, malformed, or unexpected last-successful record blocks unattended Ansible reconciliation
 until the initial baseline is established through the disposable-VM-proven adoption procedure.
 
@@ -404,7 +402,11 @@ Re-enable it after verification if bootstrap did not already do so:
 systemctl enable --now abhaile-runner.timer
 ```
 
-## 11. Existing-Host Ansible Proof and Cutover
+## 11. Completed Existing-Host Migration Record
+
+> Historical evidence only. Both hosts completed this one-time cutover on 2026-10-20. Do not run
+> the commands in this section for enrollment or routine recovery; use Sections 6-7 and the
+> operations/break-glass runbooks. The former Python mutation command is retired.
 
 The runner script and systemd unit paths are unchanged by this migration. Installing the new
 runner at those paths therefore changes authority; it is a cutover unless the maintenance window
@@ -449,8 +451,8 @@ is not a descendant of the legacy revision. Exact reviewed SHAs, not ancestry, b
 proof. Routine runner updates remain fast-forward-only. Keep `abhaile-runner.timer` stopped for
 the entire dry-run and live proof.
 
-First detach at the candidate, render it, and prove the retained legacy apply plan. With explicit
-live-mutation approval, run that legacy apply before changing recovery authority. Only after it
+The migration detached at the candidate, rendered it, and proved the then-retained mutation plan.
+Only after that explicitly approved one-time publication succeeded did it
 succeeds, atomically replace the legacy metadata-suffixed runner record with the exact candidate
 SHA using the reviewed state helper:
 
@@ -459,9 +461,7 @@ sudo -u abhaile git checkout --detach "$candidate_revision"
 sudo -H -u abhaile env HOME=/home/abhaile \
   /opt/abhaile/.venv/bin/abhaile-render \
   --host "$(hostname -s)" --output /var/lib/abhaile
-sudo /opt/abhaile/.venv/bin/abhaile-apply \
-  --host "$(hostname -s)" --output /var/lib/abhaile --dry-run --dry-run-validations
-# Review the exact plan, then run its documented live apply only with explicit approval.
+# The retired migration-only check/live publication occurred here.
 sudo test ! -e /var/lib/abhaile/runner/current-run
 sudo -H -u abhaile env HOME=/home/abhaile \
   /opt/abhaile/.venv/bin/python -c '
@@ -547,11 +547,8 @@ sudo -u abhaile git checkout --detach "$legacy_revision"
 sudo -H -u abhaile env HOME=/home/abhaile \
   /opt/abhaile/.venv/bin/abhaile-render \
   --host "$(hostname -s)" --output /var/lib/abhaile
-sudo /opt/abhaile/.venv/bin/abhaile-apply \
-  --host "$(hostname -s)" --output /var/lib/abhaile --dry-run --dry-run-validations
-# Review the exact legacy plan, then run its documented live apply only with explicit approval.
-# After the live legacy apply succeeds, use the reviewed candidate helper to restore exact
-# SHA-only legacy recovery authority while scheduling remains stopped.
+# The retired migration-only restoration publication occurred here before recovery authority was
+# restored while scheduling remained stopped.
 sudo test ! -e /var/lib/abhaile/runner/current-run
 sudo -u abhaile git checkout --detach "$candidate_revision"
 sudo -H -u abhaile env HOME=/home/abhaile \

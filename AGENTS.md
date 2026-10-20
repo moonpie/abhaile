@@ -81,7 +81,7 @@ config/ (source of truth)
 
 - **Render** takes desired state only from `config/`, outputs to `out/rendered/<host>/`
 - **Apply** compares desired manifest against live state, stages atomically, reloads changed units
-- **State** lives in `out/state/<host>/` (manifests, history)
+- **Runner state** lives in `/var/lib/abhaile/runner/` on each host
 
 Renderers may also read repository code, schemas, templates, and path configuration needed to
 validate and produce deterministic output.
@@ -263,7 +263,7 @@ Security: gitleaks (secret scanning)
 
 All agents must follow these rules when working with the user, in priority order:
 
-1. **Do not make risky assumptions.** If resolving an ambiguity would affect secrets, data loss/corruption, live apply behaviour, `config/network.yaml`, `config/mapping.yaml`, `out/rendered/`, or `out/state/`, stop and ask for clarification. For other ambiguous choices, state one sentence prefixed with "Assumption:" and proceed. When uncertain which category applies, stop and ask.
+1. **Do not make risky assumptions.** If resolving an ambiguity would affect secrets, data loss/corruption, live apply behaviour, `config/network.yaml`, `config/mapping.yaml`, `out/rendered/`, or runner recovery records, stop and ask for clarification. For other ambiguous choices, state one sentence prefixed with "Assumption:" and proceed. When uncertain which category applies, stop and ask.
 1. **Confirm before deviating.** Any change to scope, approach, or design that differs from what was agreed requires user confirmation first.
 1. **Suggest improvements.** If you see a better approach than the current plan, propose it with reasoning, but do not change scope, approach, or design unless the user explicitly approves.
 1. **Be explicit about what you're doing.** State which files you will read/write and call out assumptions before starting work.
@@ -276,7 +276,7 @@ Role/provider file resolution is defined by the decision table in Instruction Ow
 Guardrails take precedence over all Interaction Protocol rules when they conflict.
 
 - Never manually edit files under `out/rendered/` — all desired-state changes must go through `config/` and re-render
-- `out/state/` is apply-owned state and may only be written by the apply process, not by ad hoc manual edits
+- Runner recovery records are reconciliation-owned and must not be edited ad hoc
 - Never commit secrets — use SOPS/age for bootstrap, vault-agent templates for runtime
 - Prefer changes in `config/` over hard-coded script edits
 - Keep render deterministic — no timestamps, random values, or external state in render output

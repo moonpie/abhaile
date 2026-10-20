@@ -7,6 +7,9 @@
 2026-10-05: Responsibility boundary retained; revision selection, recovery state, polling order,
 and drift scheduling refined by ADR 0012.
 
+2026-10-20: ADR 0013 supersedes the legacy diff/apply and applied-state details below. The retained
+boundary is deterministic render plus Ansible reconciliation beneath the outer runner.
+
 ## Context
 
 `src/abhaile/` provides deterministic render, diff, and apply behavior for a given workspace state. The broader GitOps workflow also requires repository fetch/checkout, scheduled execution, run serialization, and recovery from bad revisions.

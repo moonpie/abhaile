@@ -32,32 +32,35 @@ make render
 # Render one host only.
 make render-host HOST=phobos
 
-# Render all hosts, then dry-run apply phobos and deimos.
+# Render all hosts, then syntax-check the reconciliation playbook.
 make validate
 
-# Render one host, then dry-run apply that host.
+# On the named host, render it and run Ansible check mode against live state.
 make validate-host HOST=phobos
 
-# Host-scoped render plus dry-run apply.
-make apply HOST=phobos
+# Equivalent explicit host-scoped workflow.
+make check HOST=phobos
 ```
 
-Use `ALLOW_HOST_MISMATCH=1` only for workstation dry-run validation from a non-target host. It
-adds only `--allow-host-mismatch` to dry-run apply commands and prints a dry-run-only override
-notice.
+The all-host target is portable and does not impersonate either host. Ansible check mode reads the
+machine's installed systemd/Podman environment, so host-scoped validation must run on the
+corresponding target before promotion.
 
-### Render, Diff, Apply (Core 3 Commands)
+### Render and Reconcile
 
 ```bash
 # Render (on target host, from /opt/abhaile)
 sudo -H -u abhaile env HOME=/home/abhaile \
   /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
 
-# Dry-run apply (safe, read-only)
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
+# Review the complete host plan in Ansible check mode.
+sudo env ANSIBLE_CONFIG=/opt/abhaile/ansible/ansible.cfg \
+  /usr/bin/ansible-playbook -i localhost, --connection=local --check \
+  --extra-vars '{"abhaile_rendered_root":"/var/lib/abhaile/rendered","abhaile_config_root":"/opt/abhaile/config","abhaile_expected_host":"'"$(hostname -s)"'"}' \
+  /opt/abhaile/ansible/playbooks/reconcile.yml
 
-# Live apply
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
+# Prefer the runner for live reconciliation so locking, recovery, and status records remain intact.
+sudo systemctl start abhaile-runner.service
 
 # Local post-apply health gate
 sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile
@@ -66,37 +69,9 @@ sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile
 sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile --cluster
 ```
 
-<details>
-<summary>Full Command Reference</summary>
-
-```bash
-# Render all hosts (workstation only, requires --output)
-abhaile-render --all --output ./out
-
-# Check drift (what would change)
-sudo /opt/abhaile/.venv/bin/abhaile-diff --output /var/lib/abhaile
-
-# Dry-run with validation commands (systemd-analyze, visudo -c, named-checkzone)
-sudo /opt/abhaile/.venv/bin/abhaile-apply \
-  --output /var/lib/abhaile \
-  --dry-run \
-  --dry-run-validations
-
-# Apply with safe removals (only files unchanged on disk)
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --prune
-
-# Force-prune drifted removals (DESTRUCTIVE — requires --allow-destructive)
-sudo /opt/abhaile/.venv/bin/abhaile-apply \
-  --output /var/lib/abhaile \
-  --force-prune \
-  --allow-destructive
-
-# JSON output for scripting
-sudo /opt/abhaile/.venv/bin/abhaile-diff --output /var/lib/abhaile --json
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run --json
-```
-
-</details>
+There is no force-prune mode. Exact-identity reversible removals are classified by the runner and
+handled by their resource-family role. Drifted, ambiguous, destructive, and irreversible removal
+stops for operator action.
 
 ### Runner Status
 
@@ -482,9 +457,9 @@ Service unreachable?
     └── Check Authelia logs: podman logs systemd-authelia-app-authelia --tail 20
 ```
 
-## Nuclear Option: Full Reconvergence
+## Manual Full Reconciliation
 
-When confused at 3am and need to blow it all away:
+Use the ordinary runner rather than deleting state or container storage:
 
 ```bash
 # On target host:
@@ -493,24 +468,10 @@ sudo -H -u abhaile env HOME=/home/abhaile git fetch origin main
 sudo -H -u abhaile env HOME=/home/abhaile git checkout main
 sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
 
-# Full re-render
-sudo -H -u abhaile env HOME=/home/abhaile \
-  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-
-# Force apply (use --prune for safe removals, --force-prune --allow-destructive if desperate)
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --prune
-
-# Reload systemd
-systemctl daemon-reload
-
-# Restart all quadlet services (example for phobos):
-systemctl restart caddy-internal.service caddy-dmz.service blocky.service
-systemctl restart authelia-app.service
-machinectl shell abhaile@ /bin/systemctl --user restart vault-agent.service
-
-# Wait for secrets:
-while [ ! -f /srv/vault/agent/out/.ready ]; do sleep 2; done
-echo "Secrets ready, services should converge"
+sudo systemctl start abhaile-runner.service
+systemctl status abhaile-runner.service --no-pager
+sudo cat /var/lib/abhaile/runner/last-run-summary
+systemctl --failed --no-pager
 ```
 
 **Dependency order for full restart:**
@@ -523,15 +484,13 @@ echo "Secrets ready, services should converge"
 
 ## Routine Maintenance
 
-### Force Re-render and Apply
+### Force a Reconciliation
 
 ```bash
 # On target host
 cd /opt/abhaile
-sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
-sudo -H -u abhaile env HOME=/home/abhaile \
-  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
+sudo systemctl start abhaile-runner.service
+systemctl status abhaile-runner.service --no-pager
 ```
 
 ### DNS Serial Workflow
@@ -560,68 +519,23 @@ Container images are pinned in `service.yaml`, not separate Quadlet `.image` fil
    members.
 1. Prefer immutable version tags or digests. Keep `pull_policy: missing` unless there is a
    deliberate reason to change boot behavior.
-1. Commit, push, wait for runner (or manual render+apply).
+1. Commit, push, and wait for the runner (or trigger it manually).
 1. Verify: `podman image exists <image-ref>` in the same rootful/rootless context as the service.
 
-During live apply, `abhaile-apply` pre-pulls a changed image before staging the new `.container`
-or restarting the service. If the pull fails, apply reports `deployment blocked during image
-acquisition`, leaves the live service and applied state unchanged, and does not remove migration
-`.image` artifacts.
+Ansible publishes changed Quadlets with `Pull=missing`. If the desired image is absent and cannot
+be acquired, reconciliation fails and last-successful authority does not advance. Existing local
+images keep ordinary boot independent from registry DNS.
 
-### Registry Image Quadlet Migration
-
-Migrate one host at a time. Keep that host's runner timer stopped until migration, health, and a
-second convergence dry-run have succeeded. Do Deimos first, then Phobos.
+### Container Storage Cleanup
 
 ```bash
-# On deimos first, then repeat on phobos after deimos is healthy.
-sudo systemctl stop abhaile-runner.timer
-sudo systemctl stop abhaile-runner.service
-
-cd /opt/abhaile
-sudo -H -u abhaile env HOME=/home/abhaile git pull --ff-only origin main
-sudo -H -u abhaile env HOME=/home/abhaile \
-  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-
-# Review planned writes, safe removals, and image acquisitions.
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run --json
-
-# Live migration. Safe, manifest-matching .image removals are applied automatically.
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile
-
-# Health and convergence checks.
-sudo /opt/abhaile/.venv/bin/abhaile-health --output /var/lib/abhaile
-sudo /opt/abhaile/.venv/bin/abhaile-apply --output /var/lib/abhaile --dry-run
-
-# Confirm obsolete image units and files are gone.
-systemctl --failed
-test ! -e /etc/containers/systemd/blocky-b.image
-test ! -e /etc/containers/systemd/blocky-a.image
-test ! -e /home/abhaile/.config/containers/systemd/vault-agent.image
-systemctl list-units 'blocky*-image.service' 'vault-agent-image.service' --all --no-pager
-
-# Re-enable only after health and the second dry-run are clean.
-sudo systemctl start abhaile-runner.timer
-```
-
-For the outage recovery case, if the desired images already exist locally, Blocky and Vault Agent
-should restart even while external registry DNS is unavailable. Failed registry access should only
-affect a service whose desired image is genuinely absent locally. Do not restart generated
-`*-image.service` units; after migration, they should not be loaded or failed.
-
-### State and History Cleanup
-
-```bash
-# Applied manifests (last 10 kept automatically)
-sudo ls /var/lib/abhaile/state/history/
-
-# Podman image pruning (manual, not automated)
+# Podman image pruning is a separate manual maintenance action.
 sudo podman image prune -a
 sudo -u abhaile podman image prune -a
 ```
 
 Do not run image pruning as part of a deployment transaction. Old images are rollback material
-until an operator verifies that no container, applied manifest, or other service still references
+until an operator verifies that no container or service still references
 them.
 
 ### NTP Verification

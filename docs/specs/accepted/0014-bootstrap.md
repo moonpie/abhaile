@@ -22,6 +22,11 @@ scope:
 
 ## Context
 
+> Current drift note (2026-10-20): active Spec 0028 replaced the first Python apply with an Ansible
+> check followed by explicitly authorized live reconciliation. Bootstrap establishes
+> `last-successful-commit` only after that reconciliation succeeds; it no longer creates applied
+> manifest history.
+
 A fresh Debian 13 host has no repo, no Vault access, and no runtime secrets. Bootstrap bridges
 the gap between bare metal and a functioning GitOps-managed host where Vault Agent renders
 runtime secrets. The old project implemented a working curl-bash bootstrap at

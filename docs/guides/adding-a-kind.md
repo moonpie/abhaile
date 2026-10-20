@@ -25,21 +25,22 @@ Create `src/abhaile/renderers/nftables.py`:
 
 Wire it in `src/abhaile/cli/render.py` → `_render_host_system()` or `_render_host_services()`.
 
-## 3. Create the executor
+## 3. Create the resource-family role
 
-Create `src/abhaile/apply/nftables.py`:
+Create `ansible/roles/nftables_config/`:
 
-- Implement `apply_owner_change(owner_ref, ...)` returning an actions summary dict
-- Use `run_command` or `run_systemctl_command` from `apply/actions.py`
+- Select only the closed kind family passed by manifest orchestration.
+- Validate every source and target before publication.
+- Use built-in modules and fixed installed validators.
+- Define synchronous activation, readiness, and safe-removal behavior.
 
-## 4. Wire the dispatch
+## 4. Wire manifest orchestration
 
-In `src/abhaile/cli/apply.py`:
+In `ansible/roles/manifest_orchestration/tasks/main.yml`:
 
-- Add `_NFTABLES_KINDS = KIND_FAMILIES["nftables"]` to the constants block
-- Add a `_run_nftables_owner_actions(writes, removals_to_apply)` function
-- Call it from `main()` in the appropriate phase position
-- Add dry-run validation in `_run_dry_run_validations` if applicable
+- Add the kind to exactly one resource-family selection.
+- Include the role at the correct dependency position.
+- Reject unsupported or ambiguous removal before mutation.
 
 ## 5. Add service config
 
@@ -48,7 +49,7 @@ In `config/services/<service>/service.yaml`, add composition entries that produc
 ## 6. Write tests
 
 - `tests/unit/python/renderers/test_nftables.py` — renderer unit tests
-- `tests/unit/python/apply/test_nftables_executor.py` — executor unit tests
+- focused Ansible integration tests for check, live, idempotence, drift, and failure behavior
 - Update integration tests if the kind should appear in phobos render
 
 ## Files touched
@@ -58,7 +59,7 @@ In `config/services/<service>/service.yaml`, add composition entries that produc
 | `src/abhaile/models/kinds.py` | Add kind to family |
 | `src/abhaile/renderers/<new>.py` | New renderer |
 | `src/abhaile/cli/render.py` | Wire renderer call |
-| `src/abhaile/apply/<new>.py` | New executor |
-| `src/abhaile/cli/apply.py` | Wire dispatch + constant |
+| `ansible/roles/<family>/` | Direct convergence role |
+| `ansible/roles/manifest_orchestration/` | Closed kind selection and ordering |
 | `config/services/<svc>/service.yaml` | Add composition entries |
 | `tests/` | New test files |

@@ -2,8 +2,16 @@
 
 ## Status
 
+2026-10-20: Amended by ADR 0013
 2026-05-05: Updated Accepted
 2026-01-31: Accepted
+
+## Amendment
+
+ADR 0013 retired the standalone Python apply/state-history model. The host output root now contains
+ephemeral `rendered/` artifacts plus durable runner recovery records under `runner/`; ordinary
+reconciliation is performed by Ansible. References below to apply-owned `state/` describe the
+superseded design and are retained as historical decision context.
 
 ## Context
 

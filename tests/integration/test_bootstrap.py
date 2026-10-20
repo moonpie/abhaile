@@ -156,7 +156,7 @@ class TestBootstrapPreflight:
         assert "candidate_branch=review/phase-6-deimos" in guide
         assert 'ABHAILE_BRANCH="$candidate_branch"' in guide
         assert "establish_last_successful(Path(sys.argv[1]), sys.argv[2])" in guide
-        assert guide.index("abhaile-apply") < guide.index("establish_last_successful")
+        assert guide.index("ansible-playbook") < guide.index("establish_last_successful")
         assert '--force-with-lease="refs/heads/main:${legacy_revision}"' in guide
         assert 'git branch --force main "$candidate_revision"' in guide
         assert 'git merge --ff-only "$candidate_revision"' not in guide
@@ -194,12 +194,14 @@ class TestBootstrapPreflight:
         assert "Synchronizing Abhaile CLI entrypoints" in script
         assert "write_abhaile_entrypoint" not in script
         assert 'run_as_abhaile "${REPO_DIR}/.venv/bin/abhaile-render"' in script
-        assert '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"' in script
+        assert '"${REPO_DIR}/ansible/playbooks/reconcile.yml"' in script
+        assert "--check" in script
+        assert "abhaile_live_apply" in script
 
     def test_bootstrap_records_first_last_successful_before_runner_registration(self) -> None:
         """Make successful explicit enrollment the runner's initial recovery authority."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
-        apply_call = '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"'
+        apply_call = 'log "Running initial Ansible reconciliation (live)"'
         baseline_call = "establish_last_successful(Path(sys.argv[1]), sys.argv[2])"
         registration_call = "stage_registration"
 
@@ -210,7 +212,7 @@ class TestBootstrapPreflight:
     def test_bootstrap_enables_network_restore_after_initial_baseline(self) -> None:
         """Enable boot recovery only after successful apply establishes its target."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
-        apply_call = '"${REPO_DIR}/.venv/bin/abhaile-apply" --host "$hostname"'
+        apply_call = 'log "Running initial Ansible reconciliation (live)"'
         baseline_call = "establish_last_successful(Path(sys.argv[1]), sys.argv[2])"
         restore_call = "    enable_network_restore\n"
         registration_call = "stage_registration"
@@ -232,9 +234,7 @@ class TestBootstrapPreflight:
         assert 'install -d -m 0750 -o root -g "$ABHAILE_GROUP" "$OUTPUT_DIR"' in script
         assert '"${OUTPUT_DIR}/rendered"' in script
         assert '"${OUTPUT_DIR}/runner"' in script
-        assert 'install -d -m 0750 -o root -g root "${OUTPUT_DIR}/state"' in script
         assert 'chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}"' in script
-        assert 'chown -R root:root "${OUTPUT_DIR}/state"' in script
 
     def test_bootstrap_validates_abhaile_identity_contract(self) -> None:
         """Bootstrap fails fast when the service account identity does not match config."""

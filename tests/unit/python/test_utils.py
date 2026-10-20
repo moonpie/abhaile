@@ -81,21 +81,17 @@ class TestResolveOutputRoot:
         """Test that output structure matches ADR 0001."""
         paths = load_paths(tmp_repo_with_config)
 
-        # Single-host: <output>/rendered and <output>/state
+        # Single-host: <output>/rendered
         root = resolve_output_root("phobos", tmp_output, paths, all_mode=False)
         assert root == tmp_output
         rendered = root / paths["rendered_dir_name"]
-        state = root / paths["state_dir_name"]
         assert rendered == tmp_output / "rendered"
-        assert state == tmp_output / "state"
 
-        # All-mode: <output>/<host>/rendered and <output>/<host>/state
+        # All-mode: <output>/<host>/rendered
         root_all = resolve_output_root("phobos", tmp_output, paths, all_mode=True)
         assert root_all == tmp_output / "phobos"
         rendered_all = root_all / paths["rendered_dir_name"]
-        state_all = root_all / paths["state_dir_name"]
         assert rendered_all == tmp_output / "phobos" / "rendered"
-        assert state_all == tmp_output / "phobos" / "state"
 
 
 def test_strip_cidr_with_mask():

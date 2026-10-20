@@ -13,15 +13,11 @@ readonly MANIFEST_PATH="${ABHAILE_VENV_BIN}/.abhaile-managed-entrypoints"
 
 readonly ENTRYPOINT_NAMES=(
     "abhaile-render"
-    "abhaile-apply"
-    "abhaile-diff"
     "abhaile-inventory"
     "abhaile-health"
 )
 readonly ENTRYPOINT_MODULES=(
     "abhaile.cli.render"
-    "abhaile.cli.apply"
-    "abhaile.cli.diff"
     "abhaile.cli.inventory"
     "abhaile.cli.health"
 )

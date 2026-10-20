@@ -148,7 +148,7 @@ Reference: `config/services/coredns-filtered/service.yaml`
 
 - [ ] `abhaile-render --host <host> --output ./out` exits 0
 - [ ] `grep '<name>' out/rendered/manifest.json` shows entries
-- [ ] `abhaile-diff --desired-manifest out/rendered/manifest.json` shows new entries as `added`
+- [ ] `make check HOST=<host>` reports the intended Ansible changes
 - [ ] `abhaile-render --all --output ./out` passes (no cross-host regression)
 - [ ] `make test && make lint` passes
 
