@@ -8,7 +8,7 @@ title: Target Host Reconciliation Model
 status: active
 owner: moonpie
 created: 2026-09-04
-updated: 2026-10-19
+updated: 2026-10-20
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
@@ -277,7 +277,10 @@ apply is retained if the replacement fails that gate.
 - [x] Candidate-only cleanup is proven without a transaction journal or replay graph.
 - [x] Pre-networkd last-successful restoration and non-racing ordering are proven.
 - [x] Required VM scenarios pass and proof state is removed.
-- [ ] Existing-host adoption and independent administrator checks are documented and proven.
+- [x] Existing-host adoption and independent administrator checks are documented and proven.
+  Evidence: Deimos and Phobos completed separately authorized one-writer adoption through exact
+  reviewed revisions, recovery-before-networkd installation, networkd cutover, reboot, direct and
+  scheduled unchanged reconciliation, clean runner state, and independent administrator access.
 - [x] Final code/state recount proves material simplification. Evidence: the reproducible recount in
   `PHASE_5_2_DISPOSITION.md` records material net deletion, removal of every prototype state
   family and custom Ansible module, and reduction of the reviewed model surface from 70
@@ -290,6 +293,18 @@ apply is retained if the replacement fails that gate.
 
 ## Decision Notes
 
+- 2026-10-20: Both production hosts now use Ansible reconciliation at exact revision
+  `19e113c60f89770706ec2a87069187d41908bd34`. Phobos separately proved its physical/VLAN/ipvlan
+  network, Coral TPU, Vault and Vault Agent, CoreDNS, Caddy, Authelia and Omada pods, reboot,
+  unchanged reconciliation, and timer path. Secret-gated pod members are activated by the
+  successful `abhaile-secrets-ready.service` transaction rather than racing it from
+  `multi-user.target`; their pods remain ordinary boot units. The source-tree runner now exports
+  its own Python import path, matching the managed CLI wrappers and avoiding an undeclared package
+  installation requirement. Shared fetch-outage, interruption, failed-target, and last-successful
+  recovery mechanisms are accepted from the Deimos and disposable-VM proofs rather than repeated
+  destructively on Phobos; host-specific Phobos boot and network behavior was proven separately.
+  The five-minute full-reconciliation cadence remains intentionally deployed on both hosts, with
+  alternative scheduling or execution approaches deferred to Phase 8 review.
 - 2026-10-19: Legacy `--dry-run-validations` verifies changed systemd units by unit name against
   the complete rendered desired unit set prepended to systemd's normal manager-specific unit load
   path. It does not construct an empty alternate operating-system root or copy selected executable
