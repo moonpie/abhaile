@@ -129,7 +129,6 @@ code and operational concepts. Phase 5.2 includes an explicit go/no-go compariso
 
 ## References
 
-- [Spec 0028: Target Host Reconciliation Model](../specs/active/0028-target-host-reconciliation-model.md)
+- [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
 - [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - [Phase 5.2 checklist](../../TODO.md)
-- [Phase 5.2 disposition report](../../PHASE_5_2_DISPOSITION.md)

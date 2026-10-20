@@ -6,9 +6,9 @@
 
 2026-09-05: Accepted
 
-2026-09-30: Amended by active Spec 0028 with bounded publication and validation mechanics.
+2026-09-30: Amended by the then-active Spec 0028 with bounded publication and validation mechanics.
 
-2026-10-01: Amended by active Spec 0028 with durable runner-LKG promotion mechanics.
+2026-10-01: Amended by the then-active Spec 0028 with durable runner-LKG promotion mechanics.
 
 2026-10-02: Amended by ADR 0011 with guarded systemd-networkd convergence and independent
 recovery mechanics.
@@ -175,7 +175,7 @@ This option is the chosen direction.
 ## References
 
 - [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
-- [Spec 0028: Target Host Reconciliation Model](../specs/active/0028-target-host-reconciliation-model.md)
+- [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
 - ADR 0002: Hash-based Drift Detection and State Model
 - ADR 0003: GitOps Runner Responsibility Boundary
 - ADR 0004: Apply Execution Model

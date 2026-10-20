@@ -21,7 +21,7 @@ scope:
 
 ## Context
 
-> Superseded by [Spec 0028](../active/0028-target-host-reconciliation-model.md). This document
+> Superseded by [Spec 0028](../accepted/0028-target-host-reconciliation-model.md). This document
 > preserves the implemented legacy runner contract; its fetch-first checkout, skip-on-unchanged,
 > and rollback behavior are not the target reconciliation model.
 

@@ -24,7 +24,7 @@ scope:
 
 ## Context
 
-> Historical implementation record: active Spec 0028 and ADR 0013 replaced this Python mutation
+> Historical implementation record: accepted Spec 0028 and ADR 0013 replaced this Python mutation
 > pipeline. Its entrypoints, executor package, drift planner, and applied-manifest history were
 > retired after both hosts completed the Ansible cutover.
 

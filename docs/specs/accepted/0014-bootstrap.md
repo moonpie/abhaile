@@ -22,7 +22,7 @@ scope:
 
 ## Context
 
-> Current drift note (2026-10-20): active Spec 0028 replaced the first Python apply with an Ansible
+> Current drift note (2026-10-20): accepted Spec 0028 replaced the first Python apply with an Ansible
 > check followed by explicitly authorized live reconciliation. Bootstrap establishes
 > `last-successful-commit` only after that reconciliation succeeds; it no longer creates applied
 > manifest history.

@@ -206,5 +206,5 @@ around the protected locally retained last-successful capsule and one durable ap
 ## References
 
 - [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
-- [Spec 0028: Target Host Reconciliation Model](../specs/active/0028-target-host-reconciliation-model.md)
+- [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
 - [ADR 0010: Ansible Reconciliation Model](0010-ansible-reconciliation-model.md)

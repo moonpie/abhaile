@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Abhaile GitOps Runner — outer reconciliation loop.
 # Fetches repository state, renders, applies, and tracks success.
-# See: docs/specs/active/0028-target-host-reconciliation-model.md
+# See: docs/specs/accepted/0028-target-host-reconciliation-model.md
 set -euo pipefail
 
 readonly ABHAILE_BRANCH="${ABHAILE_BRANCH:-main}"

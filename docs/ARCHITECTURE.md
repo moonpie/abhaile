@@ -82,7 +82,7 @@ No secrets in git or rendered output. Vault Agent renders credentials at runtime
 | Service-host mapping | [config/mapping.yaml](../config/mapping.yaml) |
 | IP/VLAN assignments | [config/network.yaml](../config/network.yaml) |
 | Adding or modifying a service | `config/services/<name>/service.yaml`, [ADR 0005](adr/0005-service-authoring-model.md) |
-| Reconciliation | [Spec 0028](specs/active/0028-target-host-reconciliation-model.md), [ADR 0013](adr/0013-last-successful-ansible-reconciliation.md) |
+| Reconciliation | [Spec 0028](specs/accepted/0028-target-host-reconciliation-model.md), [ADR 0013](adr/0013-last-successful-ansible-reconciliation.md) |
 | Secrets boundary | [ADR 0006](adr/0006-secrets-model-and-bootstrap-artifacts.md) |
 | Rendering and validation | `make render`, portable `make validate`, host-local `make check HOST=<host>` |
 | Spec status | [docs/specs/README.md](specs/README.md) |

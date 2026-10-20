@@ -5,7 +5,7 @@
 ```yaml
 id: SPEC-2026-028
 title: Target Host Reconciliation Model
-status: active
+status: accepted
 owner: moonpie
 created: 2026-09-04
 updated: 2026-10-20
@@ -255,8 +255,9 @@ apply is retained if the replacement fails that gate.
 
 ## Acceptance Criteria
 
-- [x] Phase 1-5 trust, transaction, and guarded-network machinery is removed. Evidence:
-  `PHASE_5_2_DISPOSITION.md` deletion inventory and reference scans.
+- [x] Phase 1-5 trust, transaction, and guarded-network machinery is removed. Evidence: the
+  deletion inventory retained in Git history through commits `283f54b` and `2d107ab`, the complete
+  674-test suite, all repository hooks, and the final installed-reference audits on both hosts.
 - [x] Phase 0 config and software-schema contracts are restored; software remains render-only.
   Evidence: semantic comparison with `ea888fb` and deterministic dual-host renders.
 - [x] Manifest v2, typed software operations, execution identities, and generic Ansible dispatch
@@ -281,10 +282,11 @@ apply is retained if the replacement fails that gate.
   Evidence: Deimos and Phobos completed separately authorized one-writer adoption through exact
   reviewed revisions, recovery-before-networkd installation, networkd cutover, reboot, direct and
   scheduled unchanged reconciliation, clean runner state, and independent administrator access.
-- [x] Final code/state recount proves material simplification. Evidence: the reproducible recount in
-  `PHASE_5_2_DISPOSITION.md` records material net deletion, removal of every prototype state
-  family and custom Ansible module, and reduction of the reviewed model surface from 70
-  dataclasses/12 enums/9 protocols to 1/0/0.
+- [x] Final code/state recount proves material simplification. Evidence: the reproducible recount
+  retained in Git history records material net deletion, removal of every prototype state family
+  and custom Ansible module, and reduction of the reviewed model surface from 70 dataclasses/12
+  enums/9 protocols to 1/0/0. Phase 8 commit `283f54b` then removed another 17,389 lines of retired
+  executor, state-history, migration-role, and test code.
 - [x] Accepted specs, ADRs, runbooks, and later phases contain no obsolete prototype behavior as
   current guidance. Evidence: ADR 0013 and this spec define the current model; accepted Spec 0008
   records deterministic timestamp-free manifest v1; architecture and apply references distinguish
@@ -292,6 +294,14 @@ apply is retained if the replacement fails that gate.
   last-successful recovery, and per-host one-writer cutover; superseded ADRs remain historical only.
 
 ## Decision Notes
+
+- 2026-10-20: Phase 8 completed on both production hosts at recovery-compatible revision
+  `2d107abd652126bc4a6c9e01702628a3fb766ad3`. Exact last-successful and checkout authority matched,
+  failed-target records were absent, and failed-unit sets were empty before cleanup. Under the
+  shared runner lock, both hosts removed the managed `abhaile-apply`/`abhaile-diff` wrappers and
+  `/var/lib/abhaile/state`; the managed-entrypoint inventory now contains only render, inventory,
+  and health. The temporary Phase 5.2 disposition report was then removed after transferring its
+  durable evidence here. Spec 0028 is accepted.
 
 - 2026-10-20: Phase 8 initially moved the runner's removal classifier to `state/removals.py` and
   changed its import path. Recovery correctly checked out the older last-successful revision before
@@ -559,4 +569,3 @@ apply is retained if the replacement fails that gate.
 - [ADR 0013](../../adr/0013-last-successful-ansible-reconciliation.md)
 - [Superseded Spec 0012](../superseded/0012-gitops-runner.md)
 - [Phase 5.2 checklist](../../../TODO.md)
-- [Phase 5.2 disposition](../../../PHASE_5_2_DISPOSITION.md)

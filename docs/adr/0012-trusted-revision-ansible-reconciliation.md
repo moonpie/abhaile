@@ -364,7 +364,7 @@ restores accepted state.
 ## References
 
 - [ADR 0013: Last-Successful Ansible Reconciliation](0013-last-successful-ansible-reconciliation.md)
-- [Spec 0028: Target Host Reconciliation Model](../specs/active/0028-target-host-reconciliation-model.md)
+- [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
 - [ADR 0003: GitOps Runner Responsibility Boundary](0003-gitops-runner-responsibility-boundary.md)
 - [ADR 0004: Apply Execution Model](0004-apply-execution-model.md)
 - [ADR 0010: Ansible Reconciliation Model](0010-ansible-reconciliation-model.md)
