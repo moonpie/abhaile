@@ -261,6 +261,10 @@ class TestRenderApplyE2E:
         assert "Notify=healthy" in redis_quadlet
         assert "StopSignal=SIGTERM" in redis_quadlet
         assert "StopTimeout=60" in redis_quadlet
+        assert "WantedBy=abhaile-secrets-ready.service" in authelia_quadlet
+        assert "WantedBy=multi-user.target" not in authelia_quadlet
+        assert "WantedBy=abhaile-secrets-ready.service" in redis_quadlet
+        assert "WantedBy=multi-user.target" not in redis_quadlet
 
         omada_rebuild = (
             phobos_root
@@ -302,6 +306,10 @@ class TestRenderApplyE2E:
         assert "omada-controller-app-mongodb.service" in omada_controller_content
         assert "EnvironmentFile=/etc/omada-controller/omada-mongodb.env" in (omada_mongodb_content)
         assert "omada-mongodb-env.service" in omada_mongodb_content
+        assert "WantedBy=abhaile-secrets-ready.service" in omada_controller_content
+        assert "WantedBy=multi-user.target" not in omada_controller_content
+        assert "WantedBy=abhaile-secrets-ready.service" in omada_mongodb_content
+        assert "WantedBy=multi-user.target" not in omada_mongodb_content
         assert "HealthCmd=" in omada_mongodb_content
         assert "Notify=healthy" in omada_mongodb_content
         assert "StopSignal=SIGTERM" in omada_mongodb_content

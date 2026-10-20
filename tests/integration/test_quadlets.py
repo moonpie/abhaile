@@ -250,6 +250,8 @@ class TestQuadretsIntegration:
             "Requires=abhaile-secrets-ready.service authelia-config.service "
             "authelia-app-redis.service"
         ) in authelia_content
+        assert "WantedBy=abhaile-secrets-ready.service" in authelia_content
+        assert "WantedBy=multi-user.target" not in authelia_content
 
         assert "Image=docker.io/authelia/authelia:4.39.13" in authelia_content
         assert "Pull=missing" in authelia_content
@@ -281,6 +283,8 @@ class TestQuadretsIntegration:
         assert "StopTimeout=60" in redis_content
         assert "Image=docker.io/library/redis:8.2.2-alpine" in redis_content
         assert "Pull=missing" in redis_content
+        assert "WantedBy=abhaile-secrets-ready.service" in redis_content
+        assert "WantedBy=multi-user.target" not in redis_content
 
         # Verify redis image quadlet is not rendered
         redis_image = (
@@ -354,6 +358,8 @@ class TestQuadretsIntegration:
         )
         assert "EnvironmentFile=/etc/omada-controller/omada-controller.env" in controller_content
         assert "SuccessExitStatus=143" in controller_content
+        assert "WantedBy=abhaile-secrets-ready.service" in controller_content
+        assert "WantedBy=multi-user.target" not in controller_content
 
         mongodb_content = mongodb.read_text()
         assert "Pod=omada-controller-app.pod" in mongodb_content
@@ -370,6 +376,8 @@ class TestQuadretsIntegration:
         assert "StopSignal=SIGTERM" in mongodb_content
         assert "StopTimeout=60" in mongodb_content
         assert "SuccessExitStatus=143" in mongodb_content
+        assert "WantedBy=abhaile-secrets-ready.service" in mongodb_content
+        assert "WantedBy=multi-user.target" not in mongodb_content
         assert (
             "Volume=/srv/omada-controller/mongodb/initdb/omada.js:/docker-entrypoint-initdb.d/omada.js:ro"
             in mongodb_content
