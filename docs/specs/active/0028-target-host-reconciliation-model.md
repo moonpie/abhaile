@@ -293,6 +293,13 @@ apply is retained if the replacement fails that gate.
 
 ## Decision Notes
 
+- 2026-10-20: Phase 8 initially moved the runner's removal classifier to `state/removals.py` and
+  changed its import path. Recovery correctly checked out the older last-successful revision before
+  classification, where that new module did not exist, so both hosts failed closed and retained
+  their old authority. The runner now keeps the historical `abhaile.plan.diff` import path; current
+  revisions expose only a minimal compatibility facade to the state implementation, while older
+  last-successful revisions use their original classifier. No legacy mutation behavior is restored.
+
 - 2026-10-20: Phase 8 repository cleanup removed the legacy Python executor package, apply/diff
   entrypoints, applied-manifest history, unused quarantine playbook, and unused migration roles.
   The runner's exact-identity removal classifier moved to `state/removals.py`. Fresh bootstrap now
