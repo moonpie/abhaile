@@ -7,12 +7,21 @@ import hashlib
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 import yaml
 
 RUNNER_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "abhaile-runner"
+RUNNER_TIMER = (
+    Path(__file__).resolve().parents[2]
+    / "config"
+    / "hosts"
+    / "common"
+    / "systemd"
+    / "abhaile-runner.timer"
+)
 
 
 def test_runner_transports_live_authorization_as_json_boolean() -> None:
@@ -21,6 +30,18 @@ def test_runner_transports_live_authorization_as_json_boolean() -> None:
 
     assert "--extra-vars '{\"abhaile_live_apply\":true}'" in script
     assert "--extra-vars abhaile_live_apply=true" not in script
+
+
+def test_runner_timer_is_completion_relative_and_nonpersistent() -> None:
+    """Rearm after service completion without replaying monotonic activations."""
+    timer = RUNNER_TIMER.read_text(encoding="utf-8")
+
+    assert "OnBootSec=2min" in timer
+    assert "OnUnitInactiveSec=5min" in timer
+    assert "RandomizedDelaySec=30s" in timer
+    assert "AccuracySec=1s" in timer
+    assert "OnUnitActiveSec=" not in timer
+    assert "Persistent=" not in timer
 
 
 @pytest.fixture
@@ -99,7 +120,7 @@ def _run_runner(
         capture_output=True,
         text=True,
         env=env,
-        timeout=10,
+        timeout=30,
     )
 
 
@@ -172,7 +193,39 @@ def _prepare_successful_runner(repo: Path) -> dict[str, str]:
     )
     _make_runner_executable(
         venv_bin / "abhaile-health",
-        "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            '[[ -n "${ABHAILE_AUDIT_TRACE:-}" ]] && echo health >> "${ABHAILE_AUDIT_TRACE}"\n'
+            'exit "${ABHAILE_HEALTH_RESULT:-0}"\n'
+        ),
+    )
+    _make_runner_executable(
+        venv_bin / "abhaile-integrity",
+        (
+            "#!/usr/bin/env bash\n"
+            "set -euo pipefail\n"
+            'scope=""\n'
+            "while [[ $# -gt 0 ]]; do\n"
+            '  if [[ "$1" == "--scope" ]]; then scope="$2"; shift 2; else shift; fi\n'
+            "done\n"
+            '[[ -n "${ABHAILE_AUDIT_TRACE:-}" ]] && echo "integrity-${scope}" '
+            '>> "${ABHAILE_AUDIT_TRACE}"\n'
+            'result="${ABHAILE_INTEGRITY_RESULT:-0}"\n'
+            '[[ "$scope" == "enrollment-foundations" ]] '
+            '&& result="${ABHAILE_FOUNDATION_RESULT:-0}"\n'
+            'if [[ "$result" == "0" ]]; then\n'
+            '  printf \'{"drift":0,"entries":1,"paths":[],"scope":"%s",'
+            '"uncertainty":0}\\n\' "$scope"\n'
+            "else\n"
+            '  printf \'{"drift":1,"entries":1,"paths":[".../fixture"],'
+            '"scope":"%s","uncertainty":0}\\n\' "$scope"\n'
+            "fi\n"
+            'if [[ "$scope" == "enrollment-foundations" ]]; then\n'
+            '  exit "$result"\n'
+            "fi\n"
+            'exit "$result"\n'
+        ),
     )
     _write_entrypoint_installer(
         repo,
@@ -488,7 +541,7 @@ class TestRunnerExitCodes:
         assert result.returncode == 0, result.stdout + result.stderr
         summary_text = summary.read_text()
         assert "phase=complete" in summary_text
-        assert "outcome=success" in summary_text
+        assert "outcome=full-new-commit" in summary_text
         assert f"target_sha={target_sha}" in summary_text
         assert not current.exists()
 
@@ -543,6 +596,136 @@ class TestRunnerExitCodes:
         assert result.returncode == 0, result.stdout + result.stderr
         assert trace_file.read_text().splitlines() == [expected_sha]
 
+    def test_second_unchanged_clean_run_uses_fast_path(self, runner_repo: Path) -> None:
+        """Skip Ansible after a matching clean full traversal establishes its record."""
+        env = _prepare_successful_runner(runner_repo)
+        ansible_trace = runner_repo.parent / "fast-ansible-trace.log"
+        audit_trace = runner_repo.parent / "fast-audit-trace.log"
+        env.update(
+            {
+                "ABHAILE_TRACE": str(ansible_trace),
+                "ABHAILE_AUDIT_TRACE": str(audit_trace),
+            }
+        )
+        _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+
+        first = _run_runner(runner_repo, env)
+        ansible_trace.unlink()
+        audit_trace.write_text("")
+        second = _run_runner(runner_repo, env)
+
+        assert first.returncode == 0, first.stdout + first.stderr
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert not ansible_trace.exists()
+        assert audit_trace.read_text().splitlines() == [
+            "integrity-enrollment-foundations",
+            "integrity-ordinary",
+            "health",
+        ]
+        assert (
+            "outcome=fast-clean"
+            in (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        )
+
+    def test_ordinary_drift_repairs_once_then_cools_down(self, runner_repo: Path) -> None:
+        """Attempt one repair and defer an identical residual for one hour."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "cooldown-ansible-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+        assert _run_runner(runner_repo, env).returncode == 0
+        trace_file.write_text("")
+        env["ABHAILE_INTEGRITY_RESULT"] = "1"
+
+        repair = _run_runner(runner_repo, env)
+        repaired_lines = trace_file.read_text().splitlines()
+        deferred = _run_runner(runner_repo, env)
+
+        assert repair.returncode == 1
+        assert repaired_lines == ["live"]
+        assert deferred.returncode == 1
+        assert trace_file.read_text().splitlines() == repaired_lines
+        assert (
+            "outcome=degraded-repair-deferred"
+            in (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        )
+
+    def test_foundation_drift_does_not_start_ansible(self, runner_repo: Path) -> None:
+        """Keep enrollment-owned foundations outside ordinary repair."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "foundation-ansible-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+        assert _run_runner(runner_repo, env).returncode == 0
+        trace_file.unlink()
+        env["ABHAILE_FOUNDATION_RESULT"] = "1"
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 1
+        assert not trace_file.exists()
+        assert (
+            "outcome=degraded-enrollment-foundation"
+            in (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        )
+
+    def test_force_full_bypasses_clean_fast_path(self, runner_repo: Path) -> None:
+        """Run Ansible for an explicit force even with recent clean evidence."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "forced-ansible-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+        assert _run_runner(runner_repo, env).returncode == 0
+        trace_file.write_text("")
+        env["ABHAILE_FORCE_FULL"] = "1"
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert trace_file.read_text().splitlines() == ["live"]
+        assert (
+            "outcome=full-forced"
+            in (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        )
+
+    def test_invalid_interval_is_visible_without_full_loop(self, runner_repo: Path) -> None:
+        """Use the safe interval while refusing to report a fully clean outcome."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "invalid-interval-ansible-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+        assert _run_runner(runner_repo, env).returncode == 0
+        trace_file.unlink()
+        env["ABHAILE_FULL_RECONCILE_INTERVAL_SECONDS"] = "tomorrow"
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 1
+        assert not trace_file.exists()
+        summary = (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        assert "outcome=degraded-invalid-full-interval" in summary
+        assert "full_interval_seconds=21600" in summary
+        assert "interval_status=invalid" in summary
+
+    def test_fetch_outage_uses_clean_fast_path_before_deadline(self, runner_repo: Path) -> None:
+        """Audit the retained exact revision without mutating authority while offline."""
+        env = _prepare_successful_runner(runner_repo)
+        trace_file = runner_repo.parent / "offline-fast-ansible-trace.log"
+        env["ABHAILE_TRACE"] = str(trace_file)
+        _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+        assert _run_runner(runner_repo, env).returncode == 0
+        trace_file.unlink()
+        _git(runner_repo, "remote", "set-url", "origin", str(runner_repo.parent / "missing.git"))
+
+        result = _run_runner(runner_repo, env)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not trace_file.exists()
+        assert (
+            "outcome=fast-offline-clean"
+            in (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        )
+
     def test_fetch_outage_reconciles_retained_last_successful(self, runner_repo: Path) -> None:
         """Treat Git availability as candidate discovery, not recovery authority."""
         env = _prepare_successful_runner(runner_repo)
@@ -558,7 +741,7 @@ class TestRunnerExitCodes:
         result = _run_runner(runner_repo, env)
 
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "unavailable; reconciling retained last-successful" in result.stdout
+        assert "unavailable; auditing retained last-successful" in result.stdout
         assert trace_file.read_text().splitlines() == [expected_sha]
 
     def test_startup_recovers_candidate_interrupted_before_success_commit(
@@ -593,7 +776,7 @@ class TestRunnerExitCodes:
         assert result.returncode == 1
         assert "startup: recover-last-successful" in result.stdout
         assert "suppressing retry of failed commit" in result.stdout
-        assert trace_file.read_text().splitlines() == [last_successful]
+        assert trace_file.read_text().splitlines() == [last_successful, last_successful]
         assert not managed_effect.exists()
         assert (state_dir / "last-successful-commit").read_text().strip() == last_successful
         assert (state_dir / "failed-target").read_text().strip() == interrupted_sha
@@ -896,7 +1079,10 @@ class TestRunnerExitCodes:
         result = _run_runner(runner_repo, env)
 
         assert result.returncode == 0, result.stdout + result.stderr
-        assert trace_file.read_text().strip().splitlines() == ["health-cluster"]
+        assert trace_file.read_text().strip().splitlines() == [
+            "health-cluster",
+            "health-local",
+        ]
 
     def test_runner_cluster_health_failure_is_non_fatal(self, runner_repo: Path) -> None:
         """Cluster audit failures should not trigger rollback after local health succeeds."""
@@ -930,8 +1116,11 @@ class TestRunnerExitCodes:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "non-fatal audit failed" in result.stdout
         assert _git(runner_repo, "rev-parse", "HEAD") == target_sha
-        assert trace_file.read_text().strip().splitlines() == ["health-cluster-fail"]
-        assert "outcome=success" in summary.read_text()
+        assert trace_file.read_text().strip().splitlines() == [
+            "health-cluster-fail",
+            "health-local",
+        ]
+        assert "outcome=full-new-commit" in summary.read_text()
 
     def test_render_failure_before_marker_does_not_reconcile_baseline(
         self, runner_repo: Path
@@ -1017,6 +1206,7 @@ class TestRunnerExitCodes:
         _git(runner_repo, "checkout", "-q", "-B", "main")
 
         first = _run_runner(runner_repo, env)
+        env["ABHAILE_INTEGRITY_RESULT"] = "1"
         second = _run_runner(runner_repo, env)
 
         failed_target = runner_repo.parent / "output" / "runner" / "failed-target"
@@ -1028,6 +1218,121 @@ class TestRunnerExitCodes:
         assert "suppressing retry of failed commit" in second.stdout
         assert failed_target.read_text().startswith(target_sha)
         assert not current_run.exists()
+        summary = (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        assert "outcome=failed-target-suppressed" in summary
+        assert "post_full_outcome=degraded-post-full" in summary
+
+        deferred = _run_runner(runner_repo, env)
+
+        assert deferred.returncode == 1
+        deferred_summary = (
+            runner_repo.parent / "output" / "runner" / "last-run-summary"
+        ).read_text()
+        assert "outcome=failed-target-suppressed" in deferred_summary
+        assert f"target_sha={target_sha}" in deferred_summary
+        assert "post_full_outcome=degraded-repair-deferred" in deferred_summary
+
+    @pytest.mark.parametrize(
+        ("failure_kind", "expected_detail"),
+        [
+            ("foundation", "degraded-enrollment-foundation"),
+            ("publication", "failure"),
+        ],
+    )
+    def test_suppressed_target_preserves_post_full_detail(
+        self, runner_repo: Path, failure_kind: str, expected_detail: str
+    ) -> None:
+        """Keep the failed candidate primary while exposing accepted-state degradation."""
+        env = _prepare_successful_runner(runner_repo)
+        _write_live_ansible(
+            env,
+            'if [[ "$(git rev-parse HEAD)" == "${FAIL_APPLY_SHA:-}" ]]; then exit 42; fi',
+        )
+        (runner_repo / "bad.txt").write_text("bad\n")
+        target_sha = _commit_and_push(runner_repo, f"{failure_kind} suppressed target")
+        env["FAIL_APPLY_SHA"] = target_sha
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        failed = _run_runner(runner_repo, env)
+        state_dir = runner_repo.parent / "output" / "runner"
+        assert failed.returncode == 1, failed.stdout + failed.stderr
+        if failure_kind == "foundation":
+            env["ABHAILE_FOUNDATION_RESULT"] = "1"
+        else:
+            (state_dir / "last-full-reconciliation").mkdir()
+
+        suppressed = _run_runner(runner_repo, env)
+
+        assert suppressed.returncode == 1, suppressed.stdout + suppressed.stderr
+        summary = (state_dir / "last-run-summary").read_text()
+        assert "outcome=failed-target-suppressed" in summary
+        assert f"target_sha={target_sha}" in summary
+        assert f"post_full_outcome={expected_detail}" in summary
+        assert (state_dir / "failed-target").read_text().strip() == target_sha
+
+    def test_integrity_timeout_kills_term_ignoring_process_at_limit(
+        self, runner_repo: Path
+    ) -> None:
+        """Enforce the published integrity ceiling even when TERM is ignored."""
+        env = _prepare_successful_runner(runner_repo)
+        assert _run_runner(runner_repo, env).returncode == 0
+        marker = runner_repo.parent / "integrity-timeout-once"
+        env["ABHAILE_TIMEOUT_MARKER"] = str(marker)
+        _make_runner_executable(
+            Path(env["ABHAILE_VENV_BIN"]) / "abhaile-integrity",
+            (
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'scope=""\n'
+                "while [[ $# -gt 0 ]]; do\n"
+                '  if [[ "$1" == "--scope" ]]; then scope="$2"; shift 2; else shift; fi\n'
+                "done\n"
+                'if [[ "$scope" == "ordinary" && ! -e "${ABHAILE_TIMEOUT_MARKER}" ]]; then\n'
+                '  touch "${ABHAILE_TIMEOUT_MARKER}"\n'
+                "  trap '' TERM\n"
+                "  sleep 60\n"
+                "fi\n"
+                'printf \'{"drift":0,"entries":1,"paths":[],"scope":"%s",'
+                '"uncertainty":0}\\n\' "$scope"\n'
+            ),
+        )
+
+        started = time.monotonic()
+        result = _run_runner(runner_repo, env)
+        elapsed = time.monotonic() - started
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert elapsed < 15
+        assert (
+            "outcome=full-integrity-drift"
+            in (runner_repo.parent / "output" / "runner" / "last-run-summary").read_text()
+        )
+
+    def test_fetch_outage_preserves_failed_target(self, runner_repo: Path) -> None:
+        """Keep retry suppression durable when candidate discovery is unavailable."""
+        env = _prepare_successful_runner(runner_repo)
+        _write_live_ansible(
+            env,
+            'if [[ "$(git rev-parse HEAD)" == "${FAIL_APPLY_SHA:-}" ]]; then exit 42; fi',
+        )
+        (runner_repo / "bad.txt").write_text("bad\n")
+        target_sha = _commit_and_push(runner_repo, "offline failed target")
+        env["FAIL_APPLY_SHA"] = target_sha
+        _git(runner_repo, "checkout", "-q", "HEAD~1")
+        _git(runner_repo, "checkout", "-q", "-B", "main")
+
+        failed = _run_runner(runner_repo, env)
+        state_dir = runner_repo.parent / "output" / "runner"
+        assert failed.returncode == 1, failed.stdout + failed.stderr
+        assert (state_dir / "failed-target").read_text().strip() == target_sha
+        _git(runner_repo, "remote", "set-url", "origin", str(runner_repo.parent / "missing.git"))
+
+        offline = _run_runner(runner_repo, env)
+
+        assert offline.returncode == 0, offline.stdout + offline.stderr
+        assert (state_dir / "failed-target").read_text().strip() == target_sha
+        assert not (state_dir / "current-run").exists()
 
     def test_live_apply_failure_reconciles_last_successful_revision(
         self, runner_repo: Path
@@ -1237,7 +1542,10 @@ class TestRunnerExitCodes:
                 '  rm -f "${ABHAILE_RECOVERY_FAILURE}"\n'
                 "  exit 43\n"
                 "fi\n"
-                '[[ "$cleanup_count" == "1" ]] && rm -f "${ABHAILE_MANAGED_FILE}"\n'
+                'if [[ "$cleanup_count" == "1" ]]; then\n'
+                '  rm -f "${ABHAILE_MANAGED_FILE}"\n'
+                "fi\n"
+                "exit 0\n"
             ),
         )
 
@@ -1261,6 +1569,8 @@ class TestRunnerExitCodes:
             f"{baseline_sha} live cleanup=1",
             f"{baseline_sha} check cleanup=1",
             f"{baseline_sha} live cleanup=1",
+            f"{baseline_sha} check cleanup=0",
+            f"{baseline_sha} live cleanup=0",
         ]
         assert not managed_file.exists()
         assert (state_dir / "last-successful-commit").read_text().strip() == baseline_sha

@@ -492,6 +492,18 @@ For each completed criterion, record:
 - Implementation evidence: commit or PR.
 - Validation evidence: named automated test, VM/host transcript, or equivalent verification.
 
+Pre-deployment Revision N+1 evidence (2026-10-21):
+
+- The runner/state integration suite passes 93 tests, including clean unchanged admission,
+  force/periodic selection, offline behavior, degraded-repair spacing, failed-target precedence,
+  recovery, and hard timeout handling with a TERM-ignoring process.
+- The complete unit and integration suite passes 730 tests.
+- All repository pre-commit hooks pass; shell syntax, `systemd-analyze verify`, mypy, Ruff,
+  ShellCheck, interrogate, schema checks, formatting, and secret scanning are clean.
+- Architect, SysAdmin, and Code Reviewer independently report no remaining actionable findings.
+- Deployment, production timing, timer/reboot behavior, and controlled live-drift criteria remain
+  open and are not satisfied by this pre-deployment evidence.
+
 ## Out of Scope
 
 - Replacing Ansible or changing resource-family convergence behavior.

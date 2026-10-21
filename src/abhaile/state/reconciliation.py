@@ -8,7 +8,7 @@ import re
 import stat
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, cast
 
@@ -28,6 +28,9 @@ StartupAction = Literal[
     "recovery-blocked",
 ]
 Postcheck = Literal["clean", "degraded"]
+DEFAULT_FULL_INTERVAL_SECONDS = 21600
+MINIMUM_FULL_INTERVAL_SECONDS = 3600
+DEGRADED_REPAIR_INTERVAL_SECONDS = 3600
 
 RUN_OUTCOMES = frozenset(
     {
@@ -67,6 +70,18 @@ class LastFullReconciliation:
     commit_sha: str
     completed_at: datetime
     postcheck: Postcheck
+
+
+@dataclass(frozen=True)
+class FullReconciliationSchedule:
+    """Describe whether an accepted revision requires a full traversal."""
+
+    due: bool
+    trigger: str
+    interval_seconds: int
+    interval_valid: bool
+    age_seconds: int | None
+    postcheck: Postcheck | None
 
 
 def _validate_sha(value: str, *, record_name: str) -> str:
@@ -163,6 +178,96 @@ def read_last_full_reconciliation(state_dir: Path) -> LastFullReconciliation | N
     return LastFullReconciliation(commit_sha, completed_at, cast(Postcheck, postcheck))
 
 
+def _full_interval(value: str) -> tuple[int, bool]:
+    """Return the configured full interval and whether it was valid."""
+    if value == "":
+        return DEFAULT_FULL_INTERVAL_SECONDS, True
+    try:
+        seconds = int(value, 10)
+    except ValueError:
+        return DEFAULT_FULL_INTERVAL_SECONDS, False
+    if not MINIMUM_FULL_INTERVAL_SECONDS <= seconds <= DEFAULT_FULL_INTERVAL_SECONDS:
+        return DEFAULT_FULL_INTERVAL_SECONDS, False
+    return seconds, True
+
+
+def classify_full_reconciliation(
+    state_dir: Path,
+    commit_sha: str,
+    interval_value: str,
+    force_full: str,
+    now_value: str = "",
+) -> FullReconciliationSchedule:
+    """Classify the non-authoritative full-reconciliation schedule."""
+    commit = _validate_sha(commit_sha, record_name=LAST_FULL_RECONCILIATION)
+    if force_full not in {"0", "1"}:
+        raise ApplyError("ABHAILE_FORCE_FULL must be 0 or 1")
+    interval, interval_valid = _full_interval(interval_value)
+    if force_full == "1":
+        return FullReconciliationSchedule(True, "forced", interval, interval_valid, None, None)
+    now = datetime.now(timezone.utc)
+    if now_value:
+        try:
+            now = datetime.fromisoformat(now_value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ApplyError("Invalid scheduling clock") from exc
+        if now.tzinfo is None:
+            raise ApplyError("Invalid scheduling clock")
+    try:
+        record = read_last_full_reconciliation(state_dir)
+    except ApplyError:
+        return FullReconciliationSchedule(True, "periodic", interval, interval_valid, None, None)
+    if record is None or record.commit_sha != commit:
+        return FullReconciliationSchedule(True, "periodic", interval, interval_valid, None, None)
+    age = int((now - record.completed_at).total_seconds())
+    if age < 0 or age >= interval:
+        return FullReconciliationSchedule(
+            True, "periodic", interval, interval_valid, age, record.postcheck
+        )
+    return FullReconciliationSchedule(
+        False, "audit", interval, interval_valid, age, record.postcheck
+    )
+
+
+def format_full_reconciliation_schedule(schedule: FullReconciliationSchedule) -> str:
+    """Format a schedule as a closed shell-readable record."""
+    age = "none" if schedule.age_seconds is None else str(schedule.age_seconds)
+    postcheck = schedule.postcheck or "none"
+    validity = "valid" if schedule.interval_valid else "invalid"
+    due = "due" if schedule.due else "audit"
+    return " ".join(
+        (due, schedule.trigger, str(schedule.interval_seconds), validity, age, postcheck)
+    )
+
+
+def full_reconciliation_schedule(
+    state_dir: Path,
+    commit_sha: str,
+    interval_value: str,
+    force_full: str,
+    now_value: str = "",
+) -> str:
+    """Return the closed shell-readable scheduling decision."""
+    return format_full_reconciliation_schedule(
+        classify_full_reconciliation(state_dir, commit_sha, interval_value, force_full, now_value)
+    )
+
+
+def should_defer_degraded_repair(_state_dir: Path, schedule_record: str) -> bool:
+    """Return whether a degraded accepted revision remains in its cooldown."""
+    fields = schedule_record.split()
+    if len(fields) != 6:
+        raise ApplyError("Invalid full-reconciliation schedule")
+    due, trigger, _interval, _validity, age, postcheck = fields
+    if due != "audit" or trigger != "audit" or postcheck != "degraded":
+        return False
+    try:
+        age_seconds = int(age, 10)
+    except ValueError as exc:
+        raise ApplyError("Invalid full-reconciliation schedule age") from exc
+    return 0 <= age_seconds < DEGRADED_REPAIR_INTERVAL_SECONDS
+
+
 def _sync_directory(path: Path) -> None:
     """Persist a completed record rename or removal."""
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
@@ -191,6 +296,51 @@ def _write_record(path: Path, sha: str) -> None:
         with contextlib.suppress(OSError):
             os.unlink(temporary)
         raise ApplyError(f"Unable to publish runner state record: {path.name}") from exc
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+
+
+def record_last_full_reconciliation(
+    state_dir: Path,
+    commit_sha: str,
+    postcheck: str,
+    completed_at_value: str = "",
+) -> None:
+    """Atomically record one completed full traversal as scheduling evidence."""
+    _require_state_dir(state_dir)
+    commit = _validate_sha(commit_sha, record_name=LAST_FULL_RECONCILIATION)
+    if postcheck not in {"clean", "degraded"}:
+        raise ApplyError("Invalid last-full-reconciliation postcheck")
+    completed_at = datetime.now(timezone.utc)
+    if completed_at_value:
+        try:
+            completed_at = datetime.fromisoformat(completed_at_value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ApplyError("Invalid last-full-reconciliation timestamp") from exc
+        if completed_at.tzinfo is None:
+            raise ApplyError("Invalid last-full-reconciliation timestamp")
+    timestamp = completed_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    path = state_dir / LAST_FULL_RECONCILIATION
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            handle.write(f"{commit} {timestamp} postcheck={postcheck}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        _sync_directory(path.parent)
+    except OSError as exc:
+        if descriptor >= 0:
+            os.close(descriptor)
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise ApplyError("Unable to publish last-full-reconciliation") from exc
     except BaseException:
         if descriptor >= 0:
             os.close(descriptor)

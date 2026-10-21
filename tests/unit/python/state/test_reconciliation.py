@@ -14,6 +14,7 @@ from abhaile.state.reconciliation import (
     clear_matching_current_run,
     commit_last_successful,
     establish_last_successful,
+    full_reconciliation_schedule,
     mark_current_run,
     mark_failed_target,
     RUN_OUTCOMES,
@@ -21,6 +22,8 @@ from abhaile.state.reconciliation import (
     read_current_run,
     read_failed_target,
     read_last_successful,
+    record_last_full_reconciliation,
+    should_defer_degraded_repair,
 )
 from abhaile.utils.errors import ApplyError
 
@@ -262,3 +265,62 @@ def test_last_full_parser_rejects_malformed_records(tmp_path: Path, payload: str
 
     with pytest.raises(ApplyError, match="last-full-reconciliation"):
         read_last_full_reconciliation(tmp_path)
+
+
+def test_full_schedule_is_due_when_record_is_missing(tmp_path: Path) -> None:
+    """Force the first N+1 traversal to establish scheduling evidence."""
+    assert full_reconciliation_schedule(tmp_path, NEW_SHA, "", "0").startswith(
+        "due periodic 21600 valid none none"
+    )
+
+
+def test_full_schedule_accepts_clean_unexpired_record(tmp_path: Path) -> None:
+    """Admit an audit when the matching full traversal remains recent."""
+    record_last_full_reconciliation(tmp_path, NEW_SHA, "clean", "2026-10-21T10:00:00Z")
+
+    assert (
+        full_reconciliation_schedule(tmp_path, NEW_SHA, "3600", "0", "2026-10-21T10:30:00Z")
+        == "audit audit 3600 valid 1800 clean"
+    )
+
+
+@pytest.mark.parametrize("value", ["nope", "3599", "21601", "1.5"])
+def test_invalid_full_interval_uses_safe_default(tmp_path: Path, value: str) -> None:
+    """Use six hours without creating another scheduling record."""
+    record_last_full_reconciliation(tmp_path, NEW_SHA, "clean", "2026-10-21T10:00:00Z")
+
+    assert (
+        full_reconciliation_schedule(tmp_path, NEW_SHA, value, "0", "2026-10-21T10:30:00Z")
+        == "audit audit 21600 invalid 1800 clean"
+    )
+
+
+def test_future_or_mismatched_full_record_forces_full(tmp_path: Path) -> None:
+    """Reject scheduling evidence that cannot describe the selected revision."""
+    record_last_full_reconciliation(tmp_path, OLD_SHA, "clean", "2026-10-21T12:00:00Z")
+    assert full_reconciliation_schedule(
+        tmp_path, NEW_SHA, "", "0", "2026-10-21T11:00:00Z"
+    ).startswith("due periodic")
+
+    record_last_full_reconciliation(tmp_path, NEW_SHA, "clean", "2026-10-21T12:00:00Z")
+    assert full_reconciliation_schedule(
+        tmp_path, NEW_SHA, "", "0", "2026-10-21T11:00:00Z"
+    ).startswith("due periodic")
+
+
+def test_force_full_bypasses_recent_record(tmp_path: Path) -> None:
+    """Make the explicit ephemeral force control authoritative for scheduling."""
+    assert full_reconciliation_schedule(tmp_path, NEW_SHA, "", "1").startswith("due forced")
+
+
+def test_invalid_force_full_is_rejected(tmp_path: Path) -> None:
+    """Fail invalid force input before any mutation."""
+    with pytest.raises(ApplyError, match="ABHAILE_FORCE_FULL"):
+        full_reconciliation_schedule(tmp_path, NEW_SHA, "", "yes")
+
+
+def test_degraded_repair_is_deferred_only_inside_one_hour(tmp_path: Path) -> None:
+    """Reuse the scheduling record as the bounded unsuccessful-repair cooldown."""
+    assert should_defer_degraded_repair(tmp_path, "audit audit 21600 valid 3599 degraded")
+    assert not should_defer_degraded_repair(tmp_path, "audit audit 21600 valid 3600 degraded")
+    assert not should_defer_degraded_repair(tmp_path, "due periodic 21600 valid 10 degraded")

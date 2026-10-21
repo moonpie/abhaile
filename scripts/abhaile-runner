@@ -18,7 +18,10 @@ readonly LOCK_FILE="${RUNNER_STATE_DIR}/lock"
 readonly LAST_STATUS_FILE="${RUNNER_STATE_DIR}/last-run-status"
 readonly LAST_SUMMARY_FILE="${RUNNER_STATE_DIR}/last-run-summary"
 readonly ABHAILE_FORCE_RETRY="${ABHAILE_FORCE_RETRY:-0}"
+readonly ABHAILE_FORCE_FULL="${ABHAILE_FORCE_FULL:-0}"
+readonly ABHAILE_FULL_RECONCILE_INTERVAL_SECONDS="${ABHAILE_FULL_RECONCILE_INTERVAL_SECONDS:-}"
 readonly ABHAILE_RENDER="${ABHAILE_VENV_BIN}/abhaile-render"
+readonly ABHAILE_INTEGRITY="${ABHAILE_VENV_BIN}/abhaile-integrity"
 readonly ABHAILE_ANSIBLE_PLAYBOOK="${ABHAILE_ANSIBLE_PLAYBOOK:-/usr/bin/ansible-playbook}"
 readonly ABHAILE_ANSIBLE_CONFIG="${ABHAILE_ANSIBLE_CONFIG:-${PWD}/ansible/ansible.cfg}"
 readonly ABHAILE_RECONCILE_PLAYBOOK="${ABHAILE_RECONCILE_PLAYBOOK:-${PWD}/ansible/playbooks/reconcile.yml}"
@@ -30,6 +33,19 @@ RUN_STARTED_SECONDS=""
 CURRENT_PHASE="start"
 RECOVERED_LAST_SUCCESSFUL=0
 RUN_CONTEXT_DIR=""
+RUN_TRIGGER="unknown"
+RUN_LAST_FULL_AGE="none"
+RUN_FULL_INTERVAL="21600"
+RUN_INTERVAL_STATUS="valid"
+FAST_DEADLINE_SECONDS=""
+SCHEDULE_DECISION="due"
+SCHEDULE_POSTCHECK="none"
+AUDIT_ENTRY_COUNT="none"
+AUDIT_DURATION_SECONDS="none"
+AUDIT_DRIFT_COUNT="none"
+AUDIT_UNCERTAINTY_COUNT="none"
+AUDIT_PATH_SAMPLE="none"
+RUN_POST_FULL_OUTCOME="none"
 
 export PYTHONPATH="${ABHAILE_SRC}${PYTHONPATH:+:${PYTHONPATH}}"
 
@@ -76,7 +92,17 @@ exit_code=${exit_code}
 current_sha=${current_sha}
 target_sha=${target_sha}
 last_good_sha=${last_good_sha:-none}
-rollback_attempted=${rollback}"
+rollback_attempted=${rollback}
+trigger=${RUN_TRIGGER}
+last_full_age_seconds=${RUN_LAST_FULL_AGE}
+full_interval_seconds=${RUN_FULL_INTERVAL}
+interval_status=${RUN_INTERVAL_STATUS}
+audit_entry_count=${AUDIT_ENTRY_COUNT}
+audit_duration_seconds=${AUDIT_DURATION_SECONDS}
+audit_drift_count=${AUDIT_DRIFT_COUNT}
+audit_uncertainty_count=${AUDIT_UNCERTAINTY_COUNT}
+audit_path_sample=${AUDIT_PATH_SAMPLE}
+post_full_outcome=${RUN_POST_FULL_OUTCOME}"
 }
 
 record_network_restore_noop_summary() {
@@ -173,6 +199,17 @@ classify_startup_state() { state_call classify_startup; }
 
 mark_mutation() { state_call mark_current_run "$1"; }
 
+read_full_schedule() {
+    state_call full_reconciliation_schedule \
+        "$1" "$ABHAILE_FULL_RECONCILE_INTERVAL_SECONDS" "$ABHAILE_FORCE_FULL"
+}
+
+record_last_full() { state_call record_last_full_reconciliation "$1" "$2"; }
+
+degraded_repair_is_deferred() {
+    [[ "$(state_call should_defer_degraded_repair "$1")" == "True" ]]
+}
+
 commit_success() {
     local sha="$1" clear_failed="${2:-true}" failed_sha=""
     if [[ "$clear_failed" == "true" ]]; then
@@ -232,7 +269,8 @@ do_fetch() {
         return 1
     }
     export GIT_SSH_COMMAND="ssh -i ${ABHAILE_GIT_SSH_KEY} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${ABHAILE_GIT_KNOWN_HOSTS}"
-    git fetch --prune "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"
+    /usr/bin/timeout --signal=KILL 15s \
+        git fetch --prune "$ABHAILE_REMOTE" "$ABHAILE_BRANCH"
 }
 
 do_checkout() {
@@ -260,6 +298,76 @@ do_render() {
     record_current_phase "render"
     log "render: host=${host} output=${output_root}"
     "$ABHAILE_RENDER" --host "$host" --output "$output_root" $verbose_flag
+}
+
+do_render_bounded() {
+    local host="$1" output_root="$2" remaining verbose_flag=""
+    [ "$ABHAILE_VERBOSE" -ge 1 ] 2>/dev/null && verbose_flag="-v"
+    [ "$ABHAILE_VERBOSE" -ge 2 ] 2>/dev/null && verbose_flag="-vv"
+    remaining="$(remaining_fast_seconds)" || return 124
+    record_current_phase "render"
+    log "render: host=${host} output=${output_root}"
+    /usr/bin/timeout --signal=KILL "${remaining}s" \
+        "$ABHAILE_RENDER" --host "$host" --output "$output_root" $verbose_flag
+}
+
+remaining_fast_seconds() {
+    if [[ -z "$FAST_DEADLINE_SECONDS" ]]; then
+        printf '60'
+        return 0
+    fi
+    local remaining="$((FAST_DEADLINE_SECONDS - $(date +%s)))"
+    ((remaining > 0)) || return 1
+    printf '%s' "$remaining"
+}
+
+do_integrity() {
+    local host="$1" output_root="$2" scope="$3" remaining limit result_file started status=0
+    remaining="$(remaining_fast_seconds)" || return 124
+    limit=10
+    ((remaining < limit)) && limit="$remaining"
+    record_current_phase "integrity-${scope}"
+    log "integrity: scope=${scope} output=${output_root}"
+    result_file="${RUN_CONTEXT_DIR}/integrity-${scope}.json"
+    started="$(date +%s)"
+    # The unprivileged runner intentionally owns this diagnostic capture file.
+    # shellcheck disable=SC2024
+    sudo /usr/bin/timeout --signal=KILL "${limit}s" \
+        "$ABHAILE_INTEGRITY" --output "${output_root}" --host "$host" --scope "$scope" --json \
+        > "$result_file" || status=$?
+    if [[ -s "$result_file" ]]; then
+        cat "$result_file"
+    fi
+    if [[ "$scope" == "ordinary" && -s "$result_file" ]]; then
+        local parsed
+        if ! parsed="$("$ABHAILE_PYTHON" -c '
+import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+paths = value.get("paths", [])
+if not isinstance(paths, list) or len(paths) > 10:
+    raise SystemExit(1)
+sample = ",".join(paths) or "none"
+sample = "".join(character if character.isprintable() else "?" for character in sample)
+print(value["entries"], value["drift"], value["uncertainty"], sample, sep="\t")
+' "$result_file")"; then
+            return 1
+        fi
+        IFS=$'\t' read -r AUDIT_ENTRY_COUNT AUDIT_DRIFT_COUNT AUDIT_UNCERTAINTY_COUNT AUDIT_PATH_SAMPLE \
+            <<< "$parsed"
+        AUDIT_DURATION_SECONDS="$(($(date +%s) - started))"
+    fi
+    return "$status"
+}
+
+do_actionable_health() {
+    local output_root="$1" remaining limit
+    remaining="$(remaining_fast_seconds)" || return 124
+    limit=30
+    ((remaining < limit)) && limit="$remaining"
+    record_current_phase "actionable-health"
+    log "actionable-health: output=${output_root}"
+    sudo /usr/bin/timeout --signal=KILL "${limit}s" \
+        "$ABHAILE_HEALTH" --profile local-actionable --output "$output_root"
 }
 
 write_ansible_vars() {
@@ -477,6 +585,72 @@ restore_last_successful_network() {
         "$ABHAILE_NETWORK_RESTORE_PLAYBOOK"
 }
 
+load_full_schedule() {
+    local sha="$1" decision trigger interval validity age postcheck
+    read -r decision trigger interval validity age postcheck <<< "$(read_full_schedule "$sha")"
+    SCHEDULE_DECISION="$decision"
+    SCHEDULE_POSTCHECK="$postcheck"
+    RUN_TRIGGER="$trigger"
+    RUN_FULL_INTERVAL="$interval"
+    RUN_INTERVAL_STATUS="$validity"
+    RUN_LAST_FULL_AGE="$age"
+}
+
+record_completed_full() {
+    local host="$1" sha="$2" candidate_root="$3" success_outcome="$4"
+    local foundation_clean=1 ordinary_clean=1
+    FAST_DEADLINE_SECONDS=""
+    do_integrity "$host" "$candidate_root" enrollment-foundations || foundation_clean=0
+    do_integrity "$host" "$candidate_root" ordinary || ordinary_clean=0
+    do_actionable_health "$candidate_root" || ordinary_clean=0
+    local postcheck="degraded"
+    [[ "$ordinary_clean" == "1" ]] && postcheck="clean"
+    if ! record_last_full "$sha" "$postcheck"; then
+        RUN_POST_FULL_OUTCOME="failure"
+        log "post-full: unable to publish full-reconciliation scheduling evidence"
+        record_run_status 1 "$sha"
+        record_run_summary 1 "post-full" "failure" "$sha" "false"
+        return 1
+    fi
+    if [[ "$foundation_clean" != "1" ]]; then
+        RUN_POST_FULL_OUTCOME="degraded-enrollment-foundation"
+        log "post-full: enrollment foundations require bootstrap or adoption"
+        record_run_status 1 "$sha"
+        record_run_summary 1 "post-full" "degraded-enrollment-foundation" "$sha" "false"
+        return 1
+    fi
+    if [[ "$ordinary_clean" != "1" ]]; then
+        RUN_POST_FULL_OUTCOME="degraded-post-full"
+        log "post-full: ordinary integrity or actionable health remains degraded"
+        record_run_status 1 "$sha"
+        record_run_summary 1 "post-full" "degraded-post-full" "$sha" "false"
+        return 1
+    fi
+    if [[ "$RUN_INTERVAL_STATUS" == "invalid" ]]; then
+        RUN_POST_FULL_OUTCOME="degraded-invalid-full-interval"
+        log "schedule: invalid full interval; using safe six-hour default"
+        record_run_status 1 "$sha"
+        record_run_summary 1 "schedule" "degraded-invalid-full-interval" "$sha" "false"
+        return 1
+    fi
+    record_run_status 0 "$sha"
+    RUN_POST_FULL_OUTCOME="clean"
+    record_run_summary 0 "complete" "$success_outcome" "$sha" "false"
+}
+
+finish_fast_result() {
+    local sha="$1" outcome="$2" exit_code="0"
+    if [[ "$RUN_INTERVAL_STATUS" == "invalid" ]]; then
+        log "schedule: invalid full interval; using safe six-hour default"
+        outcome="degraded-invalid-full-interval"
+        exit_code="1"
+    fi
+    record_run_status "$exit_code" "$sha"
+    record_run_summary "$exit_code" "fast-path" "$outcome" "$sha" "false"
+    return_to_branch
+    return "$exit_code"
+}
+
 # --- Main --------------------------------------------------------------------
 
 main() {
@@ -505,6 +679,13 @@ main() {
 
     log "start: host=${host} branch=${ABHAILE_BRANCH} remote=${ABHAILE_REMOTE} cwd=${PWD}"
     record_current_phase "start"
+
+    if [[ "$ABHAILE_FORCE_FULL" != "0" && "$ABHAILE_FORCE_FULL" != "1" ]]; then
+        log "FATAL: ABHAILE_FORCE_FULL must be 0 or 1"
+        record_run_status 1 "unknown"
+        record_run_summary 1 "validate" "failure" "unknown" "false"
+        exit 1
+    fi
 
     if [[ "$mode" == "restore-network" ]]; then
         local admission last_network_sha
@@ -573,30 +754,27 @@ main() {
 
     validate_host "$host"
 
+    FAST_DEADLINE_SECONDS="$((RUN_STARTED_SECONDS + 60))"
+    local fetch_available=1 target_sha current_sha failed_sha suppressed=0
     if ! do_fetch; then
-        log "fetch: unavailable; reconciling retained last-successful state"
-        if [[ "$RECOVERED_LAST_SUCCESSFUL" == "1" ]] \
-            || recover_last_successful "$host" "" "true"; then
-            return_to_branch
-            record_run_status 0 "$last_sha"
-            record_run_summary 0 "fetch" "offline-last-successful" "$last_sha" "true"
-            exit 0
-        fi
-        return_to_branch
-        record_run_status 1 "$last_sha"
-        record_run_summary 1 "recovery" "failure" "$last_sha" "true"
-        exit 1
+        fetch_available=0
+        log "fetch: unavailable; auditing retained last-successful state"
     fi
 
-    local target_sha current_sha failed_sha
-    target_sha="$(git rev-parse "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}")"
     last_sha="$(read_last_good_sha)"
+    failed_sha="$(read_failed_target_sha)"
+    if [[ "$fetch_available" == "1" ]]; then
+        target_sha="$(git rev-parse "${ABHAILE_REMOTE}/${ABHAILE_BRANCH}")"
+    else
+        target_sha="$last_sha"
+    fi
     current_sha="$(git rev-parse HEAD)"
     log "detect: current=${current_sha:0:12} target=${target_sha:0:12} last-good=${last_sha:0:12}"
 
-    failed_sha="$(read_failed_target_sha)"
-    if [[ "$RECOVERED_LAST_SUCCESSFUL" == "1" && "$target_sha" == "$last_sha" ]]; then
-        log "detect: fetched target already reconciled during startup recovery"
+    if [[ "$fetch_available" == "1" && "$RECOVERED_LAST_SUCCESSFUL" == "1" \
+        && "$target_sha" == "$last_sha" ]]; then
+        RUN_TRIGGER="recovery"
+        log "detect: target already reconciled during startup recovery"
         if [[ -n "$failed_sha" ]]; then
             state_call clear_matching_failed_target "$failed_sha"
         fi
@@ -605,22 +783,96 @@ main() {
         return_to_branch
         exit 0
     fi
-    if [[ "$ABHAILE_FORCE_RETRY" != "1" && -n "$failed_sha" && "$failed_sha" == "$target_sha" ]]; then
-        log "detect: suppressing retry of failed commit ${target_sha:0:12}; reconciling last-successful"
-        if [[ "$RECOVERED_LAST_SUCCESSFUL" != "1" ]] \
-            && ! recover_last_successful "$host" "$failed_sha" "true"; then
-            return_to_branch
-            record_run_status 1 "$target_sha"
-            record_run_summary 1 "recovery" "failure" "$target_sha" "true"
-            exit 1
-        fi
-        return_to_branch
-        record_run_status 1 "$target_sha"
-        record_run_summary 1 "detect" "retry-suppressed" "$target_sha" "false"
-        exit 1
+
+    if [[ "$fetch_available" == "1" && "$ABHAILE_FORCE_RETRY" != "1" \
+        && -n "$failed_sha" && "$failed_sha" == "$target_sha" ]]; then
+        suppressed=1
+        log "detect: suppressing retry of failed commit ${target_sha:0:12}; auditing last-successful"
+        target_sha="$last_sha"
     fi
 
-    local previous_manifest=""
+    local decision prior_postcheck full_reason="" success_outcome=""
+    load_full_schedule "$target_sha"
+    decision="$SCHEDULE_DECISION"
+    prior_postcheck="$SCHEDULE_POSTCHECK"
+
+    if [[ "$fetch_available" == "1" && "$suppressed" != "1" \
+        && "$target_sha" != "$last_sha" ]]; then
+        full_reason="new-commit"
+        success_outcome="full-new-commit"
+        RUN_TRIGGER="new-commit"
+    elif [[ "$decision" == "due" ]]; then
+        full_reason="$RUN_TRIGGER"
+        if [[ "$RUN_TRIGGER" == "forced" ]]; then
+            success_outcome="full-forced"
+        elif [[ "$fetch_available" == "1" ]]; then
+            success_outcome="full-periodic"
+        else
+            success_outcome="full-periodic-offline"
+        fi
+    fi
+
+    if [[ -z "$full_reason" ]]; then
+        local audit_root="${RUN_CONTEXT_DIR}/audit"
+        git checkout --quiet "$target_sha"
+        validate_host "$host"
+        if ! do_render_bounded "$host" "$audit_root"; then
+            full_reason="integrity-drift"
+            success_outcome="full-integrity-drift"
+            RUN_TRIGGER="render-uncertainty"
+        elif ! do_integrity "$host" "$audit_root" enrollment-foundations; then
+            log "fast-path: enrollment foundations require bootstrap or adoption"
+            record_run_status 1 "$target_sha"
+            record_run_summary 1 "fast-path" "degraded-enrollment-foundation" "$target_sha" "false"
+            return_to_branch
+            exit 1
+        elif ! do_integrity "$host" "$audit_root" ordinary; then
+            full_reason="integrity-drift"
+            success_outcome="full-integrity-drift"
+            RUN_TRIGGER="integrity-drift"
+        elif ! do_actionable_health "$audit_root"; then
+            full_reason="actionable-health"
+            success_outcome="full-actionable-health"
+            RUN_TRIGGER="actionable-health"
+        else
+            if [[ "$suppressed" == "1" ]]; then
+                RUN_TRIGGER="failed-target"
+                record_run_status 1 "$failed_sha"
+                record_run_summary 1 "fast-path" "failed-target-suppressed" "$failed_sha" "false"
+                return_to_branch
+                exit 1
+            fi
+            if [[ "$fetch_available" == "1" ]]; then
+                finish_fast_result "$target_sha" "fast-clean" || exit $?
+            else
+                finish_fast_result "$target_sha" "fast-offline-clean" || exit $?
+            fi
+            exit 0
+        fi
+
+        if [[ "$RUN_TRIGGER" =~ ^(integrity-drift|actionable-health)$ \
+            && "$prior_postcheck" == "degraded" \
+            && "$ABHAILE_FORCE_FULL" != "1" ]]; then
+            if degraded_repair_is_deferred "audit audit ${RUN_FULL_INTERVAL} ${RUN_INTERVAL_STATUS} ${RUN_LAST_FULL_AGE} degraded"; then
+                log "fast-path: degraded repair deferred until the one-hour retry boundary"
+                RUN_POST_FULL_OUTCOME="degraded-repair-deferred"
+                if [[ "$suppressed" == "1" ]]; then
+                    RUN_TRIGGER="failed-target"
+                    record_run_status 1 "$failed_sha"
+                    record_run_summary 1 "fast-path" "failed-target-suppressed" \
+                        "$failed_sha" "false"
+                else
+                    record_run_status 1 "$target_sha"
+                    record_run_summary 1 "fast-path" "degraded-repair-deferred" \
+                        "$target_sha" "false"
+                fi
+                return_to_branch
+                exit 1
+            fi
+        fi
+    fi
+
+    local previous_manifest="" candidate_root="${RUN_CONTEXT_DIR}/candidate"
     if [[ "$target_sha" != "$last_sha" ]]; then
         local previous_root="${RUN_CONTEXT_DIR}/previous-last-successful"
         log "removal-context: rendering last-successful ${last_sha:0:12}"
@@ -634,26 +886,54 @@ main() {
         fi
         previous_manifest="${previous_root}/rendered/manifest.json"
         git checkout --quiet "$ABHAILE_BRANCH"
+        do_checkout "$target_sha"
+    else
+        git checkout --quiet "$target_sha"
     fi
 
-    # Checkout (fast-forward only)
-    do_checkout "$target_sha"
-
-    # Reconcile even when target equals last-successful so ordinary drift is repaired.
-    local candidate_root="${RUN_CONTEXT_DIR}/candidate"
     if run_pipeline_for_checked_out_commit "$host" "$target_sha" "$candidate_root" \
         "${candidate_root}/rendered/manifest.json" "$previous_manifest"; then
-        log "success: applied commit ${target_sha:0:12}"
-        commit_success "$target_sha" "true"
-        record_run_status 0 "$target_sha"
-        record_run_summary 0 "complete" "success" "$target_sha" "false"
+        log "success: full reconciliation applied commit ${target_sha:0:12}"
+        if [[ "$target_sha" == "$last_sha" ]]; then
+            commit_success "$target_sha" "false"
+        else
+            commit_success "$target_sha" "true"
+        fi
+        local completed_full_status=0
+        record_completed_full "$host" "$target_sha" "$candidate_root" "$success_outcome" \
+            || completed_full_status=$?
+        if [[ "$suppressed" == "1" ]]; then
+            RUN_TRIGGER="failed-target"
+            record_run_status 1 "$failed_sha"
+            record_run_summary 1 "fast-path" "failed-target-suppressed" "$failed_sha" "false"
+            return_to_branch
+            exit 1
+        fi
+        if [[ "$completed_full_status" == "0" ]]; then
+            return_to_branch
+            exit 0
+        fi
         return_to_branch
-        exit 0
+        exit 1
     fi
 
-    # A failed candidate remains failed even when last-successful recovery passes.
     local failed_phase
     failed_phase="$(read_current_phase || true)"
+    if [[ "$target_sha" == "$last_sha" ]]; then
+        log "accepted-state full pipeline failed at ${target_sha:0:12}"
+        if [[ "$(read_current_run_sha)" == "$target_sha" ]] \
+            && recover_last_successful "$host" "$target_sha" "true"; then
+            return_to_branch
+            record_run_status 1 "$target_sha"
+            record_run_summary 1 "${failed_phase:-apply}" "failure-recovered" "$target_sha" "true"
+            exit 1
+        fi
+        return_to_branch
+        record_run_status 1 "$target_sha"
+        record_run_summary 1 "${failed_phase:-preflight}" "failure-before-mutation" "$target_sha" "false"
+        exit 1
+    fi
+
     record_failed_target "$target_sha"
     if [[ "$(read_current_run_sha)" != "$target_sha" ]]; then
         log "pipeline failed before managed-state mutation; recovery is not required"
