@@ -7,12 +7,13 @@ import socket
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
 _SECRETS_READY_SENTINEL = Path("/srv/vault/agent/out/.ready")
 _PROC_UPTIME = Path("/proc/uptime")
+HealthProfile = Literal["default", "local-actionable"]
 
 
 @dataclass(frozen=True)
@@ -31,26 +32,41 @@ def run_health_audit(
     repo_root: Path,
     timeout_seconds: int = 5,
     cluster: bool = False,
+    profile: HealthProfile = "default",
 ) -> list[HealthResult]:
     """Run bounded post-apply health checks for the local host."""
+    if profile not in {"default", "local-actionable"}:
+        raise ValueError(f"Unsupported health profile: {profile}")
     actual_host = host or socket.gethostname().split(".", 1)[0]
     config_root = repo_root / "config"
     mapping = _read_yaml(config_root / "mapping.yaml")
     network = _read_yaml(config_root / "network.yaml")
     manifest = _read_json(output_root / "rendered" / "manifest.json")
+    if manifest.get("host") != actual_host:
+        return [HealthResult("manifest-host", False, "manifest does not match expected host")]
     services = _mapped_services(mapping, actual_host)
     rootless_users = _rootless_users_for_services(config_root, services)
 
     results: list[HealthResult] = []
     results.extend(_check_required_addresses(actual_host, services, config_root, network))
+    actionable = profile == "local-actionable"
+    endpoints = _mapped_coredns_endpoints(services, network) if actionable else None
     results.extend(
         _check_coredns(
             network,
             timeout_seconds=timeout_seconds,
-            include_cluster_consistency=cluster,
+            include_cluster_consistency=cluster and not actionable,
+            endpoints=endpoints,
+            include_public=not actionable,
         )
     )
-    results.extend(_check_system_units(manifest, timeout_seconds=timeout_seconds))
+    results.extend(
+        _check_system_units(
+            manifest,
+            timeout_seconds=timeout_seconds,
+            actionable=actionable,
+        )
+    )
     results.extend(
         _check_rootless_vault_agent(
             services,
@@ -60,14 +76,18 @@ def run_health_audit(
     )
     results.extend(_check_podman_images(manifest, timeout_seconds=timeout_seconds))
     results.extend(_check_obsolete_image_units(manifest, timeout_seconds=timeout_seconds))
-    results.extend(
-        _check_failed_units(
-            timeout_seconds=timeout_seconds,
-            rootless_users=rootless_users,
+    if not actionable:
+        results.extend(
+            _check_failed_units(
+                timeout_seconds=timeout_seconds,
+                rootless_users=rootless_users,
+            )
         )
-    )
     results.extend(_check_secrets_ready(services))
-    results.extend(_check_podman_health(timeout_seconds=timeout_seconds))
+    if actionable:
+        results.extend(_check_selected_containers(manifest, timeout_seconds=timeout_seconds))
+    else:
+        results.extend(_check_podman_health(timeout_seconds=timeout_seconds))
     return results
 
 
@@ -221,6 +241,21 @@ def _coredns_endpoints(network: dict[str, Any]) -> list[str]:
     return sorted(endpoints)
 
 
+def _mapped_coredns_endpoints(services: list[str], network: dict[str, Any]) -> list[str]:
+    """Return only CoreDNS endpoints assigned to the current host."""
+    configured = network.get("services", {})
+    if not isinstance(configured, dict):
+        return []
+    endpoints: list[str] = []
+    for service in services:
+        if not service.startswith("coredns-"):
+            continue
+        payload = configured.get(service)
+        if isinstance(payload, dict) and isinstance(payload.get("address"), str):
+            endpoints.append(_strip_cidr(payload["address"]))
+    return sorted(set(endpoints))
+
+
 def _internal_zones(network: dict[str, Any]) -> list[str]:
     """Return internally hosted DNS zones from network configuration."""
     dns = network.get("dns", {})
@@ -254,20 +289,23 @@ def _check_coredns(
     *,
     timeout_seconds: int,
     include_cluster_consistency: bool,
+    endpoints: list[str] | None = None,
+    include_public: bool = True,
 ) -> list[HealthResult]:
     """Check CoreDNS public resolution and authoritative zone answers."""
     results: list[HealthResult] = []
-    endpoints = _coredns_endpoints(network)
+    endpoints = _coredns_endpoints(network) if endpoints is None else endpoints
     zones = _internal_zones(network)
     for endpoint in endpoints:
-        public_answer = _dig(endpoint, "example.com.", "A", timeout_seconds=timeout_seconds)
-        results.append(
-            HealthResult(
-                f"dns-public:{endpoint}",
-                bool(public_answer),
-                public_answer or "no public DNS answer",
+        if include_public:
+            public_answer = _dig(endpoint, "example.com.", "A", timeout_seconds=timeout_seconds)
+            results.append(
+                HealthResult(
+                    f"dns-public:{endpoint}",
+                    bool(public_answer),
+                    public_answer or "no public DNS answer",
+                )
             )
-        )
         for zone in zones:
             soa = _dig(endpoint, zone, "SOA", timeout_seconds=timeout_seconds)
             ns = _dig(endpoint, zone, "NS", timeout_seconds=timeout_seconds)
@@ -299,6 +337,7 @@ def _check_system_units(
     manifest: dict[str, Any],
     *,
     timeout_seconds: int,
+    actionable: bool = False,
 ) -> list[HealthResult]:
     """Check required root-owned units discovered from the rendered manifest."""
     units: set[str] = set()
@@ -317,7 +356,10 @@ def _check_system_units(
         unit = owner_ref.split(":", 1)[1]
         if kind in {"quadlet.container", "quadlet.pod"} and unit.endswith(".service"):
             units.add(unit)
-        if kind == "systemd.unit" and unit in {"coredns.service", "vault.service"}:
+        if kind == "systemd.unit" and (
+            unit in {"coredns.service", "vault.service"}
+            or (actionable and isinstance(hints, dict) and hints.get("activation_mode") == "start")
+        ):
             units.add(unit)
 
     results: list[HealthResult] = []
@@ -380,6 +422,11 @@ def _check_rootless_vault_agent(
 
 def _podman_image_entries(manifest: dict[str, Any]) -> list[dict[str, str | bool | None]]:
     """Return manifest-declared container images with runtime context."""
+    return [item for item in _podman_container_entries(manifest) if item["image"] is not None]
+
+
+def _podman_container_entries(manifest: dict[str, Any]) -> list[dict[str, str | bool | None]]:
+    """Return manifest-declared containers with runtime context."""
     entries = manifest.get("entries", [])
     if not isinstance(entries, list):
         return []
@@ -388,11 +435,9 @@ def _podman_image_entries(manifest: dict[str, Any]) -> list[dict[str, str | bool
         if not isinstance(entry, dict) or entry.get("kind") != "quadlet.container":
             continue
         hints = entry.get("apply_hints")
-        if not isinstance(hints, dict):
-            continue
-        image = hints.get("podman_image")
-        if not isinstance(image, str) or not image:
-            continue
+        hints = hints if isinstance(hints, dict) else {}
+        image_value = hints.get("podman_image")
+        image = image_value if isinstance(image_value, str) and image_value else None
         owner_ref = entry.get("owner_ref")
         unit = owner_ref.split(":", 1)[1] if isinstance(owner_ref, str) and ":" in owner_ref else ""
         rootless = bool(hints.get("rootless"))
@@ -607,3 +652,55 @@ def _check_podman_health(*, timeout_seconds: int) -> list[HealthResult]:
             unhealthy or result.stderr.strip(),
         )
     ]
+
+
+def _check_selected_containers(
+    manifest: dict[str, Any], *, timeout_seconds: int
+) -> list[HealthResult]:
+    """Check only manifest-selected containers in their declared Podman context."""
+    results: list[HealthResult] = []
+    for item in _podman_container_entries(manifest):
+        unit = item["unit"]
+        if not isinstance(unit, str) or not unit.endswith(".service"):
+            continue
+        container = f"systemd-{unit.removesuffix('.service')}"
+        rootless = item["rootless"] is True
+        podman_user = item["podman_user"]
+        argv = [
+            "podman",
+            "inspect",
+            "--format",
+            "{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}",
+        ]
+        if rootless:
+            if not isinstance(podman_user, str) or not podman_user:
+                results.append(
+                    HealthResult(f"container-running:{unit}", False, "missing podman_user")
+                )
+                continue
+            argv = [
+                "machinectl",
+                "--quiet",
+                "shell",
+                f"{podman_user}@",
+                "/usr/bin/podman",
+                *argv[1:],
+            ]
+        argv.append(container)
+        try:
+            result = _command(argv, timeout_seconds=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            results.append(HealthResult(f"container-running:{unit}", False, str(exc)))
+            continue
+        state, separator, health = result.stdout.strip().partition("|")
+        success = result.returncode == 0 and state == "running"
+        if separator and health:
+            success = success and health == "healthy"
+        results.append(
+            HealthResult(
+                f"container-running:{unit}",
+                success,
+                result.stdout.strip() or result.stderr.strip(),
+            )
+        )
+    return results

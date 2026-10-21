@@ -6,9 +6,10 @@ import argparse
 import socket
 import sys
 from pathlib import Path
+from typing import cast
 
 from abhaile.cli.common import configure_logging
-from abhaile.health import results_to_json, run_health_audit
+from abhaile.health import HealthProfile, results_to_json, run_health_audit
 from abhaile.utils.paths import get_repo_root, load_paths
 
 
@@ -18,6 +19,12 @@ def parse_health_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", help="Output root override")
     parser.add_argument("--host", help="Expected host name override")
     parser.add_argument("--timeout", type=int, default=5, help="Per-check timeout in seconds")
+    parser.add_argument(
+        "--profile",
+        choices=("default", "local-actionable"),
+        default="default",
+        help="Select the operator default or repair-triggering local checks",
+    )
     parser.add_argument(
         "--cluster",
         action="store_true",
@@ -43,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=repo_root,
         timeout_seconds=args.timeout,
         cluster=args.cluster,
+        profile=cast(HealthProfile, args.profile),
     )
     failed = [result for result in results if not result.success]
     if args.json:

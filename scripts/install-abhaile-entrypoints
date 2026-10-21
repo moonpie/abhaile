@@ -15,11 +15,13 @@ readonly ENTRYPOINT_NAMES=(
     "abhaile-render"
     "abhaile-inventory"
     "abhaile-health"
+    "abhaile-integrity"
 )
 readonly ENTRYPOINT_MODULES=(
     "abhaile.cli.render"
     "abhaile.cli.inventory"
     "abhaile.cli.health"
+    "abhaile.cli.integrity"
 )
 
 log() { printf '[install-abhaile-entrypoints] %s\n' "$*"; }

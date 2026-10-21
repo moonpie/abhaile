@@ -7,6 +7,9 @@
 2026-10-20: Implemented on both hosts; the legacy Python mutation backend and applied-manifest
 history were retired during Phase 8. Fresh bootstrap now uses the same Ansible check/live path.
 
+2026-10-20: Amended with the active Spec 0029 adaptive reconciliation design. Recovery authority
+remains unchanged.
+
 Supersedes ADR 0012.
 
 ## Context
@@ -60,6 +63,59 @@ Each ordinary run first resolves interrupted work. It then fetches only to disco
 commit. An unchanged desired commit is still reconciled so drift is repaired. If fetch fails and a
 last-successful revision exists locally, the runner warns and reconciles it from local Git objects.
 Existing failed-target suppression prevents repeatedly applying the same failed candidate.
+
+### Adaptive unchanged-commit admission amendment
+
+Active Spec 0029 replaces only the preceding unconditional unchanged/full and fetch-failure/full
+traversal rules. Recovery and failed-candidate handling still run first. A new unsuppressed desired
+commit, an expired full deadline, or an explicit one-shot `ABHAILE_FORCE_FULL=1` request invokes the
+existing full Ansible pipeline.
+
+When the fetched target equals `last-successful-commit`, the runner freshly renders that exact
+commit and consumes three independent Boolean results: a reserved enrollment-foundation diagnostic,
+ordinary managed-artifact integrity, and locally actionable health. Foundation failure remains
+operator-directed and never invokes ordinary repair. Ordinary integrity or health failure invokes
+the existing full pipeline unless a recent unsuccessful repair is being deferred. External, peer,
+cluster, and public-DNS health remain diagnostic because local Ansible cannot repair them. The
+runner does not parse individual findings or duplicate Ansible policy.
+
+After fetch failure, the runner applies the same Boolean checks to a fresh render of the retained
+last-successful revision. If they pass and the periodic deadline is not due, it exits without
+mutation while explicitly reporting offline degradation. If the deadline is due, it fully
+reconciles the retained last-successful revision. Neither path advances recovery authority or
+clears a failed remote target.
+
+Ansible remains one dependency-ordered check/live path, and its existing family-local acceptance
+remains candidate promotion authority. The fast path is read-only with respect to managed host
+state and recovery authority. A suppressed failed candidate is not implicitly retried; its accepted
+last-successful revision is audited and repaired under Spec 0029.
+
+The non-authoritative `last-full-reconciliation` record binds the reconciled SHA, completion time,
+and one Boolean `postcheck=clean|degraded` value for ordinary integrity and local health. A clean
+record permits one immediate automatic repair. If a successful full repair remains degraded,
+further automatic repair for the same accepted SHA waits until the record is one hour old. New
+commits, interrupted recovery, failed-candidate retry, the periodic deadline, and explicit force
+bypass that delay. No finding fingerprint, repair queue, or separate cooldown ledger is introduced.
+
+Full reconciliation remains mandatory at least every six hours. The configurable interval accepts
+3600 through 21600 seconds and defaults safely to 21600. Invalid input uses the six-hour schedule
+and remains visible without creating state or a five-minute full-run loop. Any longer interval
+requires a future spec and ADR-level review with stronger canonical drift coverage.
+
+The single timer becomes completion-relative with `OnUnitInactiveSec=5min`, `OnBootSec=2min`, up to
+30 seconds of randomized delay, and one-second accuracy. `Persistent=true` is removed. Runs neither
+overlap nor queue; a long full traversal is followed by the ordinary post-completion delay.
+
+Delivery remains recovery-compatible: a state-neutral revision introduces checks, parsing,
+outcomes, and tests while retaining always-full behavior. Only after that revision is
+last-successful on both hosts may a later revision enable the fast path, enhanced scheduling record,
+and timer semantics. Recovery of the enabling revision through the compatibility revision must be
+proved before promotion.
+
+`last-full-reconciliation` cannot select a recovery revision. This ADR remains authoritative for
+candidate promotion, the mutation marker, last-successful recovery, candidate-only cleanup, and
+network boot recovery. The deployed runners remain always-full until Spec 0029's staged enabling
+revision is deployed and validated.
 
 Candidate-only additions are cleaned using the retained interrupted-candidate and last-successful
 manifests. Removal is limited to Abhaile-managed resources whose live identity still matches the
@@ -125,10 +181,18 @@ code and operational concepts. Phase 5.2 includes an explicit go/no-go compariso
   Gateway, neighbour, SSH, Internet, and peer reachability are diagnostic rather than promotion
   authority.
 - Irreversible effects and ambiguous candidate-only cleanup remain explicit operator concerns.
+- Clean unchanged polls can avoid Ansible, while new commits and six-hour assurance retain the
+  existing full pipeline.
+- Static integrity cannot prove every semantic invariant, so periodic full reconciliation remains
+  the safety net.
+- Persistent ordinary failure remains visible while automatic retries are spaced by one hour; a
+  changed failure during that window may wait for the same boundary unless explicitly forced.
+- Long full runs extend the timer cycle by design and do not accumulate queued work.
 - ADR 0012 and its superseded ADRs remain historical evidence, not implementation authority.
 
 ## References
 
 - [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
+- [Spec 0029: Adaptive Reconciliation Fast Path](../specs/active/0029-adaptive-reconciliation-fast-path.md)
 - [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - [Phase 5.2 checklist](../../TODO.md)

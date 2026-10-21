@@ -7,14 +7,17 @@ import os
 import re
 import stat
 import tempfile
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from abhaile.utils.errors import ApplyError
 
 CURRENT_RUN = "current-run"
 FAILED_TARGET = "failed-target"
 LAST_SUCCESSFUL_COMMIT = "last-successful-commit"
+LAST_FULL_RECONCILIATION = "last-full-reconciliation"
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 
 StartupAction = Literal[
@@ -24,6 +27,46 @@ StartupAction = Literal[
     "enrollment-required",
     "recovery-blocked",
 ]
+Postcheck = Literal["clean", "degraded"]
+
+RUN_OUTCOMES = frozenset(
+    {
+        "success",
+        "recovery-success",
+        "offline-last-successful",
+        "failure",
+        "failure-recovered",
+        "failure-before-mutation",
+        "fast-forward-failure",
+        "retry-suppressed",
+        "last-successful-context-failure",
+        "enrollment-required",
+        "recovery-blocked",
+        "dirty-worktree",
+        "fast-clean",
+        "fast-offline-clean",
+        "full-new-commit",
+        "full-integrity-drift",
+        "full-actionable-health",
+        "full-periodic",
+        "full-periodic-offline",
+        "full-forced",
+        "degraded-post-full",
+        "degraded-repair-deferred",
+        "degraded-enrollment-foundation",
+        "degraded-invalid-full-interval",
+        "failed-target-suppressed",
+    }
+)
+
+
+@dataclass(frozen=True)
+class LastFullReconciliation:
+    """Represent non-authoritative completed-full scheduling evidence."""
+
+    commit_sha: str
+    completed_at: datetime
+    postcheck: Postcheck
 
 
 def _validate_sha(value: str, *, record_name: str) -> str:
@@ -80,6 +123,44 @@ def read_failed_target(state_dir: Path) -> str | None:
     """Read failed-target, accepting the existing runner's metadata suffix."""
     _require_state_dir(state_dir)
     return _read_record(state_dir / FAILED_TARGET, allow_legacy_suffix=True)
+
+
+def read_last_full_reconciliation(state_dir: Path) -> LastFullReconciliation | None:
+    """Read a closed last-full scheduling record without treating it as authority."""
+    _require_state_dir(state_dir)
+    path = state_dir / LAST_FULL_RECONCILIATION
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise ApplyError("Unable to inspect last-full-reconciliation") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise ApplyError("Runner state record is not a regular file: last-full-reconciliation")
+    state_metadata = state_dir.lstat()
+    if (
+        stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid != state_metadata.st_uid
+        or metadata.st_gid != state_metadata.st_gid
+    ):
+        raise ApplyError("Invalid last-full-reconciliation ownership or mode")
+    try:
+        fields = path.read_text(encoding="utf-8").strip().split()
+    except (OSError, UnicodeError) as exc:
+        raise ApplyError("Unable to read runner state record: last-full-reconciliation") from exc
+    if len(fields) != 3 or not fields[2].startswith("postcheck="):
+        raise ApplyError("Invalid last-full-reconciliation record")
+    commit_sha = _validate_sha(fields[0], record_name=LAST_FULL_RECONCILIATION)
+    try:
+        completed_at = datetime.fromisoformat(fields[1].replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ApplyError("Invalid last-full-reconciliation timestamp") from exc
+    if completed_at.tzinfo is None:
+        raise ApplyError("Invalid last-full-reconciliation timestamp")
+    postcheck = fields[2].split("=", 1)[1]
+    if postcheck not in {"clean", "degraded"}:
+        raise ApplyError("Invalid last-full-reconciliation postcheck")
+    return LastFullReconciliation(commit_sha, completed_at, cast(Postcheck, postcheck))
 
 
 def _sync_directory(path: Path) -> None:

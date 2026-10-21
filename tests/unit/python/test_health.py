@@ -6,6 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from abhaile import health
 
 
@@ -213,6 +215,7 @@ class TestHealthHelpers:
                 {
                     "kind": "systemd.unit",
                     "owner_ref": "unit:coredns.service",
+                    "apply_hints": {"activation_mode": "start"},
                 }
             ]
         }
@@ -222,6 +225,62 @@ class TestHealthHelpers:
         assert results == [
             health.HealthResult("unit-active:coredns.service", False, "systemctl missing")
         ]
+
+    def test_actionable_system_units_follow_manifest_activation_hints(
+        self, monkeypatch: Any
+    ) -> None:
+        """Check selected active units without treating dormant oneshots as failed."""
+        seen: list[str] = []
+
+        def fake_command(
+            argv: list[str], *, timeout_seconds: int, check: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(argv[-1])
+            return _completed("")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "systemd.unit",
+                    "owner_ref": "unit:watch.path",
+                    "apply_hints": {"activation_mode": "start"},
+                },
+                {"kind": "systemd.unit", "owner_ref": "unit:copy.service"},
+                {"kind": "quadlet.container", "owner_ref": "unit:app.service"},
+            ]
+        }
+
+        results = health._check_system_units(manifest, timeout_seconds=1, actionable=True)
+
+        assert seen == ["app.service", "watch.path"]
+        assert all(result.success for result in results)
+
+    def test_default_system_units_remain_compatible(self, monkeypatch: Any) -> None:
+        """Do not broaden the established operator-default unit set."""
+        seen: list[str] = []
+
+        def fake_command(
+            argv: list[str], *, timeout_seconds: int, check: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(argv[-1])
+            return _completed("")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "systemd.unit",
+                    "owner_ref": "unit:watch.path",
+                    "apply_hints": {"activation_mode": "start"},
+                },
+                {"kind": "systemd.unit", "owner_ref": "unit:coredns.service"},
+            ]
+        }
+
+        health._check_system_units(manifest, timeout_seconds=1)
+
+        assert seen == ["coredns.service"]
 
     def test_rootless_vault_agent_skips_when_unmapped(self, monkeypatch: Any) -> None:
         monkeypatch.setattr(
@@ -652,7 +711,7 @@ class TestHealthHelpers:
         )
         (output_root / "rendered").mkdir(parents=True)
         (output_root / "rendered" / "manifest.json").write_text(
-            '{"entries": []}\n', encoding="utf-8"
+            '{"host": "phobos", "entries": []}\n', encoding="utf-8"
         )
 
         monkeypatch.setattr(
@@ -672,6 +731,142 @@ class TestHealthHelpers:
             "address:172.20.20.235/32",
             "system-failed-units",
         }
+
+    def test_actionable_profile_excludes_global_failures_and_remote_dns(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """Restrict repair triggers to evidence the local full run can affect."""
+        repo_root = tmp_path / "repo"
+        output_root = tmp_path / "out"
+        (repo_root / "config").mkdir(parents=True)
+        (repo_root / "config" / "mapping.yaml").write_text(
+            "abhaile:\n  - phobos:\n      - coredns-a\n", encoding="utf-8"
+        )
+        (repo_root / "config" / "network.yaml").write_text(
+            "services:\n"
+            "  coredns-a: {address: 172.20.20.235/32}\n"
+            "  coredns-b: {address: 172.20.20.236/32}\n",
+            encoding="utf-8",
+        )
+        (output_root / "rendered").mkdir(parents=True)
+        (output_root / "rendered" / "manifest.json").write_text(
+            '{"host": "phobos", "entries": []}\n', encoding="utf-8"
+        )
+        dns_calls: list[tuple[list[str] | None, bool]] = []
+        monkeypatch.setattr(health, "_check_required_addresses", lambda *_args: [])
+        monkeypatch.setattr(health, "_check_system_units", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(health, "_check_rootless_vault_agent", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(health, "_check_podman_images", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(health, "_check_obsolete_image_units", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(health, "_check_secrets_ready", lambda *_args: [])
+        monkeypatch.setattr(health, "_check_selected_containers", lambda *_args, **_kwargs: [])
+        monkeypatch.setattr(
+            health,
+            "_check_failed_units",
+            lambda **_kwargs: (_ for _ in ()).throw(AssertionError("global failed units")),
+        )
+
+        def fake_dns(
+            _network: dict[str, Any],
+            *,
+            timeout_seconds: int,
+            include_cluster_consistency: bool,
+            endpoints: list[str] | None,
+            include_public: bool,
+        ) -> list[health.HealthResult]:
+            dns_calls.append((endpoints, include_public))
+            return []
+
+        monkeypatch.setattr(health, "_check_coredns", fake_dns)
+
+        assert (
+            health.run_health_audit(
+                host="phobos",
+                output_root=output_root,
+                repo_root=repo_root,
+                profile="local-actionable",
+            )
+            == []
+        )
+        assert dns_calls == [(["172.20.20.235"], False)]
+
+    def test_selected_container_health_is_manifest_scoped(self, monkeypatch: Any) -> None:
+        """Inspect selected containers including locally built-image consumers."""
+        seen: list[list[str]] = []
+
+        def fake_command(
+            argv: list[str], *, timeout_seconds: int, check: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(argv)
+            return _completed("running|healthy\n")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:caddy-dmz.service",
+                    "apply_hints": {"rootless": False},
+                }
+            ]
+        }
+
+        results = health._check_selected_containers(manifest, timeout_seconds=1)
+
+        assert results == [
+            health.HealthResult("container-running:caddy-dmz.service", True, "running|healthy")
+        ]
+        assert seen[0][-1] == "systemd-caddy-dmz"
+
+    def test_selected_rootless_container_uses_quiet_machine_shell(self, monkeypatch: Any) -> None:
+        """Keep machine session chatter out of exact Podman state parsing."""
+        seen: list[list[str]] = []
+
+        def fake_command(
+            argv: list[str], *, timeout_seconds: int, check: bool = False
+        ) -> subprocess.CompletedProcess[str]:
+            seen.append(argv)
+            return _completed("running|\n")
+
+        monkeypatch.setattr(health, "_command", fake_command)
+        manifest = {
+            "entries": [
+                {
+                    "kind": "quadlet.container",
+                    "owner_ref": "unit:vault-agent.service",
+                    "apply_hints": {"rootless": True, "podman_user": "abhaile"},
+                }
+            ]
+        }
+
+        results = health._check_selected_containers(manifest, timeout_seconds=1)
+
+        assert results[0].success is True
+        assert seen[0][:4] == ["machinectl", "--quiet", "shell", "abhaile@"]
+
+    def test_health_rejects_unknown_profile_and_wrong_manifest_host(self, tmp_path: Path) -> None:
+        """Fail closed at the programmatic profile and host authority boundaries."""
+        with pytest.raises(ValueError, match="Unsupported health profile"):
+            health.run_health_audit(
+                host="phobos",
+                output_root=tmp_path,
+                repo_root=tmp_path,
+                profile="typo",  # type: ignore[arg-type]
+            )
+
+        config_root = tmp_path / "config"
+        rendered = tmp_path / "out" / "rendered"
+        config_root.mkdir(parents=True)
+        rendered.mkdir(parents=True)
+        (config_root / "mapping.yaml").write_text("abhaile: []\n", encoding="utf-8")
+        (config_root / "network.yaml").write_text("{}\n", encoding="utf-8")
+        (rendered / "manifest.json").write_text(
+            '{"host": "deimos", "entries": []}\n', encoding="utf-8"
+        )
+
+        assert health.run_health_audit(
+            host="phobos", output_root=tmp_path / "out", repo_root=tmp_path
+        ) == [health.HealthResult("manifest-host", False, "manifest does not match expected host")]
 
     def test_rootless_user_resolution_from_service_config(self, tmp_path: Path) -> None:
         config_root = tmp_path / "config"

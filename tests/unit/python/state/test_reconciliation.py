@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,8 @@ from abhaile.state.reconciliation import (
     establish_last_successful,
     mark_current_run,
     mark_failed_target,
+    RUN_OUTCOMES,
+    read_last_full_reconciliation,
     read_current_run,
     read_failed_target,
     read_last_successful,
@@ -190,3 +193,72 @@ def test_state_writes_reject_invalid_sha(tmp_path: Path, value: str) -> None:
     """Require one complete lowercase SHA-1 commit identity."""
     with pytest.raises(ApplyError, match="Invalid current-run"):
         mark_current_run(tmp_path, value)
+
+
+def test_last_full_parser_reads_closed_non_authoritative_record(tmp_path: Path) -> None:
+    """Parse exact SHA, aware timestamp, and Boolean postcheck evidence."""
+    record_path = tmp_path / "last-full-reconciliation"
+    record_path.write_text(
+        f"{NEW_SHA} 2026-10-20T08:02:34+01:00 postcheck=degraded\n",
+        encoding="utf-8",
+    )
+    record_path.chmod(0o600)
+
+    record = read_last_full_reconciliation(tmp_path)
+
+    assert record is not None
+    assert record.commit_sha == NEW_SHA
+    assert record.completed_at == datetime.fromisoformat("2026-10-20T08:02:34+01:00")
+    assert record.postcheck == "degraded"
+
+
+def test_last_full_parser_returns_none_when_absent(tmp_path: Path) -> None:
+    """Treat absent scheduling evidence as missing without creating state."""
+    assert read_last_full_reconciliation(tmp_path) is None
+
+
+def test_last_full_parser_rejects_symlink_and_permissive_mode(tmp_path: Path) -> None:
+    """Do not accept redirected or loosely protected scheduling evidence."""
+    target = tmp_path / "target"
+    target.write_text(f"{NEW_SHA} 2026-10-20T08:02:34Z postcheck=clean\n")
+    target.chmod(0o600)
+    (tmp_path / "last-full-reconciliation").symlink_to(target)
+
+    with pytest.raises(ApplyError, match="not a regular file"):
+        read_last_full_reconciliation(tmp_path)
+
+    (tmp_path / "last-full-reconciliation").unlink()
+    target.rename(tmp_path / "last-full-reconciliation")
+    (tmp_path / "last-full-reconciliation").chmod(0o644)
+    with pytest.raises(ApplyError, match="ownership or mode"):
+        read_last_full_reconciliation(tmp_path)
+
+
+def test_adaptive_outcome_vocabulary_is_available_before_activation() -> None:
+    """Keep later runner wiring to one reviewed closed vocabulary."""
+    assert {
+        "fast-clean",
+        "full-new-commit",
+        "degraded-post-full",
+        "failed-target-suppressed",
+    } <= RUN_OUTCOMES
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        f"{NEW_SHA}\n",
+        f"{NEW_SHA} not-a-time postcheck=clean\n",
+        f"{NEW_SHA} 2026-10-20T08:02:34 postcheck=clean\n",
+        f"{NEW_SHA} 2026-10-20T08:02:34Z postcheck=unknown\n",
+        f"{NEW_SHA} 2026-10-20T08:02:34Z postcheck=clean extra\n",
+    ],
+)
+def test_last_full_parser_rejects_malformed_records(tmp_path: Path, payload: str) -> None:
+    """Force later scheduling logic to treat uncertain records conservatively."""
+    record_path = tmp_path / "last-full-reconciliation"
+    record_path.write_text(payload, encoding="utf-8")
+    record_path.chmod(0o600)
+
+    with pytest.raises(ApplyError, match="last-full-reconciliation"):
+        read_last_full_reconciliation(tmp_path)

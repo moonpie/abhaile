@@ -19,6 +19,7 @@ ENTRYPOINTS: dict[str, str] = {
     "abhaile-render": "abhaile.cli.render",
     "abhaile-inventory": "abhaile.cli.inventory",
     "abhaile-health": "abhaile.cli.health",
+    "abhaile-integrity": "abhaile.cli.integrity",
 }
 
 
