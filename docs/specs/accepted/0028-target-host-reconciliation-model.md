@@ -145,7 +145,7 @@ maintenance is outside routine reconciliation and must preserve both recovery in
 
 ## Ordinary Reconciliation
 
-Active Spec 0029 and the 2026-10-20 amendment to ADR 0013 refine only unchanged-commit admission,
+Accepted Spec 0029 and the 2026-10-20 amendment to ADR 0013 refine only unchanged-commit admission,
 fetch-outage handling, suppressed-failed-target unchanged handling, completion-relative timer
 semantics, and the non-authoritative `last-full-reconciliation` scheduling/post-check record
 described below. An unchanged or retained last-successful revision may exit without Ansible only
@@ -155,9 +155,7 @@ unsuppressed new commits, ordinary repair triggers, explicit force, and at least
 
 `last-successful-commit`, `current-run`, and `failed-target` remain the only recovery authority.
 All other recovery, candidate acceptance, cleanup, and convergence rules in this spec remain
-authoritative. Amended ADR 0013 and active Spec 0029 govern the implementation target immediately,
-but the deployed runners remain on the historically proven five-minute full cadence until Spec
-0029's staged enabling revision is deployed and validated.
+authoritative. Amended ADR 0013 and accepted Spec 0029 govern the deployed implementation.
 
 Every run acquires the existing host lock and performs these steps:
 
@@ -581,6 +579,6 @@ apply is retained if the replacement fails that gate.
 ## References
 
 - [ADR 0013](../../adr/0013-last-successful-ansible-reconciliation.md)
-- [Active Spec 0029](../active/0029-adaptive-reconciliation-fast-path.md)
+- [Accepted Spec 0029](0029-adaptive-reconciliation-fast-path.md)
 - [Superseded Spec 0012](../superseded/0012-gitops-runner.md)
 - [Phase 5.2 checklist](../../../TODO.md)

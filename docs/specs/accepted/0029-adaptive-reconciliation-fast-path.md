@@ -5,10 +5,10 @@
 ```yaml
 id: SPEC-2026-029
 title: Adaptive Reconciliation Fast Path
-status: active
+status: accepted
 owner: moonpie
 created: 2026-10-20
-updated: 2026-10-21
+updated: 2026-10-22
 related_adrs:
   - 0013-last-successful-ansible-reconciliation
 supersedes: null
@@ -35,12 +35,11 @@ last-successful recovery.
 This spec changes one part of
 [Spec 0028](../accepted/0028-target-host-reconciliation-model.md): an unchanged desired revision
 will no longer run full Ansible reconciliation on every timer activation. ADR 0013 was amended and
-its index entry and accepted Spec 0028 were updated in the activation change. This active spec is
+its index entry and accepted Spec 0028 were updated in the activation change. This accepted spec is
 authoritative only for the unchanged-commit fast path, fetch-outage behavior, timer semantics, and
 non-authoritative scheduling records, including whether a suppressed failed target requires an
 unchanged full reconciliation; all other Spec 0028 recovery and convergence contracts remain
-authoritative. The deployed runners remain always-full until the staged enabling revision is
-deployed and validated.
+authoritative. The staged enabling revision is deployed and validated on both hosts.
 
 ### Activation Record
 
@@ -51,47 +50,47 @@ runtime implementation evidence; all delivery acceptance criteria below remain o
 
 ## Requirements
 
-- [ ] Preserve `last-successful-commit`, `current-run`, and `failed-target` as the only recovery
+- [x] Preserve `last-successful-commit`, `current-run`, and `failed-target` as the only recovery
   authority records.
-- [ ] Resolve enrollment, malformed state, stale committed markers, and interrupted mutation
+- [x] Resolve enrollment, malformed state, stale committed markers, and interrupted mutation
   recovery before considering the fast path.
-- [ ] Fetch the configured remote branch and compare its exact target commit with
+- [x] Fetch the configured remote branch and compare its exact target commit with
   `last-successful-commit`; do not use working-tree `HEAD` alone as admission evidence.
-- [ ] Render the exact selected commit into the current run's temporary directory before auditing;
+- [x] Render the exact selected commit into the current run's temporary directory before auditing;
   do not trust a persistent `/var/lib/abhaile/rendered` tree as fast-path authority.
-- [ ] Admit a fast successful exit only when the target equals `last-successful-commit`, no
+- [x] Admit a fast successful exit only when the target equals `last-successful-commit`, no
   unapplied failed target requires handling, the fresh manifest passes integrity audit, locally
   actionable health passes, and full reconciliation is not due.
-- [ ] Run full reconciliation for a new target commit other than the currently suppressed
+- [x] Run full reconciliation for a new target commit other than the currently suppressed
   `failed-target`, actionable local-health failure, detected ordinary managed drift, ordinary-entry
   audit uncertainty or execution failure, `ABHAILE_FORCE_FULL=1`, or expired maximum-full interval.
   Failed-target and reserved-foundation handling retain precedence.
-- [ ] Keep cluster, peer, and external/upstream health diagnostic. Their failure must not trigger
+- [x] Keep cluster, peer, and external/upstream health diagnostic. Their failure must not trigger
   local mutation or block an otherwise clean fast path.
-- [ ] Keep every fast-path operation read-only with respect to managed host state. It may fetch,
+- [x] Keep every fast-path operation read-only with respect to managed host state. It may fetch,
   check out, render into a temporary directory, inspect live state, and atomically update
   diagnostic runner records; it must not write `current-run`, advance `last-successful-commit`,
   clear `failed-target`, invoke Ansible, restart units, or publish files.
-- [ ] Change recurring scheduling from `OnUnitActiveSec=5min` to
+- [x] Change recurring scheduling from `OnUnitActiveSec=5min` to
   `OnUnitInactiveSec=5min`, retaining a bounded post-boot activation. Runs must neither overlap nor
   queue, and the next routine activation must occur approximately five minutes after the previous
   service run becomes inactive.
-- [ ] Record the last successful full reconciliation atomically as non-authoritative scheduling
+- [x] Record the last successful full reconciliation atomically as non-authoritative scheduling
   state. Missing, unreadable, malformed, SHA-mismatched, or future-dated state must force a full
   reconciliation. A fast run, recovery-only run, or failed full run must not advance it.
-- [ ] Configure the full-reconciliation interval with
+- [x] Configure the full-reconciliation interval with
   `ABHAILE_FULL_RECONCILE_INTERVAL_SECONDS`, accepting only an integer from 3600 through 21600
   seconds inclusive and defaulting to 21600 seconds. Missing uses the default. Invalid input uses
   that safe default for scheduling and remains visibly degraded; it does not create separate state
   or force a full run on every five-minute activation.
-- [ ] Bound repeated full reconciliation after a successful full run leaves integrity or actionable
+- [x] Bound repeated full reconciliation after a successful full run leaves integrity or actionable
   health degraded. Record that Boolean post-check result in the existing last-full scheduling
   record and defer another automatic repair for one hour. A new commit, recovery, periodic
   deadline, or `ABHAILE_FORCE_FULL=1` is never deferred.
-- [ ] Preserve the existing failure contract: candidate failure and failed recovery remain
+- [x] Preserve the existing failure contract: candidate failure and failed recovery remain
   failures, successful recovery does not accept a failed candidate, and irreversible effects are
   not described as rolled back.
-- [ ] Distinguish fast, full, degraded, suppressed, and recovery outcomes in the journal,
+- [x] Distinguish fast, full, degraded, suppressed, and recovery outcomes in the journal,
   `last-run-status`, and `last-run-summary` without exposing secrets or unbounded drift-path lists.
 
 ## Constraints
@@ -442,58 +441,58 @@ the five-minute timer interval.
 
 ## Acceptance Criteria
 
-- [ ] An unchanged target with clean integrity, passing actionable health, and a non-expired full
+- [x] An unchanged target with clean integrity, passing actionable health, and a non-expired full
   deadline exits without invoking Ansible or mutating managed state or recovery authority.
-- [ ] A new target other than the currently suppressed `failed-target`,
+- [x] A new target other than the currently suppressed `failed-target`,
   `ABHAILE_FORCE_FULL=1`, and an expired full deadline select the full pipeline before fast-path
   integrity or health can return clean; the matching failed-target branch retains precedence and
   does not retry implicitly.
-- [ ] Ordinary managed missing/content/type/symlink drift, actionable health failure,
+- [x] Ordinary managed missing/content/type/symlink drift, actionable health failure,
   audit/render error, `ABHAILE_FORCE_FULL=1`, and expired/missing/malformed/future last-full state
   each select the full path.
-- [ ] Reserved host-access foundation drift returns code 1
+- [x] Reserved host-access foundation drift returns code 1
   `degraded-enrollment-foundation`, identifies explicit bootstrap/adoption as the remedy, and does
   not start ordinary full repair.
-- [ ] Interrupted `current-run`, enrollment-required, stale committed marker, and failed-target
+- [x] Interrupted `current-run`, enrollment-required, stale committed marker, and failed-target
   handling retain precedence and their existing recovery guarantees.
-- [ ] A fetch outage before the deadline yields code 0 `fast-offline-clean` only after auditing the
+- [x] A fetch outage before the deadline yields code 0 `fast-offline-clean` only after auditing the
   exact last-successful revision; an outage after the deadline runs a full retained-SHA traversal
   and may yield code 0 `full-periodic-offline`, without changing recovery authority or clearing a
   failed remote target.
-- [ ] After every successful full traversal, including both new-candidate and already-accepted/LKG
+- [x] After every successful full traversal, including both new-candidate and already-accepted/LKG
   paths, ordinary residual failure records `degraded-post-full` without creating `failed-target` or
   recovering against that accepted SHA. Foundation residual failure remains
   `degraded-enrollment-foundation` and never becomes an ordinary repair trigger.
-- [ ] A clean last-full post-check permits one immediate repair for newly observed health or
+- [x] A clean last-full post-check permits one immediate repair for newly observed health or
   ordinary-integrity failure. A degraded post-check defers repeated automatic repair for the same
   accepted SHA until the record is one hour old, while every specified bypass starts a new full
   attempt.
-- [ ] Interval parsing accepts only 3600 through 21600 seconds. Invalid input uses the six-hour
+- [x] Interval parsing accepts only 3600 through 21600 seconds. Invalid input uses the six-hour
   default for scheduling, remains visibly degraded, and creates no additional state or
   five-minute full-run loop.
-- [ ] Fast-path tests prove that `current-run`, `last-successful-commit`, `failed-target`, and
+- [x] Fast-path tests prove that `current-run`, `last-successful-commit`, `failed-target`, and
   `last-full-reconciliation` obey their specified mutation boundaries, and that the fast path may
   update only bounded diagnostic records such as `last-run-*`.
-- [ ] Isolated timer tests and `systemd-analyze verify` prove completion-relative scheduling,
+- [x] Isolated timer tests and `systemd-analyze verify` prove completion-relative scheduling,
   no overlap/backlog, and reactivation 5 minutes 0 seconds through 5 minutes 31 seconds after
   service completion, including after failure and an operator start.
-- [ ] One representative-host reboot proves two-minute boot activation,
+- [x] One representative-host reboot proves two-minute boot activation,
   recovery-before-fast-path ordering, and conservative handling of the full deadline; equivalent
   existing production evidence may satisfy this criterion.
-- [ ] Both hosts demonstrate a clean fast run with no Ansible process and clean runner/unit state
+- [x] Both hosts demonstrate a clean fast run with no Ansible process and clean runner/unit state
   afterward. One representative host demonstrates controlled harmless drift detection and repair.
   Locally stopped-service repair and failed-target behavior may be proved with isolated automated
   evidence rather than induced independently on both production hosts.
-- [ ] Performance evidence shows the standalone 1,000-entry integrity audit within five seconds,
+- [x] Performance evidence shows the standalone 1,000-entry integrity audit within five seconds,
   the complete clean production-host fast path normally within 30 seconds, and every phase plus the
   overall decision respecting its specified hard deadline.
-- [ ] The initial deployed maximum full interval is six hours; one through six hours is supported,
+- [x] The initial deployed maximum full interval is six hours; one through six hours is supported,
   and any longer interval is deferred to a future spec and ADR.
-- [ ] Revision N becomes last-successful on both hosts before revision N+1 enables the fast path;
+- [x] Revision N becomes last-successful on both hosts before revision N+1 enables the fast path;
   isolated recovery evidence proves N+1 can recover through N.
-- [ ] Any live drift/repair experiment uses an explicitly approved harmless, non-network artifact;
+- [x] Any live drift/repair experiment uses an explicitly approved harmless, non-network artifact;
   live apply and service restarts require explicit approval in that current conversation.
-- [ ] Unit, integration, runner recovery, health, manifest, timer, deterministic-render, and full
+- [x] Unit, integration, runner recovery, health, manifest, timer, deterministic-render, and full
   repository validation pass with evidence linked here before acceptance.
 
 ### Evidence
@@ -503,28 +502,93 @@ For each completed criterion, record:
 - Implementation evidence: commit or PR.
 - Validation evidence: named automated test, VM/host transcript, or equivalent verification.
 
-Pre-deployment Revision N+1 evidence (2026-10-21):
+Delivery and acceptance evidence (2026-10-21 through 2026-10-22):
+
+- Implementation commits `67dda65` (state-neutral foundations), `3c3b051` (fast-path enablement),
+  and `9047f8c` (explicit reserved runner-unit publication) implement the completed requirements
+  and acceptance criteria below. This acceptance commit records the associated operational
+  evidence.
 
 - The runner/state integration suite passes 93 tests, including clean unchanged admission,
   force/periodic selection, offline behavior, degraded-repair spacing, failed-target precedence,
   recovery, and hard timeout handling with a TERM-ignoring process.
+
 - The complete unit and integration suite passes 730 tests.
+
 - All repository pre-commit hooks pass; shell syntax, `systemd-analyze verify`, mypy, Ruff,
   ShellCheck, interrogate, schema checks, formatting, and secret scanning are clean.
+
 - Architect, SysAdmin, and Code Reviewer independently report no remaining actionable findings.
+
 - Revision N+1 commit `3c3b0514ad6cf98fafcc42a5b108a46a4abf7c60` became repository `HEAD` and
   `last-successful-commit` on Deimos and Phobos with no failed target.
+
 - After explicit reserved-timer publication, a clean production fast path completed in three
   seconds on each host without Ansible: Deimos audited 42 entries and Phobos audited 109 entries;
   both reported `fast-clean`, zero drift, zero uncertainty, and no failed systemd units.
+
 - The five-minute timers were enabled and active on both hosts and rearmed from service completion.
+
 - Initial integrity detection of the deliberately reserved, stale installed timer demonstrated
   that ordinary reconciliation does not self-publish its scheduling foundation. The explicit
   quiescent publication procedure corrected it; `scripts/install-abhaile-runner-units` now makes
   that bootstrap and existing-host boundary repeatable and tested.
-- Reboot behavior under Revision N+1, controlled live drift and stopped-service repair,
-  failed-target handling, long-running timer behavior, and the remaining complete acceptance
-  criteria stay open.
+
+- Production commit `9047f8cf4ce21b5165649d7039b720726dbe858c` was accepted on both hosts.
+  Subsequent unchanged runs completed in two seconds on Deimos and three seconds on Phobos with
+  `fast-clean`, zero drift, zero uncertainty, active completion-relative timers, and no failed
+  units.
+
+- An explicitly approved Deimos experiment added a harmless comment to the managed
+  `coredns-zones.service`. The fast audit selected `integrity-drift`; Ansible check and apply each
+  reported exactly one change, restored the file byte-for-byte, and left CoreDNS active. The full
+  traversal took 103 seconds. A following clean fast run took three seconds with zero drift and
+  uncertainty.
+
+- The drift experiment initially stopped `abhaile-runner.timer`; the repaired state therefore
+  correctly failed post-full actionable health on that inactive unit. Restoring the enabled timer
+  made the next audit clean. Future drift tests must leave the timer active because it is itself an
+  actionable-health requirement.
+
+- `test_failed_commit_retry_is_suppressed`,
+  `test_suppressed_target_preserves_post_full_detail`, and
+  `test_fetch_outage_preserves_failed_target` provide isolated failed-target evidence.
+
+- An explicitly approved Deimos stopped-service experiment first demonstrated that
+  `actionable-health` respects the one-hour retry boundary after a degraded post-check. Once that
+  boundary passed, stopping `blocky-b.service` selected `full-actionable-health`; the 105-second
+  traversal restored Blocky and completed with `post_full_outcome=clean`, zero integrity drift or
+  uncertainty, an active timer, and no failed units.
+
+- Completion-relative timer evidence on Deimos showed routine reactivation 5 minutes 1 second
+  through 5 minutes 29 seconds after prior completion. Following the 103-second full repair, the
+  next activation began 5 minutes 7 seconds after completion, with no overlap or backlog. After a
+  deliberately failed deferred-repair run, the timer reactivated the service 5 minutes 19 seconds
+  after failure.
+
+- A Deimos reboot on `9047f8c` ran `abhaile-network-restore.service` before normal network startup,
+  found no interrupted mutation, and activated the runner 2 minutes 26 seconds after boot. The
+  three-second run reported `fast-clean`, zero drift and uncertainty, unchanged recovery
+  authority, active infrastructure and Vault Agent services, and no failed units.
+
+- `test_audit_1000_small_files_within_budget` passed the five-second standalone audit budget.
+  Production clean fast paths completed in two or three seconds. Runner timeout tests include a
+  TERM-ignoring integrity process and verify bounded fallback to a full traversal.
+
+- The final focused integrity, health, runner, recovery, and installer selection passed 104 tests.
+  The complete repository suite passed 739 tests in 21 minutes 23 seconds, all pre-commit hooks
+  passed, and `git diff --check` was clean on 2026-10-22.
+
+- Validation mapping: clean admission and state mutation boundaries are covered by
+  `test_second_unchanged_clean_run_uses_fast_path`; full-path selection, interval parsing, ordinary
+  drift, cooldown, foundation isolation, offline behavior, failed-target precedence, and recovery
+  are covered by their named cases in `tests/integration/test_runner.py`; integrity type, symlink,
+  content, size, bounded-output, and performance behavior is covered by
+  `tests/unit/python/test_integrity.py`; actionable health selection is covered by
+  `tests/unit/python/test_health.py` plus the stopped-Blocky production experiment; timer content
+  and publication are covered by `test_runner_timer_is_completion_relative_and_nonpersistent`,
+  `systemd-analyze verify` in repository validation, installer integration tests, and the Deimos
+  timing and reboot transcripts above.
 
 ## Out of Scope
 

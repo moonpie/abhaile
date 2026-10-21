@@ -105,6 +105,10 @@ sudo systemctl edit abhaile-runner.service
 # Environment=ABHAILE_CLUSTER_HEALTH=1
 ```
 
+Keep `abhaile-runner.timer` active during controlled drift tests. It is part of actionable health,
+so stopping it makes an otherwise successful repair finish degraded. Manual starts and timer
+activations are already serialized by systemd and the runner lock.
+
 If the runner reports a dirty worktree, inspect staged and unstaged state before
 repairing it:
 

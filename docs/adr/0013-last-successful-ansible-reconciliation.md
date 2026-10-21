@@ -7,10 +7,12 @@
 2026-10-20: Implemented on both hosts; the legacy Python mutation backend and applied-manifest
 history were retired during Phase 8. Fresh bootstrap now uses the same Ansible check/live path.
 
-2026-10-20: Amended with the active Spec 0029 adaptive reconciliation design. Recovery authority
+2026-10-20: Amended with the Spec 0029 adaptive reconciliation design. Recovery authority
 remains unchanged.
 
 2026-10-21: Amended with the explicit reserved runner-unit publication boundary.
+
+2026-10-22: Spec 0029 accepted after automated and two-host production validation.
 
 Supersedes ADR 0012.
 
@@ -68,7 +70,7 @@ Existing failed-target suppression prevents repeatedly applying the same failed 
 
 ### Adaptive unchanged-commit admission amendment
 
-Active Spec 0029 replaces only the preceding unconditional unchanged/full and fetch-failure/full
+Accepted Spec 0029 replaces only the preceding unconditional unchanged/full and fetch-failure/full
 traversal rules. Recovery and failed-candidate handling still run first. A new unsuppressed desired
 commit, an expired full deadline, or an explicit one-shot `ABHAILE_FORCE_FULL=1` request invokes the
 existing full Ansible pipeline.
@@ -124,8 +126,8 @@ operator or bootstrap boundary.
 
 `last-full-reconciliation` cannot select a recovery revision. This ADR remains authoritative for
 candidate promotion, the mutation marker, last-successful recovery, candidate-only cleanup, and
-network boot recovery. The deployed runners remain always-full until Spec 0029's staged enabling
-revision is deployed and validated.
+network boot recovery. Spec 0029's staged enabling revision is deployed and validated on both
+hosts.
 
 Candidate-only additions are cleaned using the retained interrupted-candidate and last-successful
 manifests. Removal is limited to Abhaile-managed resources whose live identity still matches the
@@ -205,6 +207,6 @@ code and operational concepts. Phase 5.2 includes an explicit go/no-go compariso
 ## References
 
 - [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
-- [Spec 0029: Adaptive Reconciliation Fast Path](../specs/active/0029-adaptive-reconciliation-fast-path.md)
+- [Spec 0029: Adaptive Reconciliation Fast Path](../specs/accepted/0029-adaptive-reconciliation-fast-path.md)
 - [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - [Phase 5.2 checklist](../../TODO.md)
