@@ -118,6 +118,31 @@ sudo -H -u abhaile env HOME=/home/abhaile git -C /opt/abhaile reflog -n 5 --date
 Only restore paths after confirming the change is not intentional local
 operator work.
 
+### Reserved Runner Unit Updates
+
+Ordinary reconciliation validates but does not publish the runner's own units. This avoids
+replacing the service or timer while that same service is executing. After an accepted commit
+changes any reserved runner unit, publish the fixed closed set explicitly while the runner is
+quiescent:
+
+```bash
+expected="$(sudo cat /var/lib/abhaile/runner/last-successful-commit)"
+sudo systemctl disable --now abhaile-runner.timer
+systemctl is-active abhaile-runner.service || true
+systemctl list-jobs --no-legend | grep -E 'abhaile-runner[.]' || echo runner_jobs_absent
+sudo /opt/abhaile/scripts/install-abhaile-runner-units "$expected"
+sudo systemctl reset-failed abhaile-runner.service
+sudo systemctl enable --now abhaile-runner.timer
+systemctl list-timers --all abhaile-runner.timer --no-pager
+```
+
+Proceed only when the service is inactive and `runner_jobs_absent` is reported. The installer
+also requires repository `HEAD` and `last-successful-commit` to equal the supplied full commit,
+rejects active mutation or failed-target state, acquires the runner lock, validates all three
+units, publishes them, and reloads systemd. It never enables, starts, or restarts a unit.
+If publication fails, keep the timer stopped and rerun the installer successfully before rebooting
+or starting the runner; systemd is reloaded only after all three publications succeed.
+
 ## Service Operations
 
 ### Rootful Containers

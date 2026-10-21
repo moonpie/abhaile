@@ -179,6 +179,7 @@ class TestBootstrapPreflight:
         assert 'ABHAILE_OWNER="$ABHAILE_USER"' in script
         assert 'ABHAILE_GROUP="$ABHAILE_GROUP"' in script
         assert "scripts/install-abhaile-entrypoints" in script
+        assert "scripts/install-abhaile-runner-units" in script
 
     def test_bootstrap_installs_coredns_validation_tooling(self) -> None:
         """Bootstrap installs bind tooling before first CoreDNS zone apply."""
@@ -203,10 +204,14 @@ class TestBootstrapPreflight:
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
         apply_call = 'log "Running initial Ansible reconciliation (live)"'
         baseline_call = "establish_last_successful(Path(sys.argv[1]), sys.argv[2])"
+        installer_call = '"${REPO_DIR}/scripts/install-abhaile-runner-units"'
+        restore_call = "    enable_network_restore\n"
         registration_call = "stage_registration"
 
         assert script.index(apply_call) < script.index(baseline_call)
-        assert script.index(baseline_call) < script.rindex(registration_call)
+        assert script.index(baseline_call) < script.index(installer_call)
+        assert script.index(installer_call) < script.index(restore_call)
+        assert script.index(restore_call) < script.rindex(registration_call)
         assert '"${OUTPUT_DIR}/runner" "$enrolled_sha"' in script
 
     def test_bootstrap_enables_network_restore_after_initial_baseline(self) -> None:
@@ -235,6 +240,8 @@ class TestBootstrapPreflight:
         assert '"${OUTPUT_DIR}/rendered"' in script
         assert '"${OUTPUT_DIR}/runner"' in script
         assert 'chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}"' in script
+        assert 'run_as_abhaile touch "$runner_lock"' in script
+        assert 'chmod 0644 "$runner_lock"' in script
 
     def test_bootstrap_validates_abhaile_identity_contract(self) -> None:
         """Bootstrap fails fast when the service account identity does not match config."""

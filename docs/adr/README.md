@@ -22,7 +22,7 @@ Add one row per ADR. Keep links current when ADR status changes.
 | [0010](0010-ansible-reconciliation-model.md) | Ansible Reconciliation Model | Superseded | 2026-09-05 | - | 0012 | 028 |
 | [0011](0011-guarded-networkd-convergence.md) | Guarded systemd-networkd Convergence | Superseded | 2026-10-02 | - | 0012 | 028 |
 | [0012](0012-trusted-revision-ansible-reconciliation.md) | Trusted-Revision Ansible Reconciliation | Superseded | 2026-10-05 | 0010, 0011 | 0013 | 028 |
-| [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted (amended 2026-10-20) | 2026-10-08 | 0012 | - | 028, 029 |
+| [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted (amended 2026-10-21) | 2026-10-08 | 0012 | - | 028, 029 |
 
 ## Status Values
 

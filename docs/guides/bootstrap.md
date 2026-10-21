@@ -248,11 +248,17 @@ Bootstrap stages:
    Agent AppRole files.
 1. First render, live apply, and baseline: render host artifacts, apply desired state, then atomically
    record the exact checked-out commit as `last-successful-commit`.
-1. Runner registration: enable and start the GitOps runner timer.
+1. Runner registration: explicitly install the reserved recovery, runner, and timer units from
+   the accepted baseline, then enable and start the GitOps runner timer.
 
 Bootstrap records the baseline only after the explicit live apply succeeds and before enabling the
 timer. Routine runner execution refuses unattended mutation when that baseline is absent; it does
 not infer first-enrollment success for itself.
+
+The three reserved runner units are deliberately outside ordinary in-process Ansible publication.
+Bootstrap installs them only after establishing the accepted baseline. For an existing host whose
+accepted commit changes those units, follow **Reserved Runner Unit Updates** in the operations
+runbook; do not copy them during an active runner execution.
 
 If it fails, check:
 
@@ -389,12 +395,16 @@ When re-bootstrapping an existing host:
 - Services may restart if their managed units or configs change.
 - Host networking is re-applied from rendered networkd artifacts.
 
-Before re-enrollment, stop the runner if you want a quiet maintenance window:
+Before re-enrollment, stop the runner and verify that no runner job remains. Bootstrap enforces
+this quiescent boundary before making changes:
 
 ```bash
-systemctl stop abhaile-runner.timer
-systemctl stop abhaile-runner.service
+sudo systemctl disable --now abhaile-runner.timer
+systemctl is-active abhaile-runner.service || true
+systemctl list-jobs --no-legend | grep -E 'abhaile-runner[.]' || echo runner_jobs_absent
 ```
+
+Proceed only when the service is `inactive` or `failed` and `runner_jobs_absent` is reported.
 
 Re-enable it after verification if bootstrap did not already do so:
 

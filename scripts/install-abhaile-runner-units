@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Publish reserved runner units outside ordinary in-process reconciliation.
+set -euo pipefail
+
+readonly ABHAILE_REPO_DIR="${ABHAILE_REPO_DIR:-/opt/abhaile}"
+readonly ABHAILE_RUNNER_STATE_DIR="${ABHAILE_RUNNER_STATE_DIR:-/var/lib/abhaile/runner}"
+readonly ABHAILE_SYSTEMD_DIR="${ABHAILE_SYSTEMD_DIR:-/etc/systemd/system}"
+readonly ABHAILE_OWNER="${ABHAILE_OWNER:-abhaile}"
+readonly ABHAILE_TARGET_OWNER="${ABHAILE_TARGET_OWNER:-root}"
+readonly ABHAILE_TARGET_GROUP="${ABHAILE_TARGET_GROUP:-root}"
+readonly ABHAILE_SYSTEMCTL="${ABHAILE_SYSTEMCTL:-systemctl}"
+readonly ABHAILE_SYSTEMD_ANALYZE="${ABHAILE_SYSTEMD_ANALYZE:-systemd-analyze}"
+
+log() { printf '[install-abhaile-runner-units] %s\n' "$*"; }
+die() { log "FATAL: $*"; exit 1; }
+
+git_as_owner() {
+    if [[ "$(id -un)" == "$ABHAILE_OWNER" ]]; then
+        git "$@"
+    else
+        runuser -u "$ABHAILE_OWNER" -- git "$@"
+    fi
+}
+
+main() {
+    [[ $# -eq 1 && "$1" =~ ^[0-9a-f]{40}$ ]] || die "Usage: $0 EXPECTED_COMMIT"
+    [[ "$(id -u)" -eq 0 || "$ABHAILE_TARGET_OWNER" != "root" ]] || die "Run as root"
+
+    local expected="$1" head last_good timer_state service_state queued_jobs lock_path
+    [[ -d "$ABHAILE_REPO_DIR/.git" ]] || die "Repository is unavailable"
+    [[ -d "$ABHAILE_RUNNER_STATE_DIR" && ! -L "$ABHAILE_RUNNER_STATE_DIR" ]] \
+        || die "Runner state directory is unavailable"
+
+    head="$(git_as_owner -C "$ABHAILE_REPO_DIR" rev-parse HEAD)"
+    [[ "$head" == "$expected" ]] || die "Repository HEAD does not match expected commit"
+    git_as_owner -C "$ABHAILE_REPO_DIR" diff --quiet --no-ext-diff -- \
+        || die "Repository worktree is dirty"
+    git_as_owner -C "$ABHAILE_REPO_DIR" diff --cached --quiet --no-ext-diff -- \
+        || die "Repository index is dirty"
+
+    [[ -f "$ABHAILE_RUNNER_STATE_DIR/last-successful-commit" \
+        && ! -L "$ABHAILE_RUNNER_STATE_DIR/last-successful-commit" ]] \
+        || die "Last-successful record is unavailable"
+    last_good="$(< "$ABHAILE_RUNNER_STATE_DIR/last-successful-commit")"
+    [[ "$last_good" == "$expected" ]] \
+        || die "Last-successful commit does not match expected commit"
+    [[ ! -e "$ABHAILE_RUNNER_STATE_DIR/current-run" ]] || die "Runner mutation is active"
+    [[ ! -e "$ABHAILE_RUNNER_STATE_DIR/failed-target" ]] \
+        || die "Failed target requires operator resolution"
+
+    timer_state="$($ABHAILE_SYSTEMCTL is-active abhaile-runner.timer 2>/dev/null || true)"
+    service_state="$($ABHAILE_SYSTEMCTL is-active abhaile-runner.service 2>/dev/null || true)"
+    [[ "$timer_state" == "inactive" ]] || die "Runner timer must be inactive"
+    [[ "$service_state" == "inactive" || "$service_state" == "failed" ]] \
+        || die "Runner service must be inactive or failed"
+    queued_jobs="$($ABHAILE_SYSTEMCTL list-jobs --no-legend 2>/dev/null)" \
+        || die "Cannot inspect queued systemd jobs"
+    ! awk '$2 ~ /^abhaile-runner[.]/ { found=1 } END { exit found ? 0 : 1 }' \
+        <<< "$queued_jobs" || die "Runner systemd job is still queued"
+
+    lock_path="${ABHAILE_RUNNER_STATE_DIR}/lock"
+    [[ -f "$lock_path" && ! -L "$lock_path" ]] || die "Runner lock is not a regular file"
+    exec 9<>"$lock_path"
+    flock --nonblock 9 || die "Runner lock is held"
+
+    local units=(
+        abhaile-network-restore.service
+        abhaile-runner.service
+        abhaile-runner.timer
+    )
+    local sources=() unit source target temporary
+    for unit in "${units[@]}"; do
+        source="${ABHAILE_REPO_DIR}/config/hosts/common/systemd/${unit}"
+        [[ -f "$source" && ! -L "$source" ]] || die "Unit source is unavailable: ${source}"
+        sources+=("$source")
+    done
+    "$ABHAILE_SYSTEMD_ANALYZE" verify "${sources[@]}"
+
+    for unit in "${units[@]}"; do
+        source="${ABHAILE_REPO_DIR}/config/hosts/common/systemd/${unit}"
+        target="${ABHAILE_SYSTEMD_DIR}/${unit}"
+        if [[ -e "$target" || -L "$target" ]]; then
+            [[ -f "$target" && ! -L "$target" ]] \
+                || die "Unit target is not a regular file: ${target}"
+        fi
+        temporary="$(mktemp "${target}.tmp.XXXXXX")"
+        install -o "$ABHAILE_TARGET_OWNER" -g "$ABHAILE_TARGET_GROUP" -m 0644 \
+            "$source" "$temporary"
+        mv -f "$temporary" "$target"
+    done
+
+    "$ABHAILE_SYSTEMCTL" daemon-reload
+    log "reserved runner units synchronized at ${expected:0:12}"
+}
+
+main "$@"

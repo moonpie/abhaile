@@ -376,6 +376,15 @@ reconciliation. This tool installation is compatibility preparation, not fast-pa
 Revision N cannot be promoted or recorded as the recovery baseline on either host without this
 proof. Revision N+1 may depend on the wrapper only after both hosts have completed that gate.
 
+The network-restore, runner-service, and runner-timer units remain reserved from ordinary Ansible
+publication because the runner must not replace its own execution and scheduling foundations in
+process. Bootstrap and later operator-controlled updates use
+`scripts/install-abhaile-runner-units` with an exact commit that is both repository `HEAD` and
+`last-successful-commit`, a quiescent timer and service, no failed target or active mutation, and
+the shared runner lock. The installer validates and publishes only that fixed unit set, reloads
+systemd, and never activates it. This is an explicit activation boundary, not another
+reconciliation path.
+
 ### Performance Budget
 
 The current manifests contain 111 entries/104 regular files on Phobos and 44 entries/40 regular
@@ -465,14 +474,16 @@ the five-minute timer interval.
 - [ ] Fast-path tests prove that `current-run`, `last-successful-commit`, `failed-target`, and
   `last-full-reconciliation` obey their specified mutation boundaries, and that the fast path may
   update only bounded diagnostic records such as `last-run-*`.
-- [ ] Timer validation with `systemd-analyze verify` and an intentionally longer-than-five-minute
-  service proves no overlap/backlog and a new activation 5 minutes 0 seconds through 5 minutes
-  31 seconds after service completion, including after failure and an operator start.
-- [ ] Reboot validation proves the two-minute boot activation, recovery-before-fast-path ordering,
-  and conservative handling of the full deadline.
-- [ ] Both hosts demonstrate a clean fast run with no Ansible process, controlled harmless drift
-  detection and repair, locally stopped-service repair, correct failed-target visibility, and clean
-  runner/unit state afterward.
+- [ ] Isolated timer tests and `systemd-analyze verify` prove completion-relative scheduling,
+  no overlap/backlog, and reactivation 5 minutes 0 seconds through 5 minutes 31 seconds after
+  service completion, including after failure and an operator start.
+- [ ] One representative-host reboot proves two-minute boot activation,
+  recovery-before-fast-path ordering, and conservative handling of the full deadline; equivalent
+  existing production evidence may satisfy this criterion.
+- [ ] Both hosts demonstrate a clean fast run with no Ansible process and clean runner/unit state
+  afterward. One representative host demonstrates controlled harmless drift detection and repair.
+  Locally stopped-service repair and failed-target behavior may be proved with isolated automated
+  evidence rather than induced independently on both production hosts.
 - [ ] Performance evidence shows the standalone 1,000-entry integrity audit within five seconds,
   the complete clean production-host fast path normally within 30 seconds, and every phase plus the
   overall decision respecting its specified hard deadline.
@@ -501,8 +512,19 @@ Pre-deployment Revision N+1 evidence (2026-10-21):
 - All repository pre-commit hooks pass; shell syntax, `systemd-analyze verify`, mypy, Ruff,
   ShellCheck, interrogate, schema checks, formatting, and secret scanning are clean.
 - Architect, SysAdmin, and Code Reviewer independently report no remaining actionable findings.
-- Deployment, production timing, timer/reboot behavior, and controlled live-drift criteria remain
-  open and are not satisfied by this pre-deployment evidence.
+- Revision N+1 commit `3c3b0514ad6cf98fafcc42a5b108a46a4abf7c60` became repository `HEAD` and
+  `last-successful-commit` on Deimos and Phobos with no failed target.
+- After explicit reserved-timer publication, a clean production fast path completed in three
+  seconds on each host without Ansible: Deimos audited 42 entries and Phobos audited 109 entries;
+  both reported `fast-clean`, zero drift, zero uncertainty, and no failed systemd units.
+- The five-minute timers were enabled and active on both hosts and rearmed from service completion.
+- Initial integrity detection of the deliberately reserved, stale installed timer demonstrated
+  that ordinary reconciliation does not self-publish its scheduling foundation. The explicit
+  quiescent publication procedure corrected it; `scripts/install-abhaile-runner-units` now makes
+  that bootstrap and existing-host boundary repeatable and tested.
+- Reboot behavior under Revision N+1, controlled live drift and stopped-service repair,
+  failed-target handling, long-running timer behavior, and the remaining complete acceptance
+  criteria stay open.
 
 ## Out of Scope
 

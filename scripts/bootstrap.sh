@@ -137,11 +137,33 @@ prepare_repo_ownership() {
 }
 
 prepare_output_ownership() {
+    local runner_lock="${OUTPUT_DIR}/runner/lock"
     install -d -m 0750 -o root -g "$ABHAILE_GROUP" "$OUTPUT_DIR"
     install -d -m 0750 -o "$ABHAILE_USER" -g "$ABHAILE_GROUP" \
         "${OUTPUT_DIR}/rendered" \
         "${OUTPUT_DIR}/runner"
     chown -R "${ABHAILE_USER}:${ABHAILE_GROUP}" "${OUTPUT_DIR}/rendered" "${OUTPUT_DIR}/runner"
+    if [[ ! -e "$runner_lock" && ! -L "$runner_lock" ]]; then
+        run_as_abhaile touch "$runner_lock"
+    fi
+    [[ -f "$runner_lock" && ! -L "$runner_lock" ]] \
+        || die "Runner lock is not a regular file: ${runner_lock}"
+    chown --no-dereference "${ABHAILE_USER}:${ABHAILE_GROUP}" "$runner_lock"
+    chmod 0644 "$runner_lock"
+}
+
+require_runner_quiescent() {
+    local timer_state service_state queued_jobs
+    timer_state="$(systemctl is-active abhaile-runner.timer 2>/dev/null || true)"
+    service_state="$(systemctl is-active abhaile-runner.service 2>/dev/null || true)"
+    [[ "$timer_state" == "inactive" ]] \
+        || die "Stop abhaile-runner.timer before bootstrap or re-enrollment"
+    [[ "$service_state" == "inactive" || "$service_state" == "failed" ]] \
+        || die "Wait for abhaile-runner.service to become inactive before bootstrap"
+    queued_jobs="$(systemctl list-jobs --no-legend 2>/dev/null)" \
+        || die "Cannot inspect queued systemd jobs"
+    ! awk '$2 ~ /^abhaile-runner[.]/ { found=1 } END { exit found ? 0 : 1 }' \
+        <<< "$queued_jobs" || die "Runner systemd job is still queued"
 }
 
 enable_network_restore() {
@@ -323,6 +345,7 @@ stage_preflight() {
     fi
 
     validate_hostname_arg "${1:-}"
+    require_runner_quiescent
 
     # Verify Debian 13 (trixie)
     if [[ -f /etc/os-release ]]; then
@@ -652,6 +675,9 @@ from abhaile.state.reconciliation import establish_last_successful
 establish_last_successful(Path(sys.argv[1]), sys.argv[2])
 ' "${OUTPUT_DIR}/runner" "$enrolled_sha"
     log "Recorded initial last-successful commit ${enrolled_sha:0:12}"
+
+    log "Installing reserved runner units"
+    "${REPO_DIR}/scripts/install-abhaile-runner-units" "$enrolled_sha"
 
     # The rendered recovery unit becomes boot authority only after the successful enrollment
     # boundary exists. Enabling it earlier would allow boot recovery without a valid target.

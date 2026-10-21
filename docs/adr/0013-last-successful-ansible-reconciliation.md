@@ -10,6 +10,8 @@ history were retired during Phase 8. Fresh bootstrap now uses the same Ansible c
 2026-10-20: Amended with the active Spec 0029 adaptive reconciliation design. Recovery authority
 remains unchanged.
 
+2026-10-21: Amended with the explicit reserved runner-unit publication boundary.
+
 Supersedes ADR 0012.
 
 ## Context
@@ -112,6 +114,14 @@ last-successful on both hosts may a later revision enable the fast path, enhance
 and timer semantics. Recovery of the enabling revision through the compatibility revision must be
 proved before promotion.
 
+The network-restore service, runner service, and runner timer are reserved self-management
+foundations. Ordinary reconciliation validates them but does not publish them while the runner is
+executing. Fresh bootstrap and later operator-controlled updates publish only this fixed unit set
+through an explicit installer after the exact repository revision is already
+`last-successful-commit`, while the timer and service are quiescent and the shared runner lock is
+held. Publication reloads systemd but never activates these units; activation remains a separate
+operator or bootstrap boundary.
+
 `last-full-reconciliation` cannot select a recovery revision. This ADR remains authoritative for
 candidate promotion, the mutation marker, last-successful recovery, candidate-only cleanup, and
 network boot recovery. The deployed runners remain always-full until Spec 0029's staged enabling
@@ -188,6 +198,8 @@ code and operational concepts. Phase 5.2 includes an explicit go/no-go compariso
 - Persistent ordinary failure remains visible while automatic retries are spaced by one hour; a
   changed failure during that window may wait for the same boundary unless explicitly forced.
 - Long full runs extend the timer cycle by design and do not accumulate queued work.
+- Runner self-unit changes require an explicit quiescent publication step after their commit is
+  accepted; they cannot silently replace the active reconciliation foundation.
 - ADR 0012 and its superseded ADRs remain historical evidence, not implementation authority.
 
 ## References
