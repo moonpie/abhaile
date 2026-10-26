@@ -23,6 +23,7 @@ Add one row per ADR. Keep links current when ADR status changes.
 | [0011](0011-guarded-networkd-convergence.md) | Guarded systemd-networkd Convergence | Superseded | 2026-10-02 | - | 0012 | 028 |
 | [0012](0012-trusted-revision-ansible-reconciliation.md) | Trusted-Revision Ansible Reconciliation | Superseded | 2026-10-05 | 0010, 0011 | 0013 | 028 |
 | [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted (amended 2026-10-22) | 2026-10-08 | 0012 | - | 028, 029 |
+| [0014](0014-host-storage-and-nas-mount-boundaries.md) | Host Storage and NAS Mount Boundaries | Accepted | 2026-10-26 | - | - | 030, 031 |
 
 ## Status Values
 
@@ -37,3 +38,5 @@ Add one row per ADR. Keep links current when ADR status changes.
 - Keep implementation-level decisions in the relevant spec.
 - Link specs and ADRs both ways when decisions are promoted.
 - Linked Specs column uses the numeric suffix from `SPEC-2026-NNN` IDs.
+- ADR 0014's local host layout is deployed on both hosts; service-path and future NAS adoption
+  remain tracked by service specs and proposed SPEC-2026-031 respectively.
