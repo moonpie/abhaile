@@ -8,11 +8,12 @@ title: Network Device Configuration
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-20
+updated: 2026-10-22
 related_adrs:
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
   - 0004-apply-execution-model
+  - 0014-host-storage-and-nas-mount-boundaries
 supersedes: null
 superseded_by: null
 scope:
@@ -405,7 +406,9 @@ Allows general client devices to discover casting targets without full L2 bridgi
 
 - Omada Controller automated site backup: daily retention (7), weekly (4),
   monthly (3).
-- Backup storage: `/opt/abhaile/backups/omada/` on the Omada Controller host.
+- Backup storage: `/srv/backups/omada-controller/`, following SPEC-2026-030. A local destination is
+  staging or rapid-recovery material until it is replicated off-host or backed by the future NAS
+  backup mount.
 - Validate restore process by test-restoring to a staging Omada instance
   annually or after major firmware upgrades.
 
@@ -543,9 +546,9 @@ For each completed criterion, include:
    in the generic network intent model, and which should remain adapter-specific
    extensions?
 
-1. **Backup automation** — Omada Controller supports scheduled backups
-   internally. If an API can trigger or download backups, should Abhaile also
-   copy backups to a second host outside the controller?
+1. **Backup automation** — Omada Controller supports scheduled backups internally. If an API can
+   trigger or download backups, which encrypted repository and off-host replication mechanism
+   should protect `/srv/backups/omada-controller/`?
 
 1. **CrowdSec bouncer on ER605** — CrowdSec can push blocklists to the ER605
    via ACL updates through the Omada API. Is this feasible with the current
@@ -560,6 +563,8 @@ For each completed criterion, include:
 - `docs/net/PORTS.md` (port mapping documentation)
 - `docs/NETWORK.md` (network topology overview)
 - `docs/runbooks/operations.md` (break-glass procedures reference ER605 port 5)
+- `docs/adr/0014-host-storage-and-nas-mount-boundaries.md`
+- `docs/specs/accepted/0030-host-storage-layout.md`
 - `.old_docs/TODO.md` Phase 4 (original task breakdown)
 - Home Assistant TP-Link Omada integration:
   `https://www.home-assistant.io/integrations/tplink_omada/`

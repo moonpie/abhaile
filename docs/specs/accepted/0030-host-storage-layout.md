@@ -202,7 +202,7 @@ SPEC-2026-031 and the relevant service specs.
 
 - `docs/adr/0014-host-storage-and-nas-mount-boundaries.md`
 - `docs/runbooks/host-storage.md`
-- `docs/specs/proposed/0015-services-home-automation.md`
+- `docs/specs/active/0015-services-home-automation.md`
 - `docs/specs/proposed/0017-services-media.md`
 - `docs/specs/proposed/0020-host-hardening.md`
 - `docs/specs/proposed/0021-network-devices.md`

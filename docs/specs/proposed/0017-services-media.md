@@ -8,9 +8,10 @@ title: Media Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-10-22
 related_adrs:
   - 0005-service-authoring-model
+  - 0014-host-storage-and-nas-mount-boundaries
 supersedes: null
 superseded_by: null
 scope:
@@ -304,7 +305,12 @@ Already defined in `config/network.yaml`. Each service has:
 
 ## Decision Notes
 
-_To be recorded during implementation._
+- Decision: Keep downloads and managed media libraries within one `/srv/media` filesystem.
+- Rationale: Preserve hardlinks across download and library paths while allowing the stable host
+  path to move from local storage to one future NAS media mount.
+- Impact: Movies, television, music, books, and downloads must not use separate mounts or datasets
+  where their workflows require hardlinks; a transcode workspace may be separate.
+- ADR: ADR 0014.
 
 ## Acceptance Criteria
 
@@ -337,15 +343,10 @@ For each completed criterion, include:
 - Immich external access via caddy-dmz.
 - Monitoring and alerting for media services (Prometheus exporters, Grafana dashboards).
 - Backup strategy for media databases and configuration.
-- Media storage provisioning (filesystem, ZFS, NFS — host-level concern outside service config).
+- Media storage provisioning is owned by SPEC-2026-030 and remains outside service config.
 - Automated initial setup/seeding of \*arr services (first-run wizard is manual).
 
 ## Open Questions
-
-1. **Storage layout:** Should `/srv/media` be a single filesystem mount, or should
-   subdirectories (movies, tv, music, books, downloads) be separate mounts? A single
-   mount preserves hardlinks across the entire tree. Separate mounts provide independent
-   capacity management but break hardlinks between download and library directories.
 
 1. **Hardware acceleration configuration:** Should device passthrough use
    `--device /dev/dri:/dev/dri` (expose all DRI devices) or target only
@@ -386,6 +387,8 @@ For each completed criterion, include:
 - `config/services/jellyseerr/service.yaml` (stub)
 - `config/services/flaresolverr/service.yaml` (stub)
 - `docs/adr/0005-service-authoring-model.md`
+- `docs/adr/0014-host-storage-and-nas-mount-boundaries.md`
+- `docs/specs/accepted/0030-host-storage-layout.md`
 - `docs/specs/proposed/0018-services-networking.md` (SPEC-2026-018 — qBittorrent + Gluetun, shared download directory)
 - `docs/specs/proposed/0016-services-monitoring.md` (SPEC-2026-016 — Prometheus scraping of media services)
 - `docs/specs/accepted/0011-core-services.md` (SPEC-2026-011 — Phase 1 service group reference)

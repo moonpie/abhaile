@@ -8,7 +8,7 @@ title: Monitoring and Observability Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-07-28
+updated: 2026-10-27
 related_adrs:
   - 0005-service-authoring-model
 supersedes: null
@@ -345,6 +345,21 @@ Not every service exposes every signal directly. When a service lacks native met
 implementation should use the nearest reliable substitute: systemd unit state, container
 health, blackbox probes, textfile metrics, structured logs, or explicit runbook checks.
 
+### Filesystem Capacity and Frigate Storage Inhibition
+
+Monitor filesystem available bytes and inodes on both hosts, including `/srv`. On phobos, warn
+before free space reaches the Frigate storage guard's stop threshold and alert when the guard
+inhibits Frigate. Use the reserve and documented headroom from SPEC-2026-015 rather than defining
+a conflicting threshold here. Show available space, the affected filesystem, and whether Frigate
+is intentionally stopped for storage pressure.
+
+Notifications must explain that detection, recording, and Frigate live view are unavailable while
+inhibited, that camera SD recording is independent, and that recovery requires reclaiming space
+and explicitly starting Frigate. Link to the recovery instructions in SPEC-2026-015. Prefer existing
+node-exporter filesystem metrics and journal/unit evidence; add a small textfile metric only if
+needed to distinguish inhibition. Monitoring must not delete recordings or automatically restart
+an inhibited Frigate. The local guard operates independently of this monitoring deployment.
+
 ### Secrets Requirements
 
 | Secret | Delivery | Consumer |
@@ -396,6 +411,9 @@ _To be recorded during implementation._
 - [ ] Promtail config ships journal and log files to Loki with correct labels
 - [ ] Monitoring captures GitOps runner status from systemd, runner state files, and/or
   journald so checkout, render, apply, rollback, and dirty-worktree failures are diagnosable
+- [ ] Filesystem available-space and inode alerts cover both hosts; phobos `/srv` warns before
+  the SPEC-2026-015 guard threshold, and Frigate storage inhibition produces an actionable
+  notification with manual recovery guidance.
 - [ ] DNS monitoring captures CoreDNS resolver health, CoreDNS query logs for client
   attribution, and Blocky filtering metrics/statistics
 - [ ] DNS dashboards or runbooks support identifying noisy clients, suspicious query patterns,
@@ -469,7 +487,7 @@ For each completed criterion, include:
 - `config/network.yaml` — IP assignments (172.20.20.210–218 block)
 - `config/mapping.yaml` — current host-to-service mapping (monitoring not yet assigned)
 - `config/services/*/service.yaml` — skeleton definitions for all 12 services
-- `docs/specs/proposed/0015-services-home-automation.md` (SPEC-2026-015 — scrape targets on phobos)
+- `docs/specs/active/0015-services-home-automation.md` (SPEC-2026-015 — scrape targets on phobos)
 - `docs/specs/proposed/0017-services-media.md` (SPEC-2026-017 — scrape targets on deimos)
 - `docs/specs/proposed/0019-services-utilities.md` (SPEC-2026-019 — CrowdSec metrics, Postfix metrics)
 - `docs/specs/proposed/0021-network-devices.md` (SPEC-2026-021 — SNMP targets for ER605, switches, APs)
