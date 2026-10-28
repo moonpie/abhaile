@@ -8,7 +8,7 @@ title: Home Automation Services
 status: active
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-27
+updated: 2026-10-28
 related_adrs:
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -407,6 +407,84 @@ spec. Device migration can proceed independently once the relevant service is co
 
 For each completed criterion, record the implementation commit and the relevant automated test,
 render result, dry-run/check result, host observation, or restore evidence.
+
+#### Preparation Progress — 2026-10-27
+
+- Working-tree implementation (commit reference pending): removed the standalone go2rtc service
+  definition and network/DNS identity, moved Frigate to `172.20.20.225/32`, and left `.226`
+  unallocated. Service mapping is unchanged until the staged service deployment definitions exist.
+- Added the existing `devices` field to the shared container schema and exposed the same device
+  lines to pod container templates. Focused coverage in
+  `tests/integration/test_quadlet_devices.py` validates standalone and pod definitions, rejects
+  malformed device values, and checks ordered, deterministic `AddDevice=` output, including
+  `/dev/apex_0`. `tests/unit/python/renderers/test_quadlets_devices.py` covers omitted/empty lists
+  and renderer-side rejection of invalid entries.
+- Validation: all 480 unit tests and 42 relevant integration tests passed, including all 26 focused
+  device cases. Two full phobos renders produced identical output; mypy and docstring checks passed.
+  Local Ansible check mode validated the manifest but could not complete because this workstation
+  lacks the configured phobos interpreter at `/opt/abhaile/.venv/bin/python`. No live apply was run.
+- Repository-wide lint encountered read-only agent/provider files in the sandbox. Acceptance
+  checkboxes remain open pending implementation commit references and the remaining validation;
+  this preparation does not establish service deployment or runtime readiness.
+
+#### Mosquitto Implementation Progress — 2026-10-27
+
+- Working-tree implementation (commit reference pending): mapped Mosquitto to phobos with the
+  pinned `docker.io/library/eclipse-mosquitto:2.1.2-alpine` image, authenticated-only listener,
+  persistent broker data, read-only deployment configuration and password mounts, and startup
+  dependencies on Vault Agent readiness and service-owned password refresh. Updated the affected
+  forward/reverse DNS serials and content hashes.
+- User confirmed the six MQTT Vault field names: `home_assistant_username`,
+  `home_assistant_password`, `zigbee2mqtt_username`, `zigbee2mqtt_password`, `frigate_username`,
+  and `frigate_password`. Added the agent policy read path and a phobos-only mode-0600 JSON
+  staging template from the single `secret/abhaile/mqtt` secret. Applications have no direct
+  Vault access; each client's eventual delivery must expose only its own account.
+- Added `abhaile.cli.mosquitto_passwords` and service-owned refresh/path units. The helper uses
+  an isolated temporary converter container, validates distinct accounts, atomically installs
+  hashes, and avoids repeat hashing/restarts for unchanged credentials. Conversion and restart
+  failures remain retryable without touching runner recovery records. Focused helper coverage
+  is 98%; deployment integration tests check ownership, startup dependencies, and staging scope.
+- Two full phobos renders produced identical output. The container probe requires an anonymous
+  MQTT v5 connection to be refused with reason code 135. Actual image execution, authenticated
+  MQTT traffic, persistence, target-host Ansible check mode, reconciliation, and reboot remain
+  unverified; do not declare deployment readiness or proceed to Zigbee2MQTT before host evidence.
+- Automated validation: all 511 unit tests and 170 non-Ansible integration tests passed. The
+  combined selection reported 83.80% repository coverage, failing the configured 85% coverage
+  gate; this is not a full-suite coverage pass. The focused helper run separately passed a 90%
+  threshold at 98.48%. Changed-file pre-commit checks, separate Black checks, all-host rendering,
+  and Ansible's `manifest_selection` check-mode tasks passed. The full Ansible integration suite
+  was not run for this stage, and manifest selection is not a substitute for the target-host check.
+- Added [the Mosquitto runbook](../../runbooks/mosquitto.md) with provisioning, rotation,
+  failure recovery, and runtime validation steps. The shared source does not establish automatic
+  Home Assistant rotation: its external MQTT credentials are integration/UI-managed. Agree a
+  supported procedure during the configuration phase without rewriting internal application state.
+- Acceptance criteria remain open pending implementation commit references and host evidence.
+  At this implementation checkpoint, the Vault secret and policy still needed provisioning; no
+  live changes had been made.
+
+#### Prerequisite and Runbook Follow-Up — 2026-10-28
+
+- Operator evidence confirms `secret/abhaile/mqtt` now contains exactly the six agreed per-client
+  fields. The operator removed the legacy MQTT pair and obsolete Vault entries. No credential
+  values were shared or copied into repository files. The installed `vault-agent` policy still
+  lacks MQTT access; applying the canonical policy from the prerequisite commit remains pending.
+- Agreed two-part publication: publish policy/documentation prerequisites first, then validate and
+  authorize the service activation revision. Keep enrollment, address/DNS changes, templates,
+  helper code, and tests in the activation commit. Policy/docs-only publication can still trigger
+  reconciliation of existing state. Review-branch publication and promotion must account for
+  automatic scheduling on every affected host.
+- Fixed the refresh unit's bootstrap import assumption with an explicit
+  `Environment=PYTHONPATH=/opt/abhaile/src`. The deployment integration suite exercises the rendered
+  environment in a clean virtual environment without an installed Abhaile package.
+- Updated the service-authoring guide, Mosquitto runbook, shared operations/secrets guidance, and
+  README to document prerequisite publication and policy application, unprivileged rendering,
+  privileged host check mode, and explicit activation approval. Deployment publication, canonical
+  policy application, full host checks, and live runtime evidence remain pending.
+- Local follow-up validation passed: 511 unit tests, three Mosquitto deployment integration tests,
+  changed-file pre-commit checks with separate Black verification, and two identical all-host
+  renders. A prerequisite-only snapshot containing the policy and documentation changes produced
+  the same 166 rendered files/manifests as its base across both hosts. This verifies the proposed
+  commit split, not target-host runtime readiness; implementation commit references remain pending.
 
 ## Agreed Implementation Decisions
 

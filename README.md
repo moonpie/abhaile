@@ -111,6 +111,11 @@ make check HOST=phobos
   that host.
 - `make check HOST=x` is the equivalent explicit host-scoped workflow.
 
+The combined host targets run render and check as the invoking user. On managed hosts, use
+[unprivileged rendering followed by a privileged Ansible check](docs/runbooks/operations.md#host-render-and-privileged-check).
+New services use [separate prerequisite and activation pushes](docs/guides/adding-a-service.md#publish-prerequisites-before-service-activation)
+so canonical Vault policies are available and applied before service enrollment is promoted.
+
 **Important**: Never edit files under `out/` directly. All changes must be made in `config/` and re-rendered.
 
 Abhaile keeps the configuration declarative and the deployment steps explicit, so changes remain auditable and reversible.

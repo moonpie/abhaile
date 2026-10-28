@@ -130,8 +130,13 @@ If Vault is sealed or secrets are not rendering, see [Break-Glass](../runbooks/b
 
 Vault policies live in `policies/` (e.g., `vault-agent.hcl`, `admins.hcl`). These define read/write ACLs for AppRoles and operators but do not contain secret values.
 
+To enable a new service, publish policy changes in the prerequisite part of
+[the two-part service workflow](../guides/adding-a-service.md#publish-prerequisites-before-service-activation).
+Confirm the reviewed policy file is present on the target before applying it. Keep new service
+mapping and template enrollment in the activation part, after prerequisites are satisfied.
+
 To change Vault Agent access, edit the matching policy file in `policies/`, log
-in as the human admin user, then apply it:
+in as the human admin user, then apply it from the updated readable checkout:
 
 ```bash
 export VAULT_ADDR=http://172.20.20.204:8200
@@ -141,8 +146,13 @@ vault policy write vault-agent policies/vault-agent.hcl
 vault policy read vault-agent
 ```
 
-Restart Vault Agent on affected hosts after policy changes that unblock new
-templates:
+For a protected host checkout, use the [canonical policy application procedure](../runbooks/operations.md#vault-admin-operations)
+in Operations' Vault section: read the file through sudo and pipe it to `vault policy write` in
+the admin's own authenticated shell. The policy is not uploaded by ordinary reconciliation.
+
+A policy-only prerequisite update does not need an immediate agent restart. Reconciliation
+publishes newly enrolled templates/configuration and restarts the agent during authorized service
+activation. To recover an already installed template after a policy change, an explicit restart is:
 
 ```bash
 sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \

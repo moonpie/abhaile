@@ -11,6 +11,75 @@ Sequential checklist for adding a service to Abhaile. For design rationale, see
 - [ ] Decide the pattern: **container**, **pod**, **rootless container**, or **host-mode**
 - [ ] Decide the host: phobos, deimos, or both
 
+## Publish Prerequisites Before Service Activation
+
+Deliver a new service in two parts when it needs operator-applied prerequisites, such as Vault
+policy changes. Authoring the complete service locally does not mean publishing all changes
+together. Keep the two parts in separately reviewable commits. If there are no separate
+prerequisites, record that in the spec rather than creating an empty prerequisite commit.
+
+### Part 1: Prerequisite Push
+
+- [ ] Include canonical policy changes under `policies/` and the deployment instructions.
+- [ ] Keep service enrollment, address/DNS changes, units, Quadlets, secret-template enrollment,
+  and supporting activation code/tests in part 2. Include changes to shared mapped compositions
+  in that review: they can activate behaviour even without a new mapping entry.
+- [ ] Render the prerequisite-only revision and its base for all hosts into separate output roots;
+  confirm their desired artifacts and manifests are identical. Do not compare against the complete
+  working tree if it already contains part 2.
+- [ ] Review and publish part 1. A commit on the runner's polled branch still triggers ordinary
+  reconciliation and can repair existing drift, even when rendered desired state is unchanged.
+- [ ] Confirm the target checkout contains the reviewed prerequisite revision and is clean before
+  using its policy files.
+- [ ] Provision runtime secret values through the protected-file workflow and apply the canonical
+  policy as the human Vault admin. Record completion in the spec without credential values.
+
+For a protected `/opt/abhaile` checkout, the admin can read the canonical policy through sudo
+while keeping Vault authentication in their own shell:
+
+```bash
+set -o pipefail
+sudo cat /opt/abhaile/policies/vault-agent.hcl |
+  vault policy write vault-agent -
+vault policy read vault-agent
+```
+
+Run this only after reviewing the policy from the intended revision. Policy files contain ACLs,
+not secret values. They are applied explicitly; the renderer and runner do not upload them to Vault.
+Applying a policy alone does not install a service's new Vault Agent templates.
+
+### Part 2: Activation Push and Host Validation
+
+- [ ] Include the complete deployment definition, mapping, network/DNS changes, helper code,
+  templates, and tests. Record the exact reviewed activation commit SHA.
+- [ ] Publish the candidate to a non-polled review branch first. Publishing directly to the
+  polled branch can trigger live deployment before operator validation.
+- [ ] Before changing a managed host checkout for candidate testing, arrange an approved
+  maintenance window: suspend automatic scheduling, let active reconciliation finish, and verify
+  there is no running transaction or conflicting runner lock. Cover every host polling the
+  activation branch; shared DNS changes can affect hosts beyond the new service's host.
+- [ ] Fetch and select the exact reviewed candidate in a clean target checkout. Record the
+  previous revision so a failed check can return to the accepted checkout. Do not interrupt an
+  active apply, overwrite local work, or edit runner recovery records.
+- [ ] Verify host-side Python helpers work with the bootstrap installation model. Bootstrap
+  installs dependencies and source-path CLI wrappers; it does not guarantee an editable/package
+  install. A unit using `python -m abhaile...` must set `PYTHONPATH=/opt/abhaile/src` explicitly
+  or use a supported managed entrypoint.
+- [ ] On each affected host, render as `abhaile`, then run Ansible check mode with sudo using
+  [the explicit privilege-separated workflow](../runbooks/operations.md#host-render-and-privileged-check).
+  Check the complete host plan, not just the newly added service.
+- [ ] Resolve failures and recheck the final candidate. If checks fail, restore the previously
+  accepted checkout before resuming its normal scheduling; leave a failed activation unpublished.
+- [ ] After explicit live approval, promote that exact checked commit to the polled branch and
+  reconcile it through the runner. Keep scheduling controlled until prerequisite and check gates
+  have passed. Restore normal timer scheduling for the authorized run and its health checks.
+- [ ] Verify Vault template delivery, service startup, authentication, persistent state,
+  idempotence, and reboot recovery; record evidence in the active spec.
+
+The two parts are delivery stages, not a requirement to use exactly two `git push` commands:
+review-branch publication and promotion may require separate pushes. Publishing the activation
+commit to the polled branch is a deployment action when automatic reconciliation is enabled.
+
 ## Core Checklist (All Services)
 
 ### 1. Register the address
@@ -128,8 +197,8 @@ Reference: `config/services/coredns-filtered/service.yaml`
 
 - [ ] Create `.ctmpl` template(s) in `config/services/<name>/templates/`
 - [ ] Add `composition.vault_agent.templates[]` entries
-- [ ] Create Vault policy for AppRole access
-- [ ] Seed credentials in Vault KV
+- [ ] Publish and apply the canonical Vault policy through part 1 before activating new templates
+- [ ] Seed credentials in Vault KV without committing or displaying their values
 - [ ] If a container needs copied secret output before startup, add a
   service-owned oneshot copy unit and make the container `Requires=` /
   `After=` that unit
@@ -148,7 +217,8 @@ Reference: `config/services/coredns-filtered/service.yaml`
 
 - [ ] `abhaile-render --host <host> --output ./out` exits 0
 - [ ] `grep '<name>' out/rendered/manifest.json` shows entries
-- [ ] `make check HOST=<host>` reports the intended Ansible changes
+- [ ] On the target host, render as `abhaile` and run the privileged Ansible check using the
+  [host-check workflow](../runbooks/operations.md#host-render-and-privileged-check)
 - [ ] `abhaile-render --all --output ./out` passes (no cross-host regression)
 - [ ] `make test && make lint` passes
 

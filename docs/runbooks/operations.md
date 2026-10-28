@@ -4,7 +4,7 @@ Quick-reference for daily operations and incident response. See `docs/INVENTORY.
 
 ## Vault Sealed (Most Common 3am Event)
 
-````bash
+```bash
 # Check seal status (phobos only)
 curl -s http://172.20.20.204:8200/v1/sys/seal-status | jq .sealed
 
@@ -44,21 +44,50 @@ make check HOST=phobos
 
 The all-host target is portable and does not impersonate either host. Ansible check mode reads the
 machine's installed systemd/Podman environment, so host-scoped validation must run on the
-corresponding target before promotion.
+corresponding target before promotion. The combined `make check`/`validate-host` targets do not
+escalate privileges: they run rendering and Ansible as the invoking user. Use the split workflow
+below on managed hosts so rendering stays unprivileged and checks can inspect protected live files.
+
+For new services, follow [the two-part publication workflow](../guides/adding-a-service.md#publish-prerequisites-before-service-activation):
+publish/apply prerequisites first, then validate and authorize service activation. A new commit on
+the runner's polled branch can cause live reconciliation, including repair of existing drift for a
+policy/docs-only commit. Account for automatic scheduling on every affected host before promotion.
+
+### Host Render and Privileged Check
+
+Run these commands on the named target, with a clean checkout at the reviewed revision and no
+concurrent runner transaction. Coordinate scheduling before changing the checkout for candidate
+validation; do not interrupt an active apply. This workflow renders desired files and performs
+check-mode validation without publishing service files or restarting units. Native validation may
+use disposable temporary files.
+
+```bash
+target_host=$(hostname -s)
+
+# Render as the unprivileged deployment account.
+sudo -H -u abhaile \
+  /opt/abhaile/.venv/bin/abhaile-render \
+  --host "$target_host" --output /var/lib/abhaile
+
+# Inspect the complete host plan with permission to read protected live state.
+sudo env ANSIBLE_CONFIG=/opt/abhaile/ansible/ansible.cfg \
+  ANSIBLE_LOCAL_TEMP=/tmp \
+  ANSIBLE_ROLES_PATH=/opt/abhaile/ansible/roles \
+  /usr/bin/ansible-playbook -i localhost, --connection=local --check \
+  --extra-vars '{"abhaile_rendered_root":"/var/lib/abhaile/rendered","abhaile_config_root":"/opt/abhaile/config","abhaile_expected_host":"'"$target_host"'"}' \
+  /opt/abhaile/ansible/playbooks/reconcile.yml
+```
+
+Review the result before authorizing live reconciliation. Workstation rendering, syntax checks,
+or manifest-selection-only checks do not replace this target-host check.
 
 ### Render and Reconcile
 
+Complete the [host render/check](#host-render-and-privileged-check) first. A runner start below is
+a live reconciliation request, not a dry run. For a new service, first complete both publication
+stages and the explicit activation approval described in the service guide.
+
 ```bash
-# Render (on target host, from /opt/abhaile)
-sudo -H -u abhaile env HOME=/home/abhaile \
-  /opt/abhaile/.venv/bin/abhaile-render --host $(hostname -s) --output /var/lib/abhaile
-
-# Review the complete host plan in Ansible check mode.
-sudo env ANSIBLE_CONFIG=/opt/abhaile/ansible/ansible.cfg \
-  /usr/bin/ansible-playbook -i localhost, --connection=local --check \
-  --extra-vars '{"abhaile_rendered_root":"/var/lib/abhaile/rendered","abhaile_config_root":"/opt/abhaile/config","abhaile_expected_host":"'"$(hostname -s)"'"}' \
-  /opt/abhaile/ansible/playbooks/reconcile.yml
-
 # Prefer the runner for live reconciliation so locking, recovery, and status records remain intact.
 sudo systemctl start abhaile-runner.service
 
@@ -284,8 +313,11 @@ these fields:
 ```
 
 Vault Agent can already read `secret/data/abhaile/omada` through the
-`vault-agent` policy. If a future service needs a new Vault path, update and
-apply the policy as an admin:
+`vault-agent` policy. If a future service needs a new Vault path, update its canonical policy
+under `policies/` and publish it in [the prerequisite part](../guides/adding-a-service.md#part-1-prerequisite-push)
+before service activation. Confirm the reviewed policy revision is present on the target before
+applying it as the human admin; do not reconstruct a separate live-only policy in a temporary file.
+From a readable, updated repository checkout:
 
 ```bash
 vault policy fmt policies/vault-agent.hcl
@@ -293,8 +325,20 @@ vault policy write vault-agent policies/vault-agent.hcl
 vault policy read vault-agent
 ```
 
-Then restart Vault Agent on each affected host or wait for the next normal
-template render interval:
+For `/opt/abhaile` files that the admin cannot read directly, keep Vault authentication in the
+admin shell and use:
+
+```bash
+set -o pipefail
+sudo cat /opt/abhaile/policies/vault-agent.hcl |
+  vault policy write vault-agent -
+vault policy read vault-agent
+```
+
+A policy-only update does not install new templates and does not need an immediate agent restart.
+During authorized service activation, reconciliation publishes changed templates/configuration and
+restarts Vault Agent once. If an already installed template is recovering from denied access,
+restart its agent explicitly or wait for its retry; an operator restart is:
 
 ```bash
 sudo -u abhaile XDG_RUNTIME_DIR=/run/user/$(id -u abhaile) \
@@ -577,5 +621,3 @@ chronyc sources -v
 ## Break-Glass: ER605 Console
 
 If network is completely unreachable, the ER605 management interface is on VLAN 99 (172.20.99.1). Physical access: ER605 port 5 is the management fallback port (untagged VLAN 99).
-
-````
