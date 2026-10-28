@@ -1,6 +1,0 @@
-name: go2rtc
-podman:
-  user: root
-  network: ipvlan-l2
-composition:
-  container: {}

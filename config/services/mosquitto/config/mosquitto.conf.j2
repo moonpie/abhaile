@@ -1,0 +1,9 @@
+# Deployment-owned broker settings; application clients keep their own configuration.
+listener 1883 {{ network.services[service_name].address | strip_cidr }}
+allow_anonymous false
+password_file /mosquitto/secrets/passwords
+
+persistence true
+persistence_location /mosquitto/data/
+autosave_interval 300
+log_dest stdout

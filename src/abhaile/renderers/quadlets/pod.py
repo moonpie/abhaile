@@ -19,6 +19,7 @@ from abhaile.renderers.quadlets.helpers import (
 from abhaile.renderers.quadlets.network import _lookup_service_vlan
 from abhaile.renderers.quadlets.volumes import (
     HostPathRegistry,
+    _build_device_lines,
     _build_mounted_file_lines,
     _quadlet_output_root,
     _render_named_volumes,
@@ -210,6 +211,7 @@ def _render_pod_quadlets(
             host_name=host,
             service_name=service,
             volume_lines=volume_lines,
+            device_lines=_build_device_lines(container_def),
             image=image_reference,
             build=build_filename,
             pull_policy=pull_policy,

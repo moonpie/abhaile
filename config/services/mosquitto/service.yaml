@@ -2,5 +2,49 @@ name: mosquitto
 podman:
   user: root
   network: ipvlan-l2
+  image: &mosquitto_image docker.io/library/eclipse-mosquitto:2.1.2-alpine
+  pull_policy: missing
+apply:
+  config_change_restart_unit: mosquitto.service
 composition:
-  container: {}
+  vault_agent:
+    templates:
+      - source: mosquitto/templates/mosquitto-accounts.json.ctmpl
+        out: mosquitto-accounts.json
+        perms: '0600'
+  config:
+    - source:
+        template: mosquitto/config/mosquitto.conf.j2
+      destination: /srv/mosquitto/config/mosquitto.conf
+  systemd:
+    - source:
+        template: mosquitto/systemd/mosquitto-passwords.service.j2
+        variables:
+          image: *mosquitto_image
+      destination: /etc/systemd/system/mosquitto-passwords.service
+    - source: mosquitto/systemd/mosquitto-passwords.path
+      destination: /etc/systemd/system/mosquitto-passwords.path
+      enable: true
+      start: true
+  container:
+    named_volumes:
+      - name: config
+        host_path: /srv/mosquitto/config
+        mount_path: /mosquitto/config
+        host_owner: root
+        host_group: root
+        host_mode: '0755'
+        mode: ro
+      - name: data
+        host_path: /srv/mosquitto/data
+        mount_path: /mosquitto/data
+        host_owner: 1883
+        host_group: 1883
+        host_mode: '0750'
+      - name: secrets
+        host_path: /srv/mosquitto/secrets
+        mount_path: /mosquitto/secrets
+        host_owner: root
+        host_group: 1883
+        host_mode: '0750'
+        mode: ro

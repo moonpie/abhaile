@@ -20,9 +20,9 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20260730
+        date: 20261027
         counter: 00
-        content_hash: 20402fd61518bcf7b7e4d91c91f2c64981f6a2a581bd182d4fafec9f4b54d591
+        content_hash: 481684014ab743ff34212c63c565ae45c3be97da2d930e08334fad34445235c0
     - name: abhaile.home.arpa.
       provider:
         type: internal
@@ -36,9 +36,9 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20260730
+        date: 20261027
         counter: 00
-        content_hash: 3836646254daae71ae311bb0b3a14732725f9e6e6421f764351fed2c89de1cbb
+        content_hash: a8c4ea22cbe9ec76a1b52a76d7d29b4759518d89840d0edcebf04cfcbda208af
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
@@ -363,18 +363,8 @@ services:
             name: esphome
             rdata: "%%network.services.esphome.address | strip_cidr%%"
             ptr: true
-  go2rtc:
-    address: 172.20.20.225/32
-    vlan: services
-    dns:
-      - zone: svc.abhaile.home.arpa.
-        records:
-          - type: a
-            name: go2rtc
-            rdata: "%%network.services.go2rtc.address | strip_cidr%%"
-            ptr: true
   frigate:
-    address: 172.20.20.226/32
+    address: 172.20.20.225/32
     vlan: services
     dns:
       - zone: svc.abhaile.home.arpa.

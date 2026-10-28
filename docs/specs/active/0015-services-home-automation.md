@@ -466,8 +466,10 @@ render result, dry-run/check result, host observation, or restore evidence.
 
 - Operator evidence confirms `secret/abhaile/mqtt` now contains exactly the six agreed per-client
   fields. The operator removed the legacy MQTT pair and obsolete Vault entries. No credential
-  values were shared or copied into repository files. The installed `vault-agent` policy still
-  lacks MQTT access; applying the canonical policy from the prerequisite commit remains pending.
+  values were shared or copied into repository files. Prerequisite commit `dee4745` was published
+  and reached phobos; the operator supplied successful runner completion and health output.
+  The operator then applied its canonical `vault-agent` policy and supplied the six-rule read-back,
+  including read access to `secret/data/abhaile/mqtt`. Vault prerequisite provisioning is complete.
 - Agreed two-part publication: publish policy/documentation prerequisites first, then validate and
   authorize the service activation revision. Keep enrollment, address/DNS changes, templates,
   helper code, and tests in the activation commit. Policy/docs-only publication can still trigger
@@ -478,13 +480,31 @@ render result, dry-run/check result, host observation, or restore evidence.
   environment in a clean virtual environment without an installed Abhaile package.
 - Updated the service-authoring guide, Mosquitto runbook, shared operations/secrets guidance, and
   README to document prerequisite publication and policy application, unprivileged rendering,
-  privileged host check mode, and explicit activation approval. Deployment publication, canonical
-  policy application, full host checks, and live runtime evidence remain pending.
+  privileged host check mode, and explicit activation approval. Activation publication, full host
+  checks, and live Mosquitto runtime evidence remain pending.
 - Local follow-up validation passed: 511 unit tests, three Mosquitto deployment integration tests,
   changed-file pre-commit checks with separate Black verification, and two identical all-host
   renders. A prerequisite-only snapshot containing the policy and documentation changes produced
   the same 166 rendered files/manifests as its base across both hosts. This verifies the proposed
   commit split, not target-host runtime readiness; implementation commit references remain pending.
+
+#### Activation Candidate — 2026-10-28
+
+- Prepared `codex/mosquitto-activation` from prerequisite commit `dee4745`, keeping the polled
+  `main` branch at the prerequisite revision. The candidate contains Mosquitto enrollment and
+  deployment files, the source-path-safe password refresh helper, address cleanup, container
+  device schema/rendering support, and their tests.
+- Compared all-host output with the prerequisite revision: nine added files and seven changed
+  files, with no removed rendered files. Additions are the phobos broker resources, Vault Agent
+  staging template, and the `.222` service-address drop-in. Changes are Vault Agent's phobos
+  configuration, forward/reverse DNS zones on both hosts, and both manifests. No other service
+  configuration changed.
+- Local candidate validation passed: 511 unit tests and 41 relevant integration tests; the helper
+  separately passed its 90% coverage threshold at 98.48%. Repeated all-host renders were identical.
+  This does not replace full target-host Ansible checks or the still-unverified broker runtime.
+- Publication to the review branch, coordinated host candidate checks, promotion to `main`, and
+  live activation remain operator steps. Do not advance to Zigbee2MQTT until the Mosquitto stage's
+  runtime authentication and persistence evidence is collected.
 
 ## Agreed Implementation Decisions
 

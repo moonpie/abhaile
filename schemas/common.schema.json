@@ -266,6 +266,14 @@
           "items": {
             "$ref": "#/definitions/mountedFile"
           }
+        },
+        "devices": {
+          "type": "array",
+          "description": "Device passthrough entries rendered as Quadlet AddDevice= lines",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false

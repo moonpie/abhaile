@@ -1,0 +1,32 @@
+[Unit]
+Description=Mosquitto MQTT broker
+Wants=network-online.target
+After=network-online.target abhaile-secrets-ready.service mosquitto-passwords.service
+Requires=abhaile-secrets-ready.service mosquitto-passwords.service
+
+[Container]
+Image={{ image }}
+Pull={{ pull_policy }}
+Network={{ network.services[service_name].vlan }}.network
+PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
+User=1883:1883
+Timezone=local
+{% for line in volume_lines %}
+{{ line }}
+{% endfor %}
+Exec=/usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+HealthCmd=["CMD-SHELL","mosquitto_sub -o /dev/null -V mqttv5 -h {{ network.services[service_name].address | strip_cidr }} -t abhaile/health -E -W 3 >/dev/null 2>&1; test $$? -eq 135"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=10s
+Notify=healthy
+StopSignal=SIGTERM
+StopTimeout=60
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=abhaile-secrets-ready.service

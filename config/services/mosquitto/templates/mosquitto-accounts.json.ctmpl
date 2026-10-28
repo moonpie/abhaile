@@ -1,0 +1,16 @@
+{{ with secret "secret/data/abhaile/mqtt" -}}
+[
+  {
+    "username": {{ .Data.data.home_assistant_username | toJSON }},
+    "password": {{ .Data.data.home_assistant_password | toJSON }}
+  },
+  {
+    "username": {{ .Data.data.zigbee2mqtt_username | toJSON }},
+    "password": {{ .Data.data.zigbee2mqtt_password | toJSON }}
+  },
+  {
+    "username": {{ .Data.data.frigate_username | toJSON }},
+    "password": {{ .Data.data.frigate_password | toJSON }}
+  }
+]
+{{- end }}
