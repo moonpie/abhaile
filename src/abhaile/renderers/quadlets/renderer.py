@@ -151,8 +151,6 @@ def render_service_quadlets(
             service=service,
             container_name=None,
             container_def=container_def,
-            podman=podman,
-            services_root=services_root,
         )
         if build_path is not None and image_reference is not None:
             raise RenderError(

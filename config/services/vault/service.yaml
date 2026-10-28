@@ -2,8 +2,6 @@ name: vault
 podman:
   user: root
   network: ipvlan-l2
-  image: docker.io/hashicorp/vault:1.21.4
-  pull_policy: missing
 apply:
   config_change_restart_unit: vault.service
 composition:
@@ -22,15 +20,21 @@ composition:
       blocks:
         - vault/caddy/internal-ingress.txt
   container:
+    image: docker.io/hashicorp/vault:1.21.4
+    pull_policy: missing
     named_volumes:
       - name: config
         host_path: /srv/vault/config
         mount_path: /vault/config
-        manage_host_ownership: false
+        host_owner: 0
+        host_group: 0
+        host_mode: '0750'
       - name: data
         host_path: /srv/vault/data
         mount_path: /vault/data
-        manage_host_ownership: false
+        host_owner: 0
+        host_group: 0
+        host_mode: '0750'
       - name: host-certs
         host_path: /etc/ssl/certs
         mount_path: /etc/ssl/certs

@@ -41,7 +41,8 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: root
+        host_group: root
     mounted_files: []
 """,
         )
@@ -66,7 +67,8 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: root
+        host_group: root
     mounted_files: []
 """,
         )
@@ -461,7 +463,8 @@ podman:
 composition:
   pod:
     containers:
-      - name: app
+    - name: app
+      container:
         named_volumes: []
         mounted_files: []
 """,
@@ -594,7 +597,7 @@ composition:
     def test_rootful_writable_volume_requires_host_metadata(
         self, tmp_path: Path, write_file: Any
     ) -> None:
-        """Rootful writable named volume host directories require explicit metadata."""
+        """Rootful private named volume host directories require explicit metadata."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
 
@@ -638,7 +641,7 @@ composition:
 
         with pytest.raises(
             RenderError,
-            match=r"Rootful writable volume requires explicit host_owner and host_group: /data/store",
+            match=r"Rootful private named volume requires explicit host_owner and host_group: /data/store",
         ):
             render_service_quadlets(
                 "phobos",
@@ -651,7 +654,7 @@ composition:
     def test_rootful_writable_volume_defaults_host_mode(
         self, tmp_path: Path, write_file: Any
     ) -> None:
-        """Rootful writable named volume host directory mode defaults to 0750."""
+        """Rootful private named volume host directory mode defaults to 0750."""
         config_root = tmp_path / "config"
         output_dir = tmp_path / "output" / "services"
         rendered_root = tmp_path / "output"

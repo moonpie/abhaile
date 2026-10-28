@@ -29,7 +29,8 @@ podman:
 composition:
   pod:
     containers:
-      - name: app
+    - name: app
+      container:
         named_volumes: []
         mounted_files: []
 """,
@@ -108,23 +109,25 @@ podman:
 composition:
   pod:
     containers:
-      - name: authelia
+    - name: authelia
+      container:
         named_volumes:
-          - name: config
-            host_path: /var/lib/authelia/config
-            mount_path: /config
-            host_owner: root
-            host_group: root
-            host_mode: "0750"
+        - name: config
+          host_path: /var/lib/authelia/config
+          mount_path: /config
+          host_owner: root
+          host_group: root
+          host_mode: '0750'
         mounted_files: []
-      - name: redis
+    - name: redis
+      container:
         named_volumes:
-          - name: data
-            host_path: /var/lib/authelia/redis
-            mount_path: /data
-            host_owner: root
-            host_group: root
-            host_mode: "0750"
+        - name: data
+          host_path: /var/lib/authelia/redis
+          mount_path: /data
+          host_owner: root
+          host_group: root
+          host_mode: '0750'
         mounted_files: []
 """,
         )
@@ -304,12 +307,13 @@ podman:
 composition:
   pod:
     containers:
-      - name: app
+    - name: app
+      container:
         named_volumes:
-          - name: shared-data
-            host_path: /shared/data
-            mount_path: /data
-            shared: true
+        - name: shared-data
+          host_path: /shared/data
+          mount_path: /data
+          shared: true
         mounted_files: []
 """,
         )
@@ -385,7 +389,8 @@ podman:
 composition:
   pod:
     containers:
-      - name: custom
+    - name: custom
+      container:
         named_volumes: []
         mounted_files: []
 """,
@@ -466,7 +471,8 @@ podman:
 composition:
   pod:
     containers:
-      - named_volumes: []
+    - container:
+        named_volumes: []
 """,
         )
 
@@ -499,7 +505,8 @@ podman:
 composition:
   pod:
     containers:
-      - name: missing
+    - name: missing
+      container:
         named_volumes: []
 """,
         )
@@ -533,7 +540,8 @@ podman:
 composition:
   pod:
     containers:
-      - name: app
+    - name: app
+      container:
         named_volumes: []
         mounted_files: []
 """,
@@ -605,7 +613,8 @@ podman:
 composition:
   pod:
     containers:
-      - name: app
+    - name: app
+      container:
         named_volumes: []
         mounted_files: []
 """,
@@ -698,24 +707,25 @@ podman:
 composition:
   pod:
     containers:
-      - name: app
+    - name: app
+      container:
         named_volumes:
-          - name: data
-            host_path: /srv/omada-controller/mongodb/data
-            mount_path: /data/db
-            host_owner: 999
-            host_group: 999
-            host_mode: "0750"
-          - name: config
-            host_path: /srv/omada-controller/mongodb/config
-            mount_path: /data/configdb
-            host_owner: 999
-            host_group: 999
-            host_mode: "0755"
-          - name: host-certs
-            host_path: /etc/ssl/certs
-            mount_path: /etc/ssl/certs
-            shared: true
+        - name: data
+          host_path: /srv/omada-controller/mongodb/data
+          mount_path: /data/db
+          host_owner: 999
+          host_group: 999
+          host_mode: '0750'
+        - name: config
+          host_path: /srv/omada-controller/mongodb/config
+          mount_path: /data/configdb
+          host_owner: 999
+          host_group: 999
+          host_mode: '0755'
+        - name: host-certs
+          host_path: /etc/ssl/certs
+          mount_path: /etc/ssl/certs
+          shared: true
         mounted_files: []
 """,
         )

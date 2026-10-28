@@ -316,7 +316,7 @@ class TestServiceCompositionSchema:
         validate_schema(service_data, service_schema, "service.yaml", service_schema_path)
 
     def test_service_schema_accepts_registry_image_and_pull_policy(self) -> None:
-        """podman services may declare direct registry image metadata."""
+        """Standalone containers may declare direct registry image metadata."""
         repo_root = self._repo_root()
         service_schema_path = repo_root / "schemas" / "service.schema.json"
         service_schema = read_json(service_schema_path)
@@ -326,11 +326,11 @@ class TestServiceCompositionSchema:
             "podman": {
                 "user": "root",
                 "network": "ipvlan-l2",
-                "image": "ghcr.io/0xerr0r/blocky:v0.27.0",
-                "pull_policy": "missing",
             },
             "composition": {
                 "container": {
+                    "image": "ghcr.io/0xerr0r/blocky:v0.27.0",
+                    "pull_policy": "missing",
                     "named_volumes": [],
                     "mounted_files": [],
                 },
@@ -366,7 +366,8 @@ class TestServiceCompositionSchema:
                             "name": "cache",
                             "host_path": "/srv/mongodb/cache",
                             "mount_path": "/cache",
-                            "manage_host_ownership": False,
+                            "host_owner": 0,
+                            "host_group": 0,
                         },
                     ],
                     "mounted_files": [],
@@ -387,10 +388,10 @@ class TestServiceCompositionSchema:
             "podman": {
                 "user": "root",
                 "network": "ipvlan-l2",
-                "image": "",
             },
             "composition": {
                 "container": {
+                    "image": "",
                     "named_volumes": [],
                     "mounted_files": [],
                 },
@@ -417,9 +418,9 @@ class TestServiceCompositionSchema:
                     "containers": [
                         {
                             "name": "redis",
-                            "image": "docker.io/library/redis:8.2.2-alpine",
-                            "pull_policy": "opportunistic",
                             "container": {
+                                "image": "docker.io/library/redis:8.2.2-alpine",
+                                "pull_policy": "opportunistic",
                                 "named_volumes": [],
                                 "mounted_files": [],
                             },

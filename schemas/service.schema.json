@@ -74,27 +74,16 @@
     },
     "podman": {
       "type": "object",
-      "description": "Podman container/pod runtime configuration",
+      "description": "Local Podman runtime configuration (not inherited)",
       "required": ["user", "network"],
       "properties": {
         "user": {
           "type": "string",
-          "description": "User to run as (root=rootful, other=rootless)"
+          "description": "Local user to run as, never inherited (root=rootful, other=rootless)"
         },
         "network": {
           "type": "string",
           "description": "Network mode: ipvlan-l2, host, or container:<name>"
-        },
-        "image": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Registry image reference for single-container services or default pod containers"
-        },
-        "pull_policy": {
-          "type": "string",
-          "enum": ["always", "missing", "never", "newer"],
-          "default": "missing",
-          "description": "Quadlet boot-time image pull policy"
         }
       },
       "additionalProperties": false
@@ -252,28 +241,19 @@
         "pod": {
           "type": "object",
           "description": "Pod configuration (for podman services with type=pod)",
+          "required": ["containers"],
           "properties": {
             "containers": {
               "type": "array",
               "description": "Container definitions within the pod",
+              "minItems": 1,
               "items": {
                 "type": "object",
-                "required": ["name"],
+                "required": ["name", "container"],
                 "properties": {
                   "name": {
                     "type": "string",
                     "description": "Container name"
-                  },
-                  "image": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "Registry image reference for this pod container"
-                  },
-                  "pull_policy": {
-                    "type": "string",
-                    "enum": ["always", "missing", "never", "newer"],
-                    "default": "missing",
-                    "description": "Quadlet boot-time image pull policy for this pod container"
                   },
                   "container": {
                     "description": "Container configuration",
@@ -316,6 +296,7 @@
         "required": ["podman"],
         "properties": {
           "podman": {
+            "required": ["user"],
             "properties": {
               "user": {"const": "root"}
             }
@@ -342,6 +323,7 @@
         "required": ["podman"],
         "properties": {
           "podman": {
+            "required": ["user"],
             "properties": {
               "user": {"not": {"const": "root"}}
             }

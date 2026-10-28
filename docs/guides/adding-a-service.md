@@ -51,34 +51,35 @@ Applying a policy alone does not install a service's new Vault Agent templates.
 ### Part 2: Activation Push and Host Validation
 
 - [ ] Include the complete deployment definition, mapping, network/DNS changes, helper code,
-  templates, and tests. Record the exact reviewed activation commit SHA.
-- [ ] Publish the candidate to a non-polled review branch first. Publishing directly to the
-  polled branch can trigger live deployment before operator validation.
-- [ ] Before changing a managed host checkout for candidate testing, arrange an approved
-  maintenance window: suspend automatic scheduling, let active reconciliation finish, and verify
-  there is no running transaction or conflicting runner lock. Cover every host polling the
-  activation branch; shared DNS changes can affect hosts beyond the new service's host.
-- [ ] Fetch and select the exact reviewed candidate in a clean target checkout. Record the
-  previous revision so a failed check can return to the accepted checkout. Do not interrupt an
-  active apply, overwrite local work, or edit runner recovery records.
+  templates, and tests. Keep schema, renderer and service migrations together in a coherent
+  revision. Record the exact reviewed activation commit SHA.
+- [ ] Confirm operator-applied prerequisites from part 1 are complete before publishing activation.
+- [ ] Run local validation and render every affected host into temporary output roots. Review the
+  complete desired-state change, including other services affected by shared definitions.
 - [ ] Verify host-side Python helpers work with the bootstrap installation model. Bootstrap
   installs dependencies and source-path CLI wrappers; it does not guarantee an editable/package
   install. A unit using `python -m abhaile...` must set `PYTHONPATH=/opt/abhaile/src` explicitly
   or use a supported managed entrypoint.
-- [ ] On each affected host, render as `abhaile`, then run Ansible check mode with sudo using
-  [the explicit privilege-separated workflow](../runbooks/operations.md#host-render-and-privileged-check).
-  Check the complete host plan, not just the newly added service.
-- [ ] Resolve failures and recheck the final candidate. If checks fail, restore the previously
-  accepted checkout before resuming its normal scheduling; leave a failed activation unpublished.
-- [ ] After explicit live approval, promote that exact checked commit to the polled branch and
-  reconcile it through the runner. Keep scheduling controlled until prerequisite and check gates
-  have passed. Restore normal timer scheduling for the authorized run and its health checks.
+- [ ] When deployment is intended, push the reviewed activation revision to `main`, the normal
+  runner-polled branch. That publication authorizes normal automatic reconciliation on the hosts.
+- [ ] Follow the runner's normal sequence: fetch/select the revision, render, run Ansible check
+  mode, apply only after check mode succeeds, then perform health checks. Let the active run finish;
+  do not interrupt apply, change its checkout, or edit runner recovery records.
+- [ ] Confirm the finished runner summary identifies the intended revision. Record host check-mode
+  and reconciliation results. A failure before apply is not evidence of successful deployment;
+  inspect diagnostics and fix the candidate through git.
 - [ ] Verify Vault template delivery, service startup, authentication, persistent state,
-  idempotence, and reboot recovery; record evidence in the active spec.
+  idempotence, and reboot recovery as required by the active service spec.
 
-The two parts are delivery stages, not a requirement to use exactly two `git push` commands:
-review-branch publication and promotion may require separate pushes. Publishing the activation
-commit to the polled branch is a deployment action when automatic reconciliation is enabled.
+Review branches and manual candidate checkout testing are optional. Normal publication to `main`
+uses the runner's render/check gate and does not require a separate review-branch promotion or a
+routine timer suspension. For an independent manual check, use
+[the privilege-separated host workflow](../runbooks/operations.md#host-render-and-privileged-check)
+and coordinate any checkout changes with the runner so no active reconciliation is interrupted.
+
+The two parts separate operator prerequisites from activation. Record the observed check phase
+from the normal runner or an optional manual check; pushing to `main` can deploy automatically
+once that gate passes.
 
 ## Core Checklist (All Services)
 
@@ -113,11 +114,44 @@ composition: {}
 
 Schema requirements:
 
+The following image-authoring contract is implemented under active spec 0032; completion evidence
+and delivery status are tracked in that spec.
+
 - Both `name` and `composition` are always required
-- If `podman:` is present, requires `user` and `network`; `composition` must include `pod` or `container`
-- Rootless services (`podman.user` ≠ `root`) can only use `network: host` — not `ipvlan-l2`
-- Registry-backed containers set `podman.image` or per-container `image`; `pull_policy` defaults to
-  `missing`
+- A `podman` block contains only the required `user` and `network` fields.
+- Each mapped Podman service declares `user` and `network` locally; these fields are never
+  inherited. Shared container definitions need no `podman` block.
+- Standalone images belong to `composition.container.image`; pod-member images belong to
+  `composition.pod.containers[].container.image`. Both use the same container definition schema.
+- A declared pod requires at least one member in `containers`; each member requires `name` and
+  a nested `container` object.
+- `pull_policy` is optional in that container object and defaults to `missing` during rendering.
+  Service-level and pod-member wrapper-level image/policy declarations are rejected.
+- `composition` must include `pod`, `container`, or `include` when `podman` is present.
+- Rootless services (`podman.user` ≠ `root`) may use `host` or `container:<name>`, not `ipvlan-l2`.
+- Existing container-composition selection and local builds remain supported. There is no
+  service-level registry image fallback.
+
+For example, `blocky-common.composition.container` declares the shared image once while `blocky-a`
+and `blocky-b` each declare their runtime context and include the common container definition. See
+[spec 0032](../specs/active/0032-container-image-authoring.md) for the full contract, including
+the supported include-only container pattern that predates this change.
+
+A non-empty local `composition.container` replaces the inherited container definition. If you
+add local volumes, mounted files, or other container settings, supply the image and all other
+needed settings in that local object too. Alternatively, keep the complete container definition
+in the shared composition. An inherited image is not merged into a local container automatically.
+
+Pre-commit validates individual files and runs a project check for mapped services and their
+include closures. The project check runs on every commit, including deletion-only commits, so
+removing an included definition cannot bypass validation. Run it independently with:
+
+```bash
+.venv/bin/python scripts/validate-services.py
+```
+
+It requires no render, network access, Vault credentials or host privileges. CLI render performs
+the same service checks before generating any artifacts.
 
 ### 3. Add to host mapping
 
@@ -139,25 +173,37 @@ Schema requirements:
 
 ## Pattern: Simple Container
 
-Reference: `config/services/blocky/service.yaml`
+Reference: `config/services/blocky-a/service.yaml` and `config/services/blocky-common/service.yaml`
 
 - [ ] Set `podman.user: root` and `podman.network: ipvlan-l2`
-- [ ] Set `podman.image: <registry>/<image>:<version>` and optionally
-  `podman.pull_policy: missing`
+- [ ] Set `image: <registry>/<image>:<version>` in `composition.container`, directly or through
+  an included container definition, and optionally set `pull_policy: missing` there
 - [ ] Add `composition.container.named_volumes[]` for persistent data
   - If multiple services use the same `host_path`, all must set `shared: true`
+  - Private rootful volumes require `host_owner` and `host_group`; `host_mode` defaults to `0750`.
+    Rootless owner/group default to the runtime user. Only the host directory's own metadata is
+    managed; application-created descendants are untouched. There is no ownership opt-out.
 - [ ] Add `composition.container.mounted_files[]` for bind-mounted config files
 - [ ] Add `composition.config[]` for rendered config files
+- [ ] If a config parent is a private named-volume host directory, its volume declaration already
+  supplies managed directory intent; do not duplicate it in `composition.config[]`.
+- [ ] Other config parents need existing or explicit directory intent. A directory entry uses
+  `destination`, `owner`, `group`, and `mode`. Incidental render-tree directories alone do not
+  supply intent. Matching duplicate declarations preserve provenance; conflicting metadata fails.
 - [ ] Create `quadlets/container.container.j2`; include `Image={{ image }}` and
   `Pull={{ pull_policy }}`
+
+See [spec 0033](../specs/active/0033-private-volume-directory-management.md) for private-directory
+management, rootless defaults and its remaining file-only parent provisioning boundary.
 
 ## Pattern: Pod Service
 
 Reference: `config/services/authelia/service.yaml`
 
 - [ ] Set `podman.user: root` and `podman.network: ipvlan-l2`
-- [ ] Add `composition.pod.containers[]` with `name`, `image`, optional `pull_policy`,
-  and `container.named_volumes[]`
+- [ ] Add at least one `composition.pod.containers[]` member, each with `name` and nested
+  `container`; registry-backed members set `container.image`, optional `container.pull_policy`,
+  and any `container.named_volumes[]`
 - [ ] Create `quadlets/pod.pod.j2`
 - [ ] Per container: create `quadlets/<container-name>/container.container.j2`; include
   `Image={{ image }}` and `Pull={{ pull_policy }}`
@@ -177,8 +223,8 @@ Reference: `config/services/authelia/service.yaml`
 Reference: `config/services/vault-agent/service.yaml`
 
 - [ ] Set `podman.user: <username>` and `podman.network: host`
-- [ ] Set `podman.image: <registry>/<image>:<version>` and optionally
-  `podman.pull_policy: missing`
+- [ ] Set `image: <registry>/<image>:<version>` in `composition.container`, directly or through
+  an included container definition, and optionally set `pull_policy: missing` there
 - [ ] Add `composition.container.named_volumes[]` and config entries
 - [ ] Create quadlet sources under `quadlets/`
 

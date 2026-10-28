@@ -2,8 +2,6 @@ name: mosquitto
 podman:
   user: root
   network: ipvlan-l2
-  image: &mosquitto_image docker.io/library/eclipse-mosquitto:2.1.2-alpine
-  pull_policy: missing
 apply:
   config_change_restart_unit: mosquitto.service
 composition:
@@ -20,13 +18,15 @@ composition:
     - source:
         template: mosquitto/systemd/mosquitto-passwords.service.j2
         variables:
-          image: *mosquitto_image
+          image: docker.io/library/eclipse-mosquitto:2.1.2-alpine
       destination: /etc/systemd/system/mosquitto-passwords.service
     - source: mosquitto/systemd/mosquitto-passwords.path
       destination: /etc/systemd/system/mosquitto-passwords.path
       enable: true
       start: true
   container:
+    image: docker.io/library/eclipse-mosquitto:2.1.2-alpine
+    pull_policy: missing
     named_volumes:
       - name: config
         host_path: /srv/mosquitto/config

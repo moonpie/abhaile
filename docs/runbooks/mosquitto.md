@@ -13,18 +13,19 @@ Keep these parts separately reviewable:
 | Part | Include | Gate before proceeding |
 | --- | --- | --- |
 | Prerequisite push | `policies/vault-agent.hcl` and operator documentation | Reviewed policy is present on phobos, applied by the Vault admin, and the six MQTT fields are provisioned |
-| Activation push | Mosquitto mapping, network/DNS changes, service files, password helper, source-path fix, and tests | Exact reviewed candidate passes host render/check before live approval and promotion |
+| Activation push | Mosquitto mapping, network/DNS changes, service files, password helper, source-path fix, and tests | Prerequisites complete; reviewed activation is published to main for runner-gated render/check/apply |
 
 The prerequisite-only revision must render identically to its base on both hosts. Do not include
 the activation mapping, new template enrollment, or DNS changes in that push. Even a policy/docs
 commit can cause the runner to reconcile existing state; it does not automatically upload Vault
 policies. Confirm the prerequisite commit has reached the host before applying its policy file.
 
-Publish activation to a non-polled review branch first. Before selecting that candidate on a
-managed host, coordinate automatic scheduling and let any active reconciliation finish. Include
-both phobos and deimos in the release plan because the shared DNS changes affect both hosts.
-Keep promotion to the polled branch gated on prerequisites, complete host checks, and explicit
-live approval. Do not interrupt an active apply or edit runner recovery records.
+Once prerequisites are complete and deployment is intended, publish the reviewed activation
+revision to `main`. The normal runner renders and runs Ansible check mode before apply, then runs
+health checks. Record its completed revision and results on both phobos and deimos, because shared
+DNS or renderer changes can affect both hosts. A separate review branch or routine timer suspension
+is not required. Optional manual checks use the linked privilege-separated workflow and must not
+conflict with an active runner. Do not interrupt apply or edit runner recovery records.
 Both publication parts belong to spec 0015's deployment phase; the later application-configuration
 phase remains separate.
 
@@ -36,10 +37,22 @@ phase remains separate.
 | `/srv/mosquitto/data/` | Broker persistence database | UID/GID 1883, mode 0750; writable |
 | `/srv/mosquitto/secrets/` | Generated password hashes and refresh state | Root-owned, GID 1883, mode 0750; mounted read-only |
 
+The broker and password helper each declare the same pinned image literally in `service.yaml`.
+When updating the version, update both declarations; the deployment regression checks that their
+rendered image references match.
+
 The broker runs as UID/GID 1883, avoiding the image entrypoint's recursive ownership changes.
 The installed password file is root-owned, GID 1883, mode 0640. Its refresh-state file is
 root-owned, mode 0600. Reconciliation manages deployment files and directory metadata, without
 replacing the broker database or generated credentials.
+The private config volume supplies the managed `/srv/mosquitto/config` directory declaration,
+including when config rendering has already created an incidental output parent. No duplicate
+`composition.config` directory entry is needed.
+
+[Active spec 0033](../specs/active/0033-private-volume-directory-management.md) tracks the general
+registration fix replacing the explicit-directory workaround from commit `65cb022`. Operator-run
+existing-host check-mode evidence remains pending. Tests use disposable filesystem fixtures;
+no empty physical host is required or claimed.
 
 ## Vault Prerequisites
 
@@ -114,8 +127,15 @@ the configuration phase, without rewriting its internal application state.
 
 ## Deployment Validation
 
-Use a clean phobos checkout at the exact reviewed activation revision, with runner scheduling
-coordinated as above. The virtual environment needs the existing runtime dependencies; bootstrap
+For normal publication to `main`, record the completed runner revision and its render/check,
+apply and health results. The runner performs the host check before apply; the manual checks below
+are optional and do not introduce a separate promotion or timer-restoration gate.
+
+### Optional Manual Host Checks
+
+Use a clean phobos checkout at the exact reviewed revision. Coordinate any manual checkout changes
+with the runner and let active reconciliation finish first. The virtual environment needs the
+existing runtime dependencies; bootstrap
 does not guarantee that the Abhaile package is installed. The password-refresh unit explicitly sets
 `PYTHONPATH=/opt/abhaile/src` before invoking its module. Check that the candidate helper imports
 without running password conversion:
@@ -140,16 +160,18 @@ sudo env ANSIBLE_CONFIG=/opt/abhaile/ansible/ansible.cfg \
   /opt/abhaile/ansible/playbooks/reconcile.yml
 ```
 
-Use [the same host-check procedure](operations.md#host-render-and-privileged-check) on deimos for
-the shared DNS changes. These are check-mode commands; they do not activate Mosquitto. Resolve
-failures before promoting the checked revision. Return to the accepted checkout if candidate
-validation fails, before resuming its normal scheduling.
+For optional manual validation, use
+[the same host-check procedure](operations.md#host-render-and-privileged-check) on deimos for
+changes to shared definitions. These commands run in check mode and do not activate Mosquitto.
+Resolve failures through git; do not interrupt an active runner or edit recovery records.
 
-After explicit live approval, promote the exact checked revision and use the documented
-[runner reconciliation workflow](operations.md#render-and-reconcile). Restore normal scheduling
-for the authorized run and health checks. Reconciliation publishes Vault Agent's new template and
-restarts it before starting the rootful broker. Verify the staging file exists and is mode 0600
-without printing its contents, then inspect:
+### Verify Runner Deployment
+
+When deployment is intended, push the reviewed revision to `main` and follow the normal
+[runner reconciliation workflow](operations.md#render-and-reconcile). There is no separate
+candidate promotion step. If template enrollment changes, reconciliation publishes Vault Agent's
+template and restarts the agent before starting the rootful broker. Verify the staging file exists
+and is mode 0600 without printing its contents, then inspect:
 
 ```bash
 systemctl status mosquitto-passwords.service mosquitto-passwords.path mosquitto.service

@@ -2,8 +2,6 @@ name: vault-agent
 podman:
   user: abhaile
   network: host
-  image: docker.io/hashicorp/vault:1.21.4
-  pull_policy: missing
 composition:
   systemd:
     - source: vault-agent/systemd/abhaile-secrets-ready.service
@@ -24,6 +22,8 @@ composition:
         out: .ready
         perms: '0640'
   container:
+    image: docker.io/hashicorp/vault:1.21.4
+    pull_policy: missing
     named_volumes:
       - name: templates
         host_path: /srv/vault/agent/templates

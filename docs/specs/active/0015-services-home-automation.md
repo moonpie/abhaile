@@ -8,7 +8,7 @@ title: Home Automation Services
 status: active
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-28
+updated: 2026-10-29
 related_adrs:
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -473,7 +473,7 @@ render result, dry-run/check result, host observation, or restore evidence.
 - Agreed two-part publication: publish policy/documentation prerequisites first, then validate and
   authorize the service activation revision. Keep enrollment, address/DNS changes, templates,
   helper code, and tests in the activation commit. Policy/docs-only publication can still trigger
-  reconciliation of existing state. Review-branch publication and promotion must account for
+  reconciliation of existing state. Activation publication must account for
   automatic scheduling on every affected host.
 - Fixed the refresh unit's bootstrap import assumption with an explicit
   `Environment=PYTHONPATH=/opt/abhaile/src`. The deployment integration suite exercises the rendered
@@ -502,12 +502,44 @@ render result, dry-run/check result, host observation, or restore evidence.
 - Local candidate validation passed: 511 unit tests and 41 relevant integration tests; the helper
   separately passed its 90% coverage threshold at 98.48%. Repeated all-host renders were identical.
   This does not replace full target-host Ansible checks or the still-unverified broker runtime.
-- Publication to the review branch, coordinated host candidate checks, promotion to `main`, and
-  live activation remain operator steps. Do not advance to Zigbee2MQTT until the Mosquitto stage's
-  runtime authentication and persistence evidence is collected.
+- The initial publication plan used a review branch. The agreed normal workflow now publishes a
+  reviewed activation revision to `main`, where the runner gates apply on render/check success.
+  Record the resulting host checks and runtime evidence; separate review-branch promotion is not
+  required. Do not advance to Zigbee2MQTT until Mosquitto authentication and persistence are verified.
+
+#### First-Install Parent Check — 2026-10-28
+
+- Operator logs show candidate `dca9fbd` failed Ansible check mode before managed-state mutation:
+  `/srv/mosquitto/config` was absent and was not represented as a managed directory in the
+  manifest. Config rendering had created an incidental output parent, causing the named-volume
+  renderer to skip directory registration. No live apply or recovery was required for that attempt.
+
+- Added an explicit `composition.config` directory entry with the already intended root/root
+  ownership and mode 0755. The service definition now authorizes first-install creation through
+  the existing managed-directory contract, with no changes to runner recovery or Ansible guards.
+
+- Added a regression using real service rendering, the serialized manifest, and the production
+  service-config role in check mode with an absent temporary live parent. Before the fix it
+  reproduced the operator's failure. Updated the service guide and Mosquitto runbook to explain
+  explicit config-parent declarations. After the fix, all six focused integration cases and
+  511 unit tests passed. Repeated all-host renders were identical; only phobos's managed config
+  directory entry was added to the manifests, with deimos unchanged. Target-host retry and runtime
+  evidence remain pending.
+
+- General replacement (2026-10-29):
+  [spec 0033](0033-private-volume-directory-management.md) implements private volume directory
+  management and the renderer's missing-registration fix in the working tree. Mosquitto's private
+  volume now supplies the config-directory artifact, so its duplicate config entry is removed.
+  Commit `65cb022` and its failure/test history above remain valid historical evidence. This does
+  not claim successful host deployment: operator-run check mode and broker runtime evidence remain
+  pending. Bounded acceptance uses disposable filesystem fixtures rather than an empty physical host.
 
 ## Agreed Implementation Decisions
 
+1. **Normal publication workflow:** after operator prerequisites and local review, publish intended
+   activation to `main` and observe the normal runner's render/check/apply/health sequence. Separate
+   review-branch promotion, routine timer suspension and independent manual host checks are optional.
+   Record actual host check-mode evidence before claiming deployment success.
 1. **MQTT secrets:** use one `secret/abhaile/mqtt` secret with per-client fields and generate the
    hashed broker password file from a protected Vault Agent staging file.
 1. **Direct Frigate ports:** use authenticated `8971` through internal Caddy, leave `5000` unused,
@@ -550,5 +582,6 @@ render result, dry-run/check result, host observation, or restore evidence.
 - `docs/adr/0006-secrets-model-and-bootstrap-artifacts.md`
 - `docs/adr/0014-host-storage-and-nas-mount-boundaries.md`
 - `docs/specs/accepted/0030-host-storage-layout.md`
+- [0033: Private Volume Directory Management](../active/0033-private-volume-directory-management.md)
 - `docs/specs/proposed/0021-network-devices.md`
 - `docs/specs/accepted/0011-core-services.md`

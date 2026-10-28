@@ -10,11 +10,13 @@ import venv
 import pytest
 
 from abhaile.renderers.collector import ArtifactCollector
+from abhaile.renderers.manifest import build_manifest
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.renderers.services import render_service_configs
 from abhaile.renderers.vault_templates.rendering import render_vault_agent_configs
 from abhaile.utils.config import read_json, read_yaml
 from abhaile.validation.schema import validate_schema
+from tests.integration.test_ansible_service_config import _run_playbook, _write_playbook
 
 pytestmark = pytest.mark.integration
 
@@ -55,7 +57,7 @@ def test_mosquitto_deployment(tmp_path: Path) -> None:
     assert "persistence true" in broker_config
     assert "persistence_location /mosquitto/data/" in broker_config
     quadlet = (service_dir / "etc/containers/systemd/mosquitto.container").read_text()
-    assert f"Image={data['podman']['image']}" in quadlet
+    assert f"Image={data['composition']['container']['image']}" in quadlet
     assert "Network=services.network" in quadlet
     assert "PodmanArgs=--ip=172.20.20.222" in quadlet
     assert "User=1883:1883" in quadlet
@@ -66,13 +68,22 @@ def test_mosquitto_deployment(tmp_path: Path) -> None:
     assert "test $$? -eq 135" in quadlet
     assert "PublishPort=" not in quadlet
     refresh = (service_dir / "etc/systemd/system/mosquitto-passwords.service").read_text()
-    assert f"--image {data['podman']['image']}" in refresh
+    assert f"--image {data['composition']['container']['image']}" in refresh
     assert "-m abhaile.cli.mosquitto_passwords" in refresh
     assert "Environment=PYTHONPATH=/opt/abhaile/src" in refresh
     assert "--source /srv/vault/agent/out/mosquitto-accounts.json" in refresh
     assert "--destination /srv/mosquitto/secrets/passwords" in refresh
     assert not (service_dir / "srv/mosquitto/secrets/passwords").exists()
     artifacts = {artifact.target_path: artifact for artifact in collector.get_all_artifacts()}
+    config_directory = artifacts["/srv/mosquitto/config"]
+    assert config_directory.kind == "service.directory"
+    assert config_directory.is_directory
+    assert config_directory.apply_hints is not None
+    assert {name: config_directory.apply_hints[name] for name in ("owner", "group", "mode")} == {
+        "owner": "root",
+        "group": "root",
+        "mode": "0755",
+    }
     assert artifacts["/srv/mosquitto/data"].apply_hints == {
         "owner": 1883,
         "group": 1883,
@@ -87,6 +98,46 @@ def test_mosquitto_deployment(tmp_path: Path) -> None:
         "restart_unit": "mosquitto.service",
         "rootless": False,
     }
+
+
+def test_mosquitto_check_accepts_absent_config_directory(tmp_path: Path) -> None:
+    """Check first-install config publication using parents declared by the real manifest."""
+    config_root = Path(__file__).resolve().parents[2] / "config"
+    rendered_root = tmp_path / "rendered"
+    output_dir = rendered_root / "services"
+    collector = ArtifactCollector()
+    network = read_yaml(config_root / "network.yaml")
+    for renderer in (render_service_configs, render_service_quadlets):
+        renderer(
+            "phobos",
+            ["mosquitto"],
+            network,
+            config_root,
+            output_dir,
+            collector=collector,
+            rendered_root=rendered_root,
+        )
+    collector.compute_hashes_and_sizes(rendered_root)
+    manifest = build_manifest("phobos", collector.get_metadata())
+    live_root = tmp_path / "live"
+    entries = [dict(entry) for entry in manifest["entries"] if entry["kind"] == "service.config"]
+    for entry in entries:
+        entry["target_path"] = str(live_root / entry["target_path"].lstrip("/"))
+    parents = [
+        live_root / entry["target_path"].lstrip("/")
+        for entry in manifest["entries"]
+        if entry["kind"] == "service.directory"
+    ]
+    playbook = _write_playbook(
+        tmp_path,
+        rendered_root,
+        entries,
+        managed_directory_targets=parents,
+    )
+    code, stdout, stderr = _run_playbook(tmp_path / "check", playbook, check=True)
+    assert code == 0, stdout + stderr
+    assert "changed=1" in stdout
+    assert not live_root.exists()
 
 
 def test_mosquitto_vault_staging_is_scoped_to_phobos(tmp_path: Path) -> None:

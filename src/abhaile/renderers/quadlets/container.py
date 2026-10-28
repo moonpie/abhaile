@@ -67,7 +67,7 @@ def _render_service_quadlet_files(
     template_text = container_template_path.read_text(encoding="utf-8")
     if "{{ image" in template_text and not image_reference:
         raise RenderError(
-            f"Template requires image variable but podman.image is missing: "
+            f"Template requires image variable but container.image is missing: "
             f"{container_template_path}"
         )
     if "{{ build" in template_text and not build_filename:

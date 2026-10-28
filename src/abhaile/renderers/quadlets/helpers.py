@@ -135,61 +135,20 @@ def _validate_pull_policy(policy: object, *, service: str) -> str:
     return policy
 
 
-def _service_podman_config(service: str, services_root: Path) -> dict[str, Any]:
-    """Read one service's podman config, returning an empty mapping when absent."""
-    service_path = services_root / service / "service.yaml"
-    data = read_yaml_mapping(service_path)
-    podman = data.get("podman", {}) or {}
-    return podman if isinstance(podman, dict) else {}
-
-
-def _resolve_service_image_config(
-    service: str,
-    services_root: Path,
-) -> tuple[str | None, str]:
-    """Resolve inherited service-level registry image and pull policy."""
-    from abhaile.utils.composition import walk_service_includes
-
-    image: str | None = None
-    pull_policy: str | None = None
-    for service_name in walk_service_includes(service, services_root.parent):
-        podman = _service_podman_config(service_name, services_root)
-        if "image" in podman:
-            image = _validate_registry_image(podman.get("image"), service=service_name)
-        if "pull_policy" in podman:
-            pull_policy = _validate_pull_policy(podman.get("pull_policy"), service=service_name)
-    return image, _validate_pull_policy(pull_policy, service=service)
-
-
 def _resolve_container_image_config(
     *,
     service: str,
     container_name: str | None,
     container_def: dict[str, Any],
-    podman: dict[str, Any],
-    services_root: Path,
 ) -> tuple[str | None, str]:
-    """Resolve effective image reference and pull policy for a container."""
-    service_image, service_pull_policy = _resolve_service_image_config(service, services_root)
-    image = service_image
-    pull_policy = service_pull_policy
-
-    if "image" in podman:
-        image = _validate_registry_image(podman.get("image"), service=service)
-    if "pull_policy" in podman:
-        pull_policy = _validate_pull_policy(podman.get("pull_policy"), service=service)
-    if "image" in container_def:
-        image = _validate_registry_image(
-            container_def.get("image"),
-            service=f"{service}/{container_name}" if container_name else service,
-        )
-    if "pull_policy" in container_def:
-        pull_policy = _validate_pull_policy(
-            container_def.get("pull_policy"),
-            service=f"{service}/{container_name}" if container_name else service,
-        )
-
-    return image, pull_policy
+    """Resolve registry settings solely from the selected container definition."""
+    label = f"{service}/{container_name}" if container_name else service
+    image = (
+        _validate_registry_image(container_def["image"], service=label)
+        if "image" in container_def
+        else None
+    )
+    return image, _validate_pull_policy(container_def.get("pull_policy"), service=label)
 
 
 def _resolve_managed_build_hints(service: str, services_root: Path) -> dict[str, Any] | None:

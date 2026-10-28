@@ -56,15 +56,21 @@ composition:
             - name: cert
               host_path: /srv/omada-controller/omada-controller/cert
               mount_path: /cert
-              manage_host_ownership: false
+              host_owner: 0
+              host_group: 0
+              host_mode: '0750'
             - name: data
               host_path: /srv/omada-controller/omada-controller/data
               mount_path: /opt/tplink/EAPController/data
-              manage_host_ownership: false
+              host_owner: 508
+              host_group: 508
+              host_mode: '0750'
             - name: logs
               host_path: /srv/omada-controller/omada-controller/logs
               mount_path: /opt/tplink/EAPController/logs
-              manage_host_ownership: false
+              host_owner: 508
+              host_group: 508
+              host_mode: '0750'
             - name: host-certs
               host_path: /etc/ssl/certs
               mount_path: /etc/ssl/certs

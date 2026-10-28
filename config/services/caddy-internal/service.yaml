@@ -2,8 +2,6 @@ name: caddy-internal
 podman:
   user: root
   network: ipvlan-l2
-  image: docker.io/library/caddy:2.10.2
-  pull_policy: missing
 composition:
   ingress:
     internal:
@@ -11,15 +9,21 @@ composition:
         source: caddy-internal/config/Caddyfile
         destination: /srv/caddy/internal/Caddyfile
   container:
+    image: docker.io/library/caddy:2.10.2
+    pull_policy: missing
     named_volumes:
       - name: config
         host_path: /srv/caddy/internal/config
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: 0
+        host_group: 0
+        host_mode: '0750'
       - name: data
         host_path: /srv/caddy/internal/data
         mount_path: /data
-        manage_host_ownership: false
+        host_owner: 0
+        host_group: 0
+        host_mode: '0750'
       - name: host-certs
         host_path: /etc/ssl/certs
         mount_path: /etc/ssl/certs

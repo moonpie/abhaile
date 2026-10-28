@@ -214,7 +214,7 @@ def _render_named_volume_host_directory(
     rendered_root: Path | None,
 ) -> None:
     """Render the host-side directory required by a bind-backed named volume."""
-    if shared or volume.get("manage_host_ownership") is False:
+    if shared:
         return
 
     host_path = str(volume["host_path"])
@@ -224,26 +224,40 @@ def _render_named_volume_host_directory(
         volume=volume,
     )
     output_path = output_dir / service / host_path.lstrip("/")
-    if output_path.exists():
-        return
+    if output_path.is_symlink() or (output_path.exists() and not output_path.is_dir()):
+        raise RenderError(f"Managed volume directory is not a regular directory: {host_path}")
 
     output_path.mkdir(parents=True, exist_ok=True)
     if collector is None or rendered_root is None:
         return
 
+    render_path = output_path.relative_to(rendered_root).as_posix()
+    hints = {"owner": owner, "group": group, "mode": mode}
+    existing = collector.get_metadata().artifacts.get(render_path)
+    if existing is not None:
+        same_identity = (
+            existing.target_path == host_path
+            and existing.kind == "service.directory"
+            and existing.owner_ref == f"service:{service}"
+            and existing.is_directory
+        )
+        existing_hints = existing.apply_hints or {}
+        if same_identity and all(existing_hints.get(key) == value for key, value in hints.items()):
+            return
+        raise RenderError(
+            f"Conflicting managed directory declaration for {host_path}: "
+            f"volume for service '{service}' conflicts with artifact {render_path} "
+            f"owned by {existing.owner_ref}"
+        )
+
     collector.register_artifact(
-        render_path=output_path.relative_to(rendered_root).as_posix(),
+        render_path=render_path,
         target_path=host_path,
         kind="service.directory",
         owner_ref=f"service:{service}",
         content="",
         is_directory=True,
-        replace=True,
-        apply_hints={
-            "owner": owner,
-            "group": group,
-            "mode": mode,
-        },
+        apply_hints=hints,
     )
 
 
@@ -274,7 +288,7 @@ def _named_volume_host_directory_metadata(
     ]
     if missing:
         raise RenderError(
-            f"Rootful writable volume requires explicit host_owner and host_group: "
+            f"Rootful private named volume requires explicit host_owner and host_group: "
             f"{volume['host_path']}"
         )
     if not _valid_owner_value(owner):

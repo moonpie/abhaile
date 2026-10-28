@@ -705,11 +705,13 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: root
+        host_group: root
       - name: data
         host_path: /shared/path
         mount_path: /data
-        manage_host_ownership: false
+        host_owner: root
+        host_group: root
     mounted_files: []
 """,
         )
@@ -768,7 +770,8 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: root
+        host_group: root
     mounted_files: []
 """,
         )
@@ -795,7 +798,8 @@ composition:
       - name: config
         host_path: /shared/path
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: root
+        host_group: root
     mounted_files: []
 """,
         )

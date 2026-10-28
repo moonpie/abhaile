@@ -138,3 +138,80 @@ def test_managed_directories_reject_render_paths_outside_rendered_root(
 
     assert code != 0
     assert not target.exists()
+
+
+@pytest.mark.integration
+def test_managed_directories_repair_root_without_touching_descendants(tmp_path: Path) -> None:
+    """Repair a root mode without changing nested application data or metadata."""
+    target = tmp_path / "managed" / "data"
+    child = target / "application"
+    child.mkdir(parents=True)
+    child.chmod(0o1777)
+    database = child / "database"
+    database.write_bytes(b"application state\n")
+    database.chmod(0o600)
+    target.chmod(0o700)
+    paths = [child, database]
+    before = {path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid) for path in paths}
+    playbook = _write_playbook(tmp_path, [_entry(target)])
+
+    code, stdout, stderr = _run_playbook(tmp_path / "repair", playbook)
+    assert code == 0, stdout + stderr
+    assert "changed=1" in stdout
+    assert target.stat().st_mode & 0o777 == 0o750
+    assert database.read_bytes() == b"application state\n"
+    assert before == {
+        path: (path.stat().st_mode, path.stat().st_uid, path.stat().st_gid) for path in paths
+    }
+
+    code, stdout, stderr = _run_playbook(tmp_path / "unchanged", playbook)
+    assert code == 0, stdout + stderr
+    assert "changed=0" in stdout
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("target_type", ["file", "symlink", "dangling"])
+@pytest.mark.parametrize("check", [False, True])
+def test_managed_directories_preflight_all_targets_before_changes(
+    tmp_path: Path, target_type: str, check: bool
+) -> None:
+    """Reject unsafe targets in check and real mode before any selected directory changes."""
+    existing = tmp_path / "existing"
+    existing.mkdir(mode=0o700)
+    missing = tmp_path / "must-not-create"
+    invalid = tmp_path / "invalid"
+    referent = tmp_path / "referent"
+    if target_type == "file":
+        invalid.write_bytes(b"keep file\n")
+    else:
+        if target_type == "symlink":
+            referent.mkdir(mode=0o700)
+        invalid.symlink_to(referent, target_is_directory=True)
+    playbook = _write_playbook(tmp_path, [_entry(existing), _entry(missing), _entry(invalid)])
+
+    code, stdout, stderr = _run_playbook(tmp_path / "unsafe", playbook, check=check)
+    assert code != 0
+    assert "existing file or symlink" in stdout + stderr
+    assert existing.stat().st_mode & 0o777 == 0o700
+    assert not missing.exists()
+    if target_type == "file":
+        assert invalid.read_bytes() == b"keep file\n"
+    else:
+        assert invalid.is_symlink()
+        if target_type == "symlink":
+            assert referent.stat().st_mode & 0o777 == 0o700
+
+
+@pytest.mark.integration
+def test_managed_directories_empty_recovery_selection_preserves_data(tmp_path: Path) -> None:
+    """An older desired inventory without a new root must not delete its application data."""
+    target = tmp_path / "data"
+    target.mkdir(mode=0o750)
+    database = target / "database"
+    database.write_bytes(b"preserve across recovery\n")
+    playbook = _write_playbook(tmp_path, [])
+    code, stdout, stderr = _run_playbook(tmp_path / "recovery", playbook)
+    assert code == 0, stdout + stderr
+    assert "changed=0" in stdout
+    assert target.is_dir()
+    assert database.read_bytes() == b"preserve across recovery\n"

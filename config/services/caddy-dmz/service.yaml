@@ -38,11 +38,15 @@ composition:
       - name: config
         host_path: /srv/caddy/dmz/config
         mount_path: /config
-        manage_host_ownership: false
+        host_owner: 0
+        host_group: 0
+        host_mode: '0750'
       - name: data
         host_path: /srv/caddy/dmz/data
         mount_path: /data
-        manage_host_ownership: false
+        host_owner: 0
+        host_group: 0
+        host_mode: '0750'
       - name: host-certs
         host_path: /etc/ssl/certs
         mount_path: /etc/ssl/certs

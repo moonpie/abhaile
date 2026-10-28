@@ -13,7 +13,7 @@ from typing import Any, cast
 
 from abhaile.cli.common import configure_logging
 from abhaile.dns.renderer import render_dns
-from abhaile.models.config import MappingConfig, NetworkConfig, ServiceConfig
+from abhaile.models.config import MappingConfig, NetworkConfig
 from abhaile.renderers.host import render_host_config
 from abhaile.renderers.ingress import render_ingress_configs
 from abhaile.renderers.manifest import build_manifest, write_manifest
@@ -31,11 +31,11 @@ from abhaile.validation.dns import validate_dns_serials
 from abhaile.validation.network import validate_host_physical_device, validate_network_sanity
 from abhaile.validation.schema import validate_schema
 from abhaile.validation.services import (
-    ensure_service_definitions,
     get_all_services_in_order,
     parse_mapping,
     validate_config_change_restart_units,
     validate_service_names,
+    validate_service_definitions,
 )
 from abhaile.validation.users import validate_user_management_ids
 
@@ -178,21 +178,12 @@ def _validate_services(
     schemas: ConfigSchemas,
 ) -> list[Path]:
     """Validate service definitions and return their paths."""
-    service_paths: list[Path] = []
-    for service in sorted({svc for services in host_services.values() for svc in services}):
-        service_paths.extend(ensure_service_definitions(roots.config_root, [service]))
-
-    for service_path in service_paths:
-        service_data = cast(
-            ServiceConfig,
-            read_yaml_mapping(service_path),
-        )
-        validate_schema(
-            service_data,
-            schemas.service,
-            str(service_path),
-            roots.schemas_root / "service.schema.json",
-        )
+    service_paths = validate_service_definitions(
+        roots.config_root,
+        sorted({svc for services in host_services.values() for svc in services}),
+        schemas.service,
+        roots.schemas_root / "service.schema.json",
+    )
 
     validate_config_change_restart_units(roots.config_root, host_services)
 

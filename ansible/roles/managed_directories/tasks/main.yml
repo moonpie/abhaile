@@ -22,6 +22,27 @@
   loop: "{{ abhaile_directory_entries }}"
   loop_control:
     label: "{{ item.target_path | default('invalid directory entry') }}"
+- name: Inspect managed directory targets without following symlinks
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop: "{{ abhaile_directory_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_directory_target_stats
+- name: Require missing targets or existing real directories
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or item.stat.isdir | default(false)
+    fail_msg: Managed directory target is an existing file or symlink
+    quiet: true
+  loop: "{{ abhaile_directory_target_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
 - name: Converge managed directories
   ansible.builtin.file:
     path: "{{ item.target_path }}"

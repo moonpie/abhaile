@@ -1,6 +1,3 @@
 name: netbox
-podman:
-  user: root
-  network: ipvlan-l2
-composition:
-  pod: {}
+# Pod composition will be declared when its containers are specified.
+composition: {}

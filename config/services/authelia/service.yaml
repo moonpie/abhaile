@@ -43,11 +43,15 @@ composition:
             - name: config
               host_path: /srv/authelia/authelia/config
               mount_path: /config
-              manage_host_ownership: false
+              host_owner: 0
+              host_group: 0
+              host_mode: '0750'
             - name: data
               host_path: /srv/authelia/authelia/data
               mount_path: /data
-              manage_host_ownership: false
+              host_owner: 0
+              host_group: 0
+              host_mode: '0750'
             - name: host-certs
               host_path: /etc/ssl/certs
               mount_path: /etc/ssl/certs
@@ -61,7 +65,9 @@ composition:
             - name: data
               host_path: /srv/authelia/redis/data
               mount_path: /data
-              manage_host_ownership: false
+              host_owner: 999
+              host_group: 0
+              host_mode: '0750'
             - name: host-certs
               host_path: /etc/ssl/certs
               mount_path: /etc/ssl/certs

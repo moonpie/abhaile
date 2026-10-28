@@ -588,8 +588,9 @@ When zone records change in `config/network.yaml`:
 
 Container images are pinned in `service.yaml`, not separate Quadlet `.image` files. To update:
 
-1. Edit `podman.image` for simple/rootless containers, or the per-container `image` field for pod
-   members.
+1. Edit `composition.container.image` for standalone containers (including rootless services),
+   or `composition.pod.containers[].container.image` for pod members. For shared definitions,
+   update the selected included container definition.
 1. Prefer immutable version tags or digests. Keep `pull_policy: missing` unless there is a
    deliberate reason to change boot behavior.
 1. Commit, push, and wait for the runner (or trigger it manually).

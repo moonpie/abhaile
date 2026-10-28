@@ -131,8 +131,11 @@ def _render_pod_quadlets(
         if not container_name:
             raise RenderError(f"Container missing 'name' in pod service '{service}'")
 
-        # Extract container definition (may be under 'container' key or directly in container dict)
-        container_def = container.get("container", container)
+        container_def = container.get("container")
+        if not isinstance(container_def, dict):
+            raise RenderError(
+                f"Pod container '{service}/{container_name}' must define a container object"
+            )
 
         container_dir = quadlets_dir / container_name
         if not container_dir.exists():
@@ -168,8 +171,6 @@ def _render_pod_quadlets(
             service=service,
             container_name=container_name,
             container_def=container_def,
-            podman=podman,
-            services_root=services_root,
         )
         if image_reference is None and image_path is not None:
             image_reference = _read_legacy_image_reference(

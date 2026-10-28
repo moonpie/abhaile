@@ -22,7 +22,7 @@ pytestmark = pytest.mark.integration
 def test_devices_validate_and_render(tmp_path: Path, in_pod: bool, devices: list[str]) -> None:
     """Accept device lists and emit one AddDevice line per entry in declaration order."""
     schema_path = Path(__file__).resolve().parents[2] / "schemas/service.schema.json"
-    container: dict[str, Any] = {"devices": devices}
+    container: dict[str, Any] = {"devices": devices, "image": "example.invalid/test:1"}
     composition = (
         {"pod": {"containers": [{"name": "app", "container": container}]}}
         if in_pod
@@ -30,7 +30,10 @@ def test_devices_validate_and_render(tmp_path: Path, in_pod: bool, devices: list
     )
     data = {
         "name": "device-test",
-        "podman": {"user": "root", "network": "host", "image": "example.invalid/test:1"},
+        "podman": {
+            "user": "root",
+            "network": "host",
+        },
         "composition": composition,
     }
     validate_schema(data, read_json(schema_path), "service.yaml", schema_path)

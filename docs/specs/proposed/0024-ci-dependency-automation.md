@@ -8,7 +8,7 @@ title: CI and Dependency Automation
 status: proposed
 owner: moonpie
 created: 2026-06-21
-updated: 2026-10-20
+updated: 2026-10-29
 related_adrs: []
 supersedes: null
 superseded_by: null
@@ -55,6 +55,11 @@ complex.
 
 - [ ] Add CI workflows that run repository validation on pull requests and pushes
 - [ ] Keep CI behaviour equivalent to documented local commands where practical
+- [ ] Run the shared mapped-service/include validation from
+  [spec 0032](../active/0032-container-image-authoring.md), including changes limited to
+  shared fragments or schemas. Extract registry images from `composition.container.image` and
+  `composition.pod.containers[].container.image`, including shared container definitions. Keep
+  optional container pull policies unchanged; managed-build dependencies remain a separate source.
 - [ ] Add dependency automation configuration for standard package managers
 - [ ] Add custom dependency extraction for Abhaile-specific software references
 - [ ] Define structured metadata for host software downloads before automating them

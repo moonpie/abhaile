@@ -382,12 +382,12 @@ class TestQuadretsIntegration:
             "Volume=/srv/omada-controller/mongodb/initdb/omada.js:/docker-entrypoint-initdb.d/omada.js:ro"
             in mongodb_content
         )
-        for unmanaged_bind_dir in (
+        for private_bind_dir in (
             "srv/omada-controller/omada-controller/cert",
             "srv/omada-controller/omada-controller/data",
             "srv/omada-controller/omada-controller/logs",
         ):
-            assert not (output_dir / f"omada-controller/{unmanaged_bind_dir}").exists()
+            assert (output_dir / f"omada-controller/{private_bind_dir}").is_dir()
         for managed_bind_dir in (
             "srv/omada-controller/mongodb/config",
             "srv/omada-controller/mongodb/data",

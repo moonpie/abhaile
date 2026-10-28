@@ -8,7 +8,7 @@ title: Inventory Generator
 status: proposed
 owner: moonpie
 created: 2026-06-07
-updated: 2026-06-07
+updated: 2026-10-29
 related_adrs: []
 supersedes: null
 superseded_by: null
@@ -82,6 +82,11 @@ Data gathered from:
 Service YAML is loaded only for services present in `mapping.yaml`. Missing `service.yaml`
 files produce a warning row (network mode = `unknown`) rather than aborting — unless
 `--validate` is set, in which case they fail as today.
+
+Under [spec 0032](../active/0032-container-image-authoring.md), mapping determines deployed
+inventory entries and `podman.user`/`podman.network` provide local runtime context. Shared
+container definitions need no `podman` section and are not independently deployed inventory
+entries. Do not inherit runtime fields when collecting a mapped service's network or user context.
 
 ### Markdown Output Sections
 

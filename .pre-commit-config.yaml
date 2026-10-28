@@ -1,4 +1,16 @@
 repos:
+  - repo: local
+    hooks:
+      - id: validate-service-project
+        name: Validate mapped services and includes
+        entry: python scripts/validate-services.py
+        language: python
+        additional_dependencies: ["PyYAML>=6.0", "jsonschema>=4.0"]
+        pass_filenames: false
+        always_run: true
+        files: >-
+          (?x)^(config/services/.*|config/mapping\.yaml|schemas/.*| src/abhaile/(validation|cli|utils)/.*|src/abhaile/renderers/quadlets/helpers\.py|
+          scripts/validate-services\.py|paths\.ini|\.pre-commit-config\.yaml)$
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

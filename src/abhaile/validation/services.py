@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from abhaile.renderers.metadata import classify_service_artifact
-from abhaile.utils.composition import walk_service_includes
+from abhaile.utils.composition import walk_mapping_includes, walk_service_includes
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
+from abhaile.validation.schema import validate_schema
 
 
 def parse_mapping(mapping: Any) -> dict[str, list[str]]:
@@ -143,6 +144,36 @@ def validate_service_names(config_root: Path) -> None:
     if errors:
         formatted = "\n".join(f"- {err}" for err in errors)
         raise RenderError(f"Service name validation failed:\n{formatted}")
+
+
+def validate_service_definitions(
+    config_root: Path,
+    services: Iterable[str],
+    schema: dict[str, Any],
+    schema_path: Path,
+) -> list[Path]:
+    """Validate mapped definitions and includes, requiring local Podman runtime fields.
+
+    Return mapped definition paths. Validate each document before traversing its
+    includes so malformed composition produces a schema diagnostic.
+    """
+    mapped = list(dict.fromkeys(services))
+    mapped_paths = ensure_service_definitions(config_root, mapped)
+    pending = list(mapped)
+    validated: set[str] = set()
+    for service in pending:
+        if service in validated:
+            continue
+        service_path = ensure_service_definitions(config_root, [service])[0]
+        data = read_yaml_mapping(service_path)
+        validate_schema(data, schema, str(service_path), schema_path)
+        validated.add(service)
+        composition = data.get("composition", {}) or {}
+        pending.extend(composition.get("include", []) or [])
+
+    # Reuse canonical traversal for cycle diagnostics and include semantics.
+    walk_mapping_includes(mapped, config_root)
+    return mapped_paths
 
 
 def validate_config_change_restart_units(
