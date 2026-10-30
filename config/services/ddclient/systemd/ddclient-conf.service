@@ -1,5 +1,9 @@
 [Unit]
-Description=Restart ddclient after config update
+Description=Install ddclient configuration from Vault Agent
+After=abhaile-secrets-ready.service
+Requires=abhaile-secrets-ready.service
 [Service]
 Type=oneshot
-ExecStart=/bin/systemctl restart ddclient.service
+ExecCondition=/bin/sh -c 'test ! -e /etc/ddclient.conf || ! cmp -s /srv/vault/agent/out/ddclient.conf /etc/ddclient.conf'
+ExecStart=/usr/bin/install -m 0600 -o root -g root /srv/vault/agent/out/ddclient.conf /etc/ddclient.conf
+ExecStartPost=/bin/systemctl --no-block try-restart ddclient.service

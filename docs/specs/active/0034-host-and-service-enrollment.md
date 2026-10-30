@@ -199,8 +199,8 @@ focused account, rootful/rootless Quadlet and Caddy/CoreDNS checks are recorded 
 These are fixture-based checks, not proof of a clean-host runtime deployment.
 
 Delivery remains subject to recovery compatibility review: the previous successful revision must
-understand newly managed families before their publication is enabled. No commits or pushes have
-been made for this spec. Acceptance checkboxes remain open pending delivery evidence.
+understand newly managed families before their publication is enabled. Compatibility support is committed as `a4e262f`; activation is a separate follow-up commit.
+No pushes have been made for this spec. Acceptance checkboxes remain open pending delivery evidence.
 
 ## Out of Scope
 
@@ -226,3 +226,24 @@ been made for this spec. Acceptance checkboxes remain open pending delivery evid
 - [Private volume directory management](../active/0033-private-volume-directory-management.md)
 - [Current reconciliation decision](../../adr/0013-last-successful-ansible-reconciliation.md)
 - [Adding a service](../../guides/adding-a-service.md)
+
+### Staged Publication
+
+Publish preparation correction `ae94b55` (which includes `a4e262f`) alone, then confirm that Phobos and Deimos both record it as
+last-successful before publishing the activation commit. The preparation excludes Mosquitto and
+retains legacy renderer emission. Phobos comparison against `dee4745` adds only the twelve
+previously inspected private roots; Deimos comparison against `4fd9eaa` adds no targets. Both
+hosts receive the required DNS zone updates. No existing targets are removed. The exact staged
+preparation rendered both hosts, passed mypy, and passed 27 removal/compatibility/key-cleanup
+tests. Normal commit hooks, including security checks, passed.
+
+The activation commit enables account/package and directory intent, publishes resource identity
+metadata, declares native vendor-unit startup and restores Mosquitto with a subsequent DNS serial.
+Do not publish both commits together before the preparation revision is accepted on both hosts.
+
+Preparation check-mode correction: Phobos rejected repeated `Volume=` directives in the Caddy
+Quadlet because the native INI lookup requires unique keys. Commit `ae94b55` reads only the
+Container section's candidate image/environment references without imposing INI uniqueness.
+Nine production-role regression cases passed, covering repeated Volume and ExecStartPre lines,
+managed build images, an absent environment file, and check-mode behavior. Normal commit hooks
+passed. The failed host run stopped before managed-state mutation; no recovery was required.

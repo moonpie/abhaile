@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +72,44 @@ def _render_network_quadlets(
             newline="\n",
         )
         if collector is not None and rendered_root is not None:
+            vlan = network["vlans"][vlan_name]
+            interface = next(
+                (
+                    name
+                    for name, definition in network["hosts"][host]["interfaces"].items()
+                    if definition["vlan"] == vlan_name and not name.startswith("ipvlan-")
+                ),
+                "",
+            )
+            subnet: dict[str, Any] = {"subnet": vlan["cidr"], "gateway": vlan["gateway"]}
+            if vlan.get("ipvlanl2_range"):
+                ip_range = vlan["ipvlanl2_range"]
+                if "-" in ip_range:
+                    first, last = ip_range.split("-", maxsplit=1)
+                    start_ip, end_ip = str(ip_address(first.strip())), str(ip_address(last.strip()))
+                else:
+                    addresses = ip_network(ip_range, strict=False)
+                    start_ip = str(next(iter(addresses.hosts())))
+                    end_ip = str(
+                        addresses.broadcast_address
+                        - (1 if addresses.version == 4 and addresses.num_addresses > 2 else 0)
+                    )
+                subnet["lease_range"] = {"start_ip": start_ip, "end_ip": end_ip}
+            hints = {
+                "rootless": False,
+                "shared": True,
+                "podman_resource": {
+                    "name": f"systemd-{vlan_name}",
+                    "driver": "ipvlan",
+                    "network_interface": interface,
+                    "subnets": [subnet],
+                    "options": {"mode": "l2"},
+                    "internal": False,
+                    "dns_enabled": False,
+                    "ipv6_enabled": ip_network(vlan["cidr"], strict=False).version == 6,
+                    "ipam_options": {"driver": "host-local"},
+                },
+            }
             _register_quadlet_artifact(
                 collector=collector,
                 rendered_root=rendered_root,
@@ -79,6 +118,6 @@ def _render_network_quadlets(
                 kind=_quadlet_kind_from_filename(network_filename),
                 owner_ref=f"unit:{_quadlet_unit_name(network_filename)}",
                 content=rendered,
-                apply_hints={"rootless": False, "shared": True},
-                owner_apply_hints={"rootless": False, "shared": True},
+                apply_hints=hints,
+                owner_apply_hints=hints,
             )

@@ -3,6 +3,10 @@ systemd:
   network: host
 composition:
   systemd:
+    - source: ddclient/systemd/config.conf
+      destination: /etc/systemd/system/ddclient.service.d/10-abhaile.conf
+      enable: true
+      start: true
     - source: ddclient/systemd/ddclient-conf.service
       destination: /etc/systemd/system/ddclient-conf.service
     - source: ddclient/systemd/ddclient-conf.path

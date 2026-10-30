@@ -176,13 +176,10 @@ def annotate_systemd_entries_with_apply_hints(entries: list[dict[str, Any]]) -> 
 
         merged = dict(entry)
         hints: dict[str, Any] = {}
-        destination = merged.get("destination")
-        is_dropin = isinstance(destination, str) and ".d/" in destination
-        if not is_dropin:
-            if merged.get("enable") is True:
-                hints["enable_mode"] = "enable"
-            if merged.get("start") is True:
-                hints["activation_mode"] = "start"
+        if merged.get("enable") is True:
+            hints["enable_mode"] = "enable"
+        if merged.get("start") is True:
+            hints["activation_mode"] = "start"
         if hints:
             merged["_abhaile_apply_hints"] = hints
         annotated.append(merged)

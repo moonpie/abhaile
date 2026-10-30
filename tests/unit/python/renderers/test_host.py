@@ -219,10 +219,10 @@ class TestRenderHostConfig:
         assert "After=vault.service network-online.target" in content
         assert "Vault=172.20.20.204" in content
 
-    def test_host_systemd_dropins_do_not_receive_lifecycle_hints(
+    def test_host_systemd_dropins_apply_lifecycle_to_parent(
         self, tmp_path: Path, write_file: Any
     ) -> None:
-        """Host systemd drop-ins do not receive independent enable/start hints."""
+        """Host systemd drop-ins carry explicit lifecycle intent for their parent."""
         config_root = tmp_path / "config"
         rendered_root = tmp_path / "output"
         collector = ArtifactCollector()
@@ -260,4 +260,4 @@ class TestRenderHostConfig:
         artifact = collector.get_all_artifacts()[0]
         assert artifact.kind == "systemd.dropin"
         assert artifact.owner_ref == "unit:demo.service"
-        assert artifact.apply_hints is None
+        assert artifact.apply_hints == {"enable_mode": "enable", "activation_mode": "start"}

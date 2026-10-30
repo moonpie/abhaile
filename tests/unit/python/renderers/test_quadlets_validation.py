@@ -91,7 +91,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"svc-a": {"vlan": "services"}, "svc-b": {"vlan": "services"}},
         }
 
@@ -171,7 +172,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"svc-a": {"vlan": "services"}, "svc-b": {"vlan": "services"}},
         }
 
@@ -217,7 +219,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 
@@ -259,7 +262,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 
@@ -311,7 +315,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 
@@ -359,7 +364,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 
@@ -420,7 +426,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"unicode-test": {"vlan": "services"}},
         }
 
@@ -496,7 +503,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"multi-container": {"vlan": "services"}},
         }
 
@@ -576,7 +584,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 
@@ -635,7 +644,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 
@@ -693,7 +703,8 @@ composition:
             "[Network]\n",
         )
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"app": {"vlan": "services"}},
         }
 

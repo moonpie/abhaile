@@ -180,6 +180,11 @@ def _render_named_volumes(
             volume_hints: dict[str, Any] = {
                 "rootless": user != "root",
                 "shared": shared,
+                "podman_resource": {
+                    "name": f"systemd-{Path(volume_filename).stem}",
+                    "driver": "local",
+                    "options": {"device": host_path, "o": "bind"},
+                },
             }
             if user != "root":
                 volume_hints["podman_user"] = user

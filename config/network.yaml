@@ -21,8 +21,8 @@ dns:
         name: coredns-common
       serial:
         date: 20261030
-        counter: 00
-        content_hash: 29474cac1aa65648b29ff92962b2cd77dffcddf5973cc94ea3be2126643acfaa
+        counter: 01
+        content_hash: cc4139033d84510205f332c9b4f083fbec43e357a5a5d3ed86cacb662928c5f5
     - name: abhaile.home.arpa.
       provider:
         type: internal
@@ -37,8 +37,8 @@ dns:
         name: coredns-common
       serial:
         date: 20261030
-        counter: 00
-        content_hash: e343afe2a6340a5685c13ceb965507bd09e9081d4a6c91cd19549317b33862db
+        counter: 01
+        content_hash: d179ec03b6de90a9b1740974bccc83a359a4e54b5dfac4f68829c9bd30f6f140
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal

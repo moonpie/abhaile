@@ -4,6 +4,11 @@ systemd:
 apply:
   config_change_restart_unit: chrony.service
 composition:
+  systemd:
+    - source: chrony-common/systemd/network.conf
+      destination: /etc/systemd/system/chrony.service.d/10-abhaile.conf
+      enable: true
+      start: true
   config:
     - source:
         template: chrony-common/config/chrony.conf.j2

@@ -10,7 +10,7 @@ from abhaile.utils.composition import walk_host_includes
 from abhaile.utils.config import read_yaml_mapping
 from abhaile.utils.errors import RenderError
 
-USER_SCALAR_FIELDS = ("uid", "system", "primary_group", "home", "shell", "gecos")
+USER_SCALAR_FIELDS = ("uid", "system", "primary_group", "home", "shell", "gecos", "rootless")
 USER_LIST_FIELDS = ("additional_groups", "ssh_authorized_keys")
 
 
@@ -31,6 +31,8 @@ def render_users_artifacts(
     sudoers = merged["sudoers"]
 
     _validate_user_group_references(users, groups)
+    _validate_declared_ids(users, groups)
+    _validate_rootless_ranges(users, groups)
 
     sysusers_path = output_dir / "etc" / "sysusers.d" / "abhaile.conf"
     sudoers_path = output_dir / "etc" / "sudoers.d" / "abhaile"
@@ -49,6 +51,8 @@ def render_users_artifacts(
             "owner_user": "root",
             "owner_group": "root",
             "mode": "0644",
+            "users": users,
+            "groups": groups,
         },
     )
 
@@ -233,6 +237,59 @@ def _write_sysusers_file(
     destination.write_text("".join(lines), encoding="utf-8", newline="\n")
 
 
+def _validate_rootless_ranges(
+    users: dict[str, dict[str, Any]], groups: dict[str, dict[str, Any]]
+) -> None:
+    """Reject overlapping or overflowing explicitly declared subordinate ID ranges."""
+    for field in ("subuid_start", "subgid_start"):
+        ranges: list[tuple[int, int, str]] = []
+        for name, user in sorted(users.items()):
+            rootless = user.get("rootless")
+            if not isinstance(rootless, dict):
+                continue
+            if user.get("home") != f"/home/{name}":
+                raise RenderError(f"Rootless user '{name}' must declare home /home/{name}")
+            start, count = rootless.get(field), rootless.get("count")
+            if (
+                type(start) is not int
+                or type(count) is not int
+                or start < 65536
+                or count < 65536
+                or start + count > 2**32
+            ):
+                raise RenderError(f"Invalid rootless {field} range for user '{name}'")
+            identities, id_field = (users, "uid") if field == "subuid_start" else (groups, "gid")
+            for identity_name, definition in identities.items():
+                value = definition.get(id_field)
+                if type(value) is int and start <= value < start + count:
+                    raise RenderError(
+                        f"Rootless {field} range for '{name}' overlaps {id_field} of '{identity_name}'"
+                    )
+            for other_start, other_end, other_name in ranges:
+                if start < other_end and other_start < start + count:
+                    raise RenderError(
+                        f"Rootless {field} ranges overlap for users '{other_name}' and '{name}'"
+                    )
+            ranges.append((start, start + count, name))
+
+
+def _validate_declared_ids(
+    users: dict[str, dict[str, Any]], groups: dict[str, dict[str, Any]]
+) -> None:
+    """Reject colliding authored IDs before native tools create either identity."""
+    for identities, field in ((users, "uid"), (groups, "gid")):
+        occupied: dict[int, str] = {}
+        for name, definition in sorted(identities.items()):
+            value = definition.get(field)
+            if value is None:
+                continue
+            if type(value) is not int or value < 0:
+                raise RenderError(f"Invalid {field} for '{name}'")
+            if value in occupied:
+                raise RenderError(f"Duplicate {field} {value} for '{occupied[value]}' and '{name}'")
+            occupied[value] = name
+
+
 def _quote_sysusers_field(value: str) -> str:
     """Quote sysusers fields that contain whitespace."""
     if value in {"-", ""}:
@@ -291,6 +348,7 @@ def _write_authorized_keys(
             apply_hints={
                 "owner_user": user_name,
                 "owner_group": user.get("primary_group") or user_name,
+                "home": home,
                 "mode": "0600",
                 "ssh_dir_mode": "0700",
             },

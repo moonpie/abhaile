@@ -18,6 +18,7 @@ from abhaile.renderers.host import render_host_config
 from abhaile.renderers.ingress import render_ingress_configs
 from abhaile.renderers.manifest import build_manifest, write_manifest
 from abhaile.renderers.networkd import render_networkd_config, render_networkd_dropins
+from abhaile.renderers.parents import register_file_parents
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.renderers.services import render_service_configs
 from abhaile.renderers.software import render_software_artifacts
@@ -450,6 +451,7 @@ def _write_manifest(
     collector: ArtifactCollector,
 ) -> Path:
     """Build and write the render manifest into the rendered directory."""
+    register_file_parents(collector, rendered_dir)
     collector.compute_hashes_and_sizes(rendered_dir)
     metadata = collector.get_metadata()
     manifest = build_manifest(host, metadata)

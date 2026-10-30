@@ -287,6 +287,7 @@ composition:
             "restart_mode": "restart",
             "rootless": True,
             "podman_user": "abhaile",
+            "required_outputs": ["/srv/vault/agent/out/srv/authelia/secrets/jwt.txt"],
         }
 
         directory_artifacts = sorted(

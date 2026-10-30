@@ -109,6 +109,7 @@ def render_vault_agent_configs(
         source=source,
         destination=destination,
         templates=templates,
+        required_outputs=[_join_host_path(out_host_root, spec.out) for spec in specs],
         network=network,
         services_root=services_root,
         output_dir=output_dir,
@@ -122,6 +123,7 @@ def _render_base_config(
     source: dict[str, Any],
     destination: str,
     templates: list[dict[str, str]],
+    required_outputs: list[str],
     network: dict[str, Any],
     services_root: Path,
     output_dir: Path,
@@ -176,6 +178,7 @@ def _render_base_config(
             "restart_mode": "restart",
             "rootless": True,
             "podman_user": "abhaile",
+            "required_outputs": sorted(required_outputs),
         },
     )
 

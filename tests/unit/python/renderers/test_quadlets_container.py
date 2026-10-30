@@ -873,7 +873,8 @@ composition:
         )
 
         network: dict[str, Any] = {
-            "vlans": {"services": {"cidr": "172.20.20.0/24"}},
+            "vlans": {"services": {"cidr": "172.20.20.0/24", "gateway": "172.20.20.1"}},
+            "hosts": {"phobos": {"interfaces": {"example.20": {"vlan": "services"}}}},
             "services": {"blocky": {"vlan": "services", "address": "172.20.20.10/32"}},
         }
 
@@ -901,11 +902,13 @@ composition:
         network_art = artifacts[network_key]
         assert network_art.kind == "quadlet.network"
         assert network_art.owner_ref == "unit:services-network.service"
-        assert network_art.apply_hints == {"rootless": False, "shared": True}
-        assert owners["unit:services-network.service"].apply_hints == {
-            "rootless": False,
-            "shared": True,
-        }
+        assert network_art.apply_hints is not None
+        assert network_art.apply_hints["rootless"] is False
+        assert network_art.apply_hints["shared"] is True
+        resource = network_art.apply_hints["podman_resource"]
+        assert resource["name"] == "systemd-services"
+        assert resource["driver"] == "ipvlan"
+        assert owners["unit:services-network.service"].apply_hints == network_art.apply_hints
         assert owners["unit:blocky.service"].requires == [
             "unit:services-network.service",
         ]

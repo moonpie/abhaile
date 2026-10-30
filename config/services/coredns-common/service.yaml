@@ -1,5 +1,14 @@
 name: coredns-common
 composition:
+  config:
+    - destination: /var/lib/coredns
+      owner: coredns
+      group: coredns
+      mode: '0750'
+    - destination: /etc/coredns
+      owner: root
+      group: coredns
+      mode: '0750'
   systemd:
     - source: coredns-common/systemd/coredns-zones.path
       destination: /etc/systemd/system/coredns-zones.path

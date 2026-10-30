@@ -37,6 +37,17 @@ def render_software_artifacts(
     refs, sources = _collect_software_refs(ordered_hosts, config_root)
 
     _write_packages_file(refs["packages"], output_dir / "packages.txt")
+    if collector is not None and rendered_root is not None:
+        packages_path = output_dir / "packages.txt"
+        collector.register_artifact(
+            render_path=packages_path.relative_to(rendered_root).as_posix(),
+            target_path="/etc/abhaile/packages.txt",
+            kind="host.packages",
+            owner_ref=f"host-packages:{host}",
+            content=packages_path.read_text(encoding="utf-8"),
+            apply_hints={"owner_user": "root", "owner_group": "root", "mode": "0644"},
+        )
+        collector.register_owner(name=f"host-packages:{host}")
 
     schema_path = config_root.parent / "schemas" / "software-action.schema.json"
     schema = read_json(schema_path)
