@@ -640,3 +640,18 @@ The operator successfully uploaded `vault-agent` policy and confirmed read acces
 `secret/data/abhaile/zigbee2mqtt`. Activation can now enroll the protected template.
 Native environment quoting escapes backslashes and double quotes directly rather than applying
 JSON HTML escaping to MQTT credentials. Live Zigbee2MQTT startup remains to be observed.
+
+### Zigbee2MQTT Environment File Correction (2026-10-30)
+
+Phobos reached the SLZB-06 coordinator successfully, but Mosquitto rejected the client
+identity during activation of `74c0ab6`. The Vault template incorrectly used quoted,
+escaped assignments: Quadlet passes `EnvironmentFile` to Podman, whose parser retains
+quotes and backslashes literally. Emit unquoted `NAME=value` assignments for the MQTT
+identity and frontend token, preserving the existing Vault fields and credentials.
+Values must occupy one line; existing MQTT credential validation excludes line breaks,
+and the frontend token is generated as hexadecimal.
+
+Regression coverage in `tests/integration/test_zigbee2mqtt.py` checks complete rendered
+assignments, including absence of surrounding quotes or transformations. Runtime MQTT
+connection and frontend authentication remain pending host verification. The separate
+recovery correction is tracked by spec 0034 (`1ac21d7`).

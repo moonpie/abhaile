@@ -80,9 +80,13 @@ def test_zigbee2mqtt_credentials_use_existing_mqtt_identity_and_separate_fronten
     ).read_text()
     assert 'secret "secret/data/abhaile/mqtt"' in template
     assert 'secret "secret/data/abhaile/zigbee2mqtt"' in template
-    assert ".Data.data.zigbee2mqtt_username | replaceAll" in template
-    assert ".Data.data.zigbee2mqtt_password | replaceAll" in template
-    assert ".Data.data.frontend_auth_token | replaceAll" in template
+    # Podman preserves quotes and backslashes in env files, unlike systemd.
+    assignments = [line for line in template.splitlines() if line.startswith("ZIGBEE2MQTT_")]
+    assert assignments == [
+        "ZIGBEE2MQTT_CONFIG_MQTT_USER={{ .Data.data.zigbee2mqtt_username }}",
+        "ZIGBEE2MQTT_CONFIG_MQTT_PASSWORD={{ .Data.data.zigbee2mqtt_password }}",
+        "ZIGBEE2MQTT_CONFIG_FRONTEND_AUTH_TOKEN={{ .Data.data.frontend_auth_token }}",
+    ]
     assert "home_assistant_password" not in template and "frigate_password" not in template
     rendered_config = next(
         entry for entry in collector.get_all_artifacts() if entry.kind == "vault.config"
