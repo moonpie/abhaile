@@ -211,7 +211,9 @@ def _caddy_runtime_variables(
     entry = _entry(rendered)
     quadlet = rendered / "caddy.container"
     image = "caddy-internal.build" if managed_build else "example.invalid/caddy:candidate"
-    quadlet.write_text(f"[Container]\nImage={image}\nEnvironmentFile=/protected/candidate.env\n")
+    quadlet.write_text(
+        f"[Container]\nImage={image}\nEnvironmentFile=/protected/candidate.env\nVolume=config.volume:/config\nVolume=data.volume:/data\n\n[Service]\nExecStartPre=/usr/bin/true\nExecStartPre=/usr/bin/true\n"
+    )
     variables: dict[str, Any] = {
         "abhaile_rendered_root": str(rendered),
         "abhaile_caddy_config_entries": [entry],
@@ -306,3 +308,17 @@ def test_caddy_refuses_dangling_target_before_validation_or_publication(tmp_path
     assert target.is_symlink()
     assert not referent.exists()
     assert not calls, output
+
+
+@pytest.mark.integration
+def test_caddy_repeated_directives_without_environment_file(tmp_path: Path) -> None:
+    """Read repeated Quadlet keys without requiring an optional environment file."""
+    variables, _ = _caddy_runtime_variables(tmp_path)
+    quadlet = Path(variables["abhaile_rendered_root"]) / "caddy.container"
+    quadlet.write_text(
+        quadlet.read_text().replace("EnvironmentFile=/protected/candidate.env\n", "")
+    )
+    code, output, calls = _run_runtime_role(tmp_path, "caddy_config", variables, check=False)
+    assert code == 0, output
+    validation = next(call for call in calls if "run" in call["argv"])
+    assert "--env-file" not in validation["argv"]

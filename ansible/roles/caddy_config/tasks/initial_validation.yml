@@ -2,12 +2,15 @@
   ansible.builtin.set_fact:
     abhaile_caddy_container_entry: "{{ abhaile_rootful_quadlet_entries | selectattr('owner_ref', 'equalto', 'unit:caddy-'
       ~ caddy_segment ~ '.service') | selectattr('kind', 'equalto', 'quadlet.container') | first }}"
+- name: Read candidate Container directives without parsing repeatable Quadlet keys as INI
+  ansible.builtin.set_fact:
+    abhaile_caddy_container_directives: "{{ lookup('ansible.builtin.file', abhaile_rendered_root ~ '/' ~ abhaile_caddy_container_entry.render_path)
+      | regex_findall('(?ms)^\\[Container\\][^\\n]*\\n(.*?)(?=^\\[|\\Z)') | first }}"
 - name: Read the candidate Caddy image and environment references
   ansible.builtin.set_fact:
-    abhaile_caddy_image_ref: "{{ lookup('ansible.builtin.ini', 'Image', section='Container', file=abhaile_rendered_root
-      ~ '/' ~ abhaile_caddy_container_entry.render_path) }}"
-    abhaile_caddy_environment_file: "{{ lookup('ansible.builtin.ini', 'EnvironmentFile', section='Container', file=abhaile_rendered_root
-      ~ '/' ~ abhaile_caddy_container_entry.render_path, default='') }}"
+    abhaile_caddy_image_ref: "{{ abhaile_caddy_container_directives | regex_findall('(?m)^Image=(.+)$') | last }}"
+    abhaile_caddy_environment_file: "{{ (abhaile_caddy_container_directives | regex_findall('(?m)^EnvironmentFile=(.+)$')
+      | last) | default('') }}"
 - name: Resolve a managed Caddy build output
   ansible.builtin.set_fact:
     abhaile_caddy_image_ref: "{{ item.apply_hints.managed_build.output_image }}"
