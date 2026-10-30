@@ -247,3 +247,19 @@ Container section's candidate image/environment references without imposing INI 
 Nine production-role regression cases passed, covering repeated Volume and ExecStartPre lines,
 managed build images, an absent environment file, and check-mode behavior. Normal commit hooks
 passed. The failed host run stopped before managed-state mutation; no recovery was required.
+
+### Candidate-Only Vault Template Recovery Correction
+
+Zigbee2MQTT exposed an omitted cleanup family: its newly enrolled `vault.template` was returned
+for deletion, but the last-successful orchestration intentionally has no template-deletion role.
+Recovery therefore stopped at complete-family selection. Retain candidate-only template files
+as inactive residue, like existing retained Caddy/package inventory; restored agent configuration
+references only accepted templates. Do not delete secret outputs, application data or recovery
+records. The runner's actual extra-vars generation is covered by
+`tests/integration/test_runner_template_residue.py`; 19 focused classification/regression cases
+passed. The original activation failure remains a separate investigation.
+
+A runner already blocked in startup recovery cannot fetch this correction through its ordinary
+loop. Operator-controlled fast-forward of the clean checkout must use the existing runner lock;
+then restart the ordinary runner so its updated cleanup selection can restore last-successful
+state. This is an explicit repair of executor code, not an edit to recovery authority records.
