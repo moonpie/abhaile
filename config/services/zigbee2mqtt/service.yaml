@@ -2,5 +2,32 @@ name: zigbee2mqtt
 podman:
   user: root
   network: ipvlan-l2
+apply:
+  config_change_restart_unit: null
 composition:
-  container: {}
+  systemd:
+    - source: zigbee2mqtt/systemd/zigbee2mqtt-env.service
+      destination: /etc/systemd/system/zigbee2mqtt-env.service
+    - source: zigbee2mqtt/systemd/zigbee2mqtt-env.path
+      destination: /etc/systemd/system/zigbee2mqtt-env.path
+      enable: true
+      start: true
+  vault_agent:
+    templates:
+      - source: zigbee2mqtt/templates/zigbee2mqtt.env.ctmpl
+        out: zigbee2mqtt.env
+        perms: '0600'
+  ingress:
+    internal:
+      blocks:
+        - zigbee2mqtt/caddy/internal-ingress.txt
+  container:
+    image: ghcr.io/koenkk/zigbee2mqtt:2.14.2
+    pull_policy: missing
+    named_volumes:
+      - name: data
+        host_path: /srv/zigbee2mqtt/data
+        mount_path: /app/data
+        host_owner: root
+        host_group: root
+        host_mode: '0750'

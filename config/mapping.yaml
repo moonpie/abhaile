@@ -11,6 +11,7 @@ abhaile:
       - authelia
       - omada-controller
       - mosquitto
+      - zigbee2mqtt
   - deimos:
       - chrony-b
       - coredns-b

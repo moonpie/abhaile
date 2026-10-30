@@ -1,0 +1,7 @@
+zigbee2mqtt.abhaile.home.arpa {
+	import tls_internal
+	import common_headers
+	import authelia_forward_auth
+
+	reverse_proxy http://zigbee2mqtt.svc.abhaile.home.arpa:8080
+}

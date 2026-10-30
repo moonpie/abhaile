@@ -8,7 +8,7 @@ title: Home Automation Services
 status: active
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-29
+updated: 2026-10-30
 related_adrs:
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -355,7 +355,7 @@ spec. Device migration can proceed independently once the relevant service is co
 - [ ] Container `devices` is accepted by schema validation and covered by focused tests.
 - [ ] All five services start with defaults or minimum required secure configuration, persistent
   mounts, git-owned deployment definitions, and working ingress/secret delivery as applicable.
-- [ ] Mosquitto rejects anonymous clients and uses distinct client identities with protected
+- [x] Mosquitto rejects anonymous clients and uses distinct client identities with protected
   secret delivery before deployment readiness is declared.
 - [ ] HTTP services have the agreed ingress authentication and protected direct listeners;
   required administrator setup is complete and no unauthenticated management/onboarding bypass
@@ -563,6 +563,53 @@ render result, dry-run/check result, host observation, or restore evidence.
    Review actual usage after one week of recording; changing filesystem boundaries remains a
    separate storage decision under ADR 0014.
 
+## Mosquitto Host Verification (2026-10-30)
+
+- Implementation: `824808702734661e53abdc7bc896f755c3db38dd`, following preparation correction
+  `ae94b55d3370bb722c4a09992c5030c11bbdc9e8` accepted on both hosts.
+- Phobos operator evidence: broker active and container running/healthy; the configured health
+  probe verifies anonymous rejection. The 20:20 UTC runner audit was fast-clean with zero drift
+  and uncertainty. Data-root metadata was subsequently confirmed as mode 0750, UID/GID 1883:1883.
+- All three approved identities (Home Assistant, Zigbee2MQTT and Frigate) successfully published
+  QoS 1 retained test messages and independently read them back. Credential values were piped
+  through client option-file input, not shared in chat or passed as process arguments.
+- Broker restart verification passed: after `systemctl restart mosquitto.service`, all three
+  retained messages were read without republishing. The container returned running/healthy and
+  `/srv/mosquitto/data` remained mode 0750, UID/GID 1883:1883.
+- Mosquitto phase-one boot readiness is accepted by operator-approved risk assessment: its
+  shared secrets-ready target, network ordering, credential-preparation dependency and restart
+  policy match the established Authelia/Omada startup pattern. The operator reports existing
+  Mosquitto reboot experience. A new dedicated host reboot was not performed or claimed; check
+  it opportunistically at the next planned maintenance reboot, without blocking Zigbee2MQTT.
+  The initial mode-0755 drift was repaired through normal reconciliation; its original cause
+  has not been conclusively reproduced. Overall multi-service acceptance remains open.
+
+## Zigbee2MQTT Preparation (2026-10-30)
+
+- Operator confirmed the SLZB-06 is a fresh network, with no existing devices/state to preserve.
+  The Ethernet coordinator remains at `172.20.50.10:6638` using `zstack`; no USB access is needed.
+- Operator created version 1 of `secret/abhaile/zigbee2mqtt` with field `frontend_auth_token`.
+  No secret values were supplied to the assistant. The MQTT identity reuses the approved
+  `zigbee2mqtt_username`/`zigbee2mqtt_password` fields at the existing shared MQTT path.
+- Deployment uses pinned upstream image `ghcr.io/koenkk/zigbee2mqtt:2.14.2`. Its supported
+  environment settings provide minimum required startup configuration. The application creates
+  and updates its own configuration file; no seed-only publisher or reconciled application YAML
+  is introduced. `Z2M_ONBOARD_NO_SERVER=1` disables unauthenticated setup/failure HTTP servers.
+- Runtime files use container umask 0077. Vault Agent output and the copied native environment
+  file are mode 0600. The data root is declared root:root 0750; inspect it after initial volume
+  use, given the unresolved one-time Podman mode adjustment observed with Mosquitto.
+- Internal Caddy ingress uses Authelia's existing admins-only policy. Native frontend token
+  authentication protects direct control access as well; serving public frontend assets is not
+  evidence of an authentication bypass. Home Assistant integration is initially disabled.
+  Device pairing remains an explicit operator action after successful startup.
+- Publish the Vault policy prerequisite separately before mapping/template enrollment. The
+  operator applies the policy from the deployed repo; activation then publishes the frontend
+  DNS alias, SSO rule, secret template and service resources. No push or live deployment is
+  claimed by this working-tree preparation.
+- Validation: both full-host renders passed; 21 focused deployment/MQTT/ingress/Vault/DNS tests
+  passed, including three Zigbee2MQTT cases. Repository formatting, schemas, mypy, lint and
+  secret scanning passed. These checks do not claim live coordinator or frontend startup.
+
 ## References
 
 - [Frigate recording and retention](https://docs.frigate.video/configuration/record/)
@@ -585,3 +632,11 @@ render result, dry-run/check result, host observation, or restore evidence.
 - [0033: Private Volume Directory Management](../active/0033-private-volume-directory-management.md)
 - `docs/specs/proposed/0021-network-devices.md`
 - `docs/specs/accepted/0011-core-services.md`
+
+### Zigbee2MQTT Policy Prerequisite Confirmed
+
+Phobos accepted `4b216d62a00af6d1e2be1c03c19eb4405160bc46` with a clean post-full audit.
+The operator successfully uploaded `vault-agent` policy and confirmed read access to
+`secret/data/abhaile/zigbee2mqtt`. Activation can now enroll the protected template.
+Native environment quoting escapes backslashes and double quotes directly rather than applying
+JSON HTML escaping to MQTT credentials. Live Zigbee2MQTT startup remains to be observed.

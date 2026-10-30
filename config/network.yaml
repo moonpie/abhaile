@@ -21,24 +21,24 @@ dns:
         name: coredns-common
       serial:
         date: 20261030
-        counter: 01
-        content_hash: cc4139033d84510205f332c9b4f083fbec43e357a5a5d3ed86cacb662928c5f5
+        counter: 02
+        content_hash: 57d3384ac682bef560ece9194df087692a958c41e2d4f23086438769ea6e8cb8
     - name: abhaile.home.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20260730
+        date: 20261030
         counter: 00
-        content_hash: 83d08bc07ecb1bf2a1f8e6b9ecc9a1f28b39f091989c81059270b278afb648c1
+        content_hash: 7887c1a6f3780bdfaa01f1b85a197733e369fb086d14f4b944ffe9e51d92914b
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
         date: 20261030
-        counter: 01
-        content_hash: d179ec03b6de90a9b1740974bccc83a359a4e54b5dfac4f68829c9bd30f6f140
+        counter: 02
+        content_hash: f5980128850d67f130a26482b40ec9ba853e3ab471a3c5fdc9aa5d4f96f256e6
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
@@ -353,6 +353,11 @@ services:
             name: zigbee2mqtt
             rdata: "%%network.services.zigbee2mqtt.address | strip_cidr%%"
             ptr: true
+      - zone: abhaile.home.arpa.
+        records:
+          - type: cname
+            name: zigbee2mqtt
+            rdata: caddy.abhaile.home.arpa.
   esphome:
     address: 172.20.20.224/32
     vlan: services

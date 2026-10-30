@@ -1,0 +1,39 @@
+[Unit]
+Description=Zigbee2MQTT
+Wants=network-online.target mosquitto.service
+After=network-online.target mosquitto.service abhaile-secrets-ready.service zigbee2mqtt-env.service
+Requires=abhaile-secrets-ready.service zigbee2mqtt-env.service
+
+[Container]
+Image={{ image }}
+Pull={{ pull_policy }}
+Network={{ network.services[service_name].vlan }}.network
+PodmanArgs=--umask=0077
+PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
+Timezone=local
+EnvironmentFile=/etc/zigbee2mqtt/zigbee2mqtt.env
+Environment=Z2M_ONBOARD_NO_SERVER=1
+Environment=ZIGBEE2MQTT_CONFIG_MQTT_SERVER=mqtt://{{ network.services.mosquitto.address | strip_cidr }}:1883
+Environment=ZIGBEE2MQTT_CONFIG_SERIAL_PORT=tcp://172.20.50.10:6638
+Environment=ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER=zstack
+Environment=ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED=true
+Environment=ZIGBEE2MQTT_CONFIG_FRONTEND_HOST={{ network.services[service_name].address | strip_cidr }}
+Environment=ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED=false
+{% for line in volume_lines %}
+{{ line }}
+{% endfor %}
+HealthCmd=["CMD", "node", "-e", "fetch('http://{{ network.services[service_name].address | strip_cidr }}:8080').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+HealthInterval=30s
+HealthTimeout=5s
+HealthRetries=3
+HealthStartPeriod=180s
+Notify=healthy
+StopTimeout=60
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=240s
+
+[Install]
+WantedBy=abhaile-secrets-ready.service

@@ -1,0 +1,12 @@
+[Unit]
+Description=Copy Zigbee2MQTT environment from Vault Agent
+After=abhaile-secrets-ready.service
+Requires=abhaile-secrets-ready.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecCondition=/bin/sh -c 'test ! -e /etc/zigbee2mqtt/zigbee2mqtt.env || ! cmp -s /srv/vault/agent/out/zigbee2mqtt.env /etc/zigbee2mqtt/zigbee2mqtt.env'
+ExecStartPre=/usr/bin/install -d -m 0755 -o root -g root /etc/zigbee2mqtt
+ExecStart=/usr/bin/install -m 0600 -o root -g root /srv/vault/agent/out/zigbee2mqtt.env /etc/zigbee2mqtt/zigbee2mqtt.env
+ExecStartPost=/usr/bin/systemctl --no-block try-restart zigbee2mqtt.service

@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch Zigbee2MQTT environment from Vault Agent
+
+[Path]
+PathChanged=/srv/vault/agent/out/zigbee2mqtt.env
+
+[Install]
+WantedBy=multi-user.target
