@@ -8,7 +8,7 @@ title: Private Volume Directory Management
 status: active
 owner: moonpie
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 related_adrs:
   - 0005-service-authoring-model
   - 0014-host-storage-and-nas-mount-boundaries
@@ -210,32 +210,33 @@ read-only mounts also require correctly provisioned host roots.
 
 ## Acceptance Criteria
 
-- [ ] Schema rejects the removed field for both boolean values; all service definitions validate
+- [x] Schema rejects the removed field for both boolean values; all service definitions validate
   without it, and renderer code no longer branches on the field.
-- [ ] All twelve adopted roots render the inspected numeric owner/group/mode; existing rootless
+- [x] All twelve adopted roots render the inspected numeric owner/group/mode; existing rootless
   defaults, read-only private roots and shared-path behavior remain correct.
-- [ ] A pre-existing render-tree parent still registers a managed directory; identical declarations
+- [x] A pre-existing render-tree parent still registers a managed directory; identical declarations
   preserve provenance and conflicting identities/metadata fail deterministically.
-- [ ] Mosquitto's redundant config-directory entry is removed and the production config-parent
+- [x] Mosquitto's redundant config-directory entry is removed and the production config-parent
   check succeeds with the volume-managed parent absent in a disposable fixture.
-- [ ] Production directory-role tests create missing roots, repair top-level metadata drift and
+- [x] Production directory-role tests create missing roots, repair top-level metadata drift and
   converge idempotently without changing child content, modes or ownership. Existing file/symlink
   targets fail safely; recovery/cleanup does not recursively delete application data.
-- [ ] All-host render comparison accounts for intended directory manifest additions and metadata
+- [x] All-host render comparison accounts for intended directory manifest additions and metadata
   changes only; existing config, Quadlet, image, network and helper bytes remain unchanged.
 - [ ] Existing-host check-mode results for Phobos and Deimos are recorded by the operator, including
   revision, expected directory changes and unavailable validation. No empty-host deployment is
   required or claimed.
-- [ ] Relevant tests and repository checks are recorded; guide, runbook, ADR/index and spec 0015
+- [x] Relevant tests and repository checks are recorded; guide, runbook, ADR/index and spec 0015
   references describe the implemented behavior. Each completed criterion has commit/PR and
   validation evidence.
 
 ### Evidence
 
-Local implementation and disposable-fixture validation are present in the working tree.
-Acceptance criteria remain unchecked pending implementation commit/PR references and formal
-evidence. Operator-run Phobos and Deimos check-mode results have not been supplied; that criterion
-remains pending. The spec stays active.
+Implementation reference for the completed criteria: [commit 4fd9eaa](https://github.com/moonpie/abhaile/commit/4fd9eaa25ff4c5f6317f957bac614da84df32d4c).
+Criterion-specific renderer, schema, directory-role and render-comparison validation is recorded
+below. Operator-run Phobos and Deimos check-mode evidence remains incomplete, so this spec stays
+active. Deimos's last-successful revision is `4fd9eaa`; Phobos's is `dee4745`. These revision
+reports alone do not establish the required expected-directory-change and validation records.
 
 The operator's directory/mount listings establish adoption metadata only. Application file
 contents were not read; no unrelated files were identified in the shallow inspection. No live-host
@@ -278,7 +279,7 @@ ownership changes, deletion, service restarts or deployment were performed durin
   tests/integration/test_vault_templates.py
 ```
 
-Implementation and test evidence awaiting a commit reference:
+Implementation and test evidence for commit `4fd9eaa`:
 
 - `schemas/common.schema.json` rejects the retired field; opted-out service declarations now
   supply the inspected metadata. `test_private_volume_directories.py` checks both retired boolean
@@ -322,4 +323,4 @@ those ownership/default rules; this does not block the named-volume directory co
 - [0028: Target Host Reconciliation](../accepted/0028-target-host-reconciliation-model.md)
 - [0030: Host Storage Layout](../accepted/0030-host-storage-layout.md)
 - [0031: NAS Storage Adoption](../proposed/0031-nas-storage-adoption.md)
-- [0032: Container Image Authoring](../active/0032-container-image-authoring.md)
+- [0032: Container Image Authoring](../accepted/0032-container-image-authoring.md)

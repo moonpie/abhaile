@@ -1,0 +1,87 @@
+- name: Require concrete desired Podman resource identity
+  ansible.builtin.assert:
+    that:
+      - resource is mapping
+      - resource.name is string
+      - resource.name is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+      - resource.driver is string
+      - resource.options is mapping
+      - resource_kind == 'volume' or (resource.network_interface is string and resource.subnets is sequence)
+    fail_msg: Missing auxiliary Quadlet requires rendered Podman resource identity and options
+    quiet: true
+  vars: &resource_vars
+    resource: "{{ abhaile_auxiliary_target.item.apply_hints.podman_resource | default({}) }}"
+    resource_kind: "{{ 'volume' if abhaile_auxiliary_target.item.kind == 'quadlet.volume' else 'network' }}"
+- name: Observe whether the native Podman resource already exists
+  ansible.builtin.command:
+    argv:
+      - "{{ abhaile_podman_binary | default('/usr/bin/podman') }}"
+      - "{{ resource_kind }}"
+      - exists
+      - "{{ resource.name }}"
+  check_mode: false
+  changed_when: false
+  failed_when: abhaile_resource_exists.rc not in [0, 1]
+  register: abhaile_resource_exists
+  vars: *resource_vars
+- name: Inspect an existing resource without changing it
+  ansible.builtin.command:
+    argv:
+      - "{{ abhaile_podman_binary | default('/usr/bin/podman') }}"
+      - "{{ resource_kind }}"
+      - inspect
+      - "{{ resource.name }}"
+  check_mode: false
+  changed_when: false
+  register: abhaile_resource_inspection
+  no_log: true
+  when: abhaile_resource_exists.rc == 0
+  vars: *resource_vars
+- name: Require an unambiguous native resource inspection
+  ansible.builtin.assert:
+    that:
+      - observed is sequence
+      - observed is not string
+      - observed | length == 1
+      - observed[0] is mapping
+    fail_msg: Podman resource inspection did not identify exactly one object
+    quiet: true
+  when: abhaile_resource_exists.rc == 0
+  vars:
+    observed: "{{ abhaile_resource_inspection.stdout | from_json }}"
+- name: Refuse incompatible existing bind volumes
+  ansible.builtin.assert:
+    that:
+      - observed.Name == resource.name
+      - observed.Driver == resource.driver
+      - observed.Options | default({}, true) == resource.options
+    fail_msg: Existing Podman volume has incompatible identity or options; explicit adoption is required
+    quiet: true
+  when:
+    - abhaile_resource_exists.rc == 0
+    - resource_kind == 'volume'
+  vars:
+    !!merge <<: *resource_vars
+    observed: "{{ (abhaile_resource_inspection.stdout | from_json)[0] }}"
+- name: Refuse incompatible existing IPvlan networks
+  ansible.builtin.assert:
+    that:
+      - observed.name == resource.name
+      - observed.driver == resource.driver
+      - observed.network_interface == resource.network_interface
+      - observed.subnets == resource.subnets
+      - observed.options | default({}, true) == resource.options
+      - observed.internal is sameas resource.internal
+      - observed.dns_enabled is sameas resource.dns_enabled
+      - observed.ipv6_enabled is sameas resource.ipv6_enabled
+      - observed.ipam_options == resource.ipam_options
+      - observed.routes | default([], true) | length == 0
+      - observed.network_dns_servers | default([], true) | length == 0
+    fail_msg: Existing Podman network has incompatible identity or options; explicit adoption is required
+    quiet: true
+  when:
+    - abhaile_resource_exists.rc == 0
+    - resource_kind == 'network'
+  vars:
+    !!merge <<: *resource_vars
+    observed: "{{ (abhaile_resource_inspection.stdout | from_json)[0] }}"

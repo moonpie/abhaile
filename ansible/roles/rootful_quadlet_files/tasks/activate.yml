@@ -1,0 +1,93 @@
+- name: Restart deferred managed build consumers after configuration publication
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+  loop: "{{ abhaile_rebuilt_rootful_consumers | default([]) | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  when:
+    - not ansible_check_mode
+    - abhaile_defer_build_consumers | default(false)
+- name: Start or restart changed automatic rootful containers and pods
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+    state: restarted
+  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.changed or (item.item.owner_ref | regex_replace('^unit:', '')) in abhaile_deferred_config_units | default([])
+    - item.item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.item.apply_hints.restart_mode | default('try-restart') != 'manual'
+    - >-
+      item.item.owner_ref | regex_replace('^unit:', '') not in abhaile_rebuilt_rootful_consumers | default([])
+- name: Ensure automatic rootful containers and pods are started
+  ansible.builtin.systemd_service:
+    name: "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+    state: started
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.apply_hints.restart_mode | default('try-restart') != 'manual'
+- name: Reset changed manual rootful parent pods
+  ansible.builtin.set_fact:
+    abhaile_changed_rootful_parent_pods: []
+- name: Collect parent pods for changed manual rootful containers
+  ansible.builtin.set_fact:
+    abhaile_changed_rootful_parent_pods: "{{ (abhaile_changed_rootful_parent_pods | default([])) + (abhaile_rootful_quadlet_owners[item.item.owner_ref].requires
+      | intersect(rootful_quadlet_pod_owner_refs)) }}"
+  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.changed or (item.item.owner_ref | regex_replace('^unit:', '')) in abhaile_deferred_config_units | default([])
+    - item.item.kind == 'quadlet.container'
+    - item.item.apply_hints.restart_mode | default('try-restart') == 'manual'
+  vars:
+    rootful_quadlet_pod_owner_refs: "{{ abhaile_rootful_quadlet_entries | selectattr('kind', 'equalto', 'quadlet.pod')
+      | map(attribute='owner_ref') | list }}"
+- name: Start or restart parent pods for changed manual rootful containers
+  ansible.builtin.systemd_service:
+    name: "{{ item | regex_replace('^unit:', '') }}"
+    state: restarted
+  loop: "{{ abhaile_changed_rootful_parent_pods | default([]) | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  when: item not in changed_rootful_pod_owner_refs
+  vars: &changed_rootful_pod_vars
+    changed_rootful_pod_owner_refs: "{{ abhaile_rootful_quadlet_publications.results | selectattr('changed') | selectattr('item.kind',
+      'equalto', 'quadlet.pod') | map(attribute='item.owner_ref') | list + (abhaile_deferred_config_units | default([])
+      | map('regex_replace', '^', 'unit:') | list) }}"
+- name: Verify parent pods for changed manual rootful containers are active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - --quiet
+      - "{{ item | regex_replace('^unit:', '') }}"
+  changed_when: false
+  loop: "{{ abhaile_changed_rootful_parent_pods | default([]) | unique }}"
+  loop_control:
+    label: "{{ item }}"
+  when: item not in changed_rootful_pod_owner_refs
+  vars: *changed_rootful_pod_vars
+- name: Verify automatic rootful containers and pods are active
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - is-active
+      - --quiet
+      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
+  changed_when: false
+  loop: "{{ abhaile_rootful_quadlet_entries }}"
+  loop_control:
+    label: "{{ item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.apply_hints.restart_mode | default('try-restart') != 'manual'

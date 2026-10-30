@@ -5,10 +5,10 @@
 ```yaml
 id: SPEC-2026-032
 title: Container Image Authoring
-status: active
+status: accepted
 owner: moonpie
 created: 2026-10-28
-updated: 2026-10-29
+updated: 2026-10-30
 related_adrs:
   - 0005-service-authoring-model
 supersedes: null
@@ -236,30 +236,28 @@ need no changes if rendered artifacts and manifest metadata remain equal.
 
 ## Acceptance Criteria
 
-- [ ] Schema tests accept runtime-only `podman` and canonical standalone/pod container image
+- [x] Schema tests accept runtime-only `podman` and canonical standalone/pod container image
   settings; reject `podman.image`, `podman.pull_policy`, pod-wrapper equivalents, empty/incomplete
   runtime blocks, unknown fields, invalid images/policies, and invalid rootful/rootless networks.
-- [ ] Schema tests reject pods without `containers`, empty container lists, and members missing
+- [x] Schema tests reject pods without `containers`, empty container lists, and members missing
   `name` or nested `container`; accept a nested empty object structurally while preserving
   separate renderer checks for required image/build sources.
-- [ ] CLI and project validation schema-check mapped and included definitions before rendering,
+- [x] CLI and project validation schema-check mapped and included definitions before rendering,
   retain cycle/missing-definition diagnostics, and keep runtime fields local.
-- [ ] The real pre-commit hook covers shared-fragment-only, schema-only and deletion-only changes;
+- [x] The real pre-commit hook covers shared-fragment-only, schema-only and deletion-only changes;
   project validation performs no render or live-host operations.
-- [ ] Tests prove standalone and pod image resolution uses only the selected container object,
+- [x] Tests prove standalone and pod image resolution uses only the selected container object,
   preserves `missing` as the policy default, and cannot fall back to removed image locations.
-- [ ] Tests preserve nested include selection, local-definition replacement, shared Blocky
+- [x] Tests preserve nested include selection, local-definition replacement, shared Blocky
   composition, pod-member images, local builds, rootless unit placement, ownership and health hints.
-- [ ] All managed definitions and supporting references use canonical image locations. Full-host
+- [x] All managed definitions and supporting references use canonical image locations. Full-host
   artifacts and manifests remain byte-identical to the pre-change baseline for both hosts.
-- [ ] Appropriate tests and repository checks are recorded; guide, ADR/index and linked proposed
+- [x] Appropriate tests and repository checks are recorded; guide, ADR/index and linked proposed
   specs agree with the revised contract. Any pre-existing coverage failure remains explicit.
 
 ### Evidence
 
-The revised implementation is present in the working tree. Acceptance criteria remain unchecked
-pending an implementation commit/PR reference and formal completion evidence. Earlier pairing
-tests were replaced with canonical-container authoring, selection and migration tests.
+All criteria are complete. Implementation reference for each criterion: [commit 4fd9eaa](https://github.com/moonpie/abhaile/commit/4fd9eaa25ff4c5f6317f957bac614da84df32d4c). The criterion-specific validation is recorded below, including the canonical schema, image resolution, real project-hook and all-host comparison evidence. The subsequent 674-test run also passed (86.76% coverage); no live broker deployment is required by this authoring spec. Earlier pairing tests were replaced with canonical-container authoring, selection and migration tests.
 
 Historical validation on 2026-10-28, for the earlier pairing proposal only:
 
@@ -299,7 +297,7 @@ authoring. Revised validation results are recorded separately below.
   tests/integration/test_vault_templates.py
 ```
 
-Implementation and validation evidence awaiting a commit reference:
+Criterion-specific implementation and validation evidence for commit `4fd9eaa`:
 
 - `schemas/service.schema.json` and `tests/integration/test_container_image_authoring.py` cover
   canonical image locations, runtime requirements, nonempty pods, nested container objects,

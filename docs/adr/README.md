@@ -17,12 +17,12 @@ Add one row per ADR. Keep links current when ADR status changes.
 | [0005](0005-service-authoring-model.md) | Service Authoring Model | Accepted (amended 2026-10-29) | 2026-10-29 | - | - | 001, 002, 003, 004, 005, 006, 007, 009, 011, 015, 016, 017, 018, 019, 020, 032, 033 |
 | [0006](0006-secrets-model-and-bootstrap-artifacts.md) | Secrets Model and Bootstrap Artifacts | Accepted | 2026-05-05 | - | - | 001, 005, 007, 010, 011, 014, 015, 018, 019, 020 |
 | [0007](0007-sops-bootstrap-policy-and-layout.md) | SOPS Bootstrap Policy and Layout | Accepted | 2026-05-05 | - | - | 010, 013, 014 |
-| [0008](0008-host-infrastructure-authoring-model.md) | Host Infrastructure Authoring Model | Accepted | 2026-06-19 | - | - | 023 |
+| [0008](0008-host-infrastructure-authoring-model.md) | Host Infrastructure Authoring Model | Accepted (amended 2026-10-30) | 2026-10-30 | - | - | 023, 034 |
 | [0009](0009-vault-agent-approle-auto-auth.md) | Vault Agent AppRole Auto-Auth | Accepted | 2026-06-22 | - | - | 025 |
 | [0010](0010-ansible-reconciliation-model.md) | Ansible Reconciliation Model | Superseded | 2026-09-05 | - | 0012 | 028 |
 | [0011](0011-guarded-networkd-convergence.md) | Guarded systemd-networkd Convergence | Superseded | 2026-10-02 | - | 0012 | 028 |
 | [0012](0012-trusted-revision-ansible-reconciliation.md) | Trusted-Revision Ansible Reconciliation | Superseded | 2026-10-05 | 0010, 0011 | 0013 | 028 |
-| [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted (amended 2026-10-22) | 2026-10-08 | 0012 | - | 028, 029 |
+| [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted (amended 2026-10-30) | 2026-10-30 | 0012 | - | 028, 029, 034 |
 | [0014](0014-host-storage-and-nas-mount-boundaries.md) | Host Storage and NAS Mount Boundaries | Accepted | 2026-10-26 | - | - | 030, 031 |
 
 ## Status Values

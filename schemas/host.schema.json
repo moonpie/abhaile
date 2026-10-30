@@ -136,7 +136,7 @@
     "user": {
       "type": "object",
       "properties": {
-        "uid": {"type": "integer"},
+        "uid": {"type": "integer", "minimum": 0},
         "system": {"type": "boolean"},
         "primary_group": {"type": "string"},
         "additional_groups": {
@@ -146,6 +146,21 @@
         "home": {"type": "string"},
         "shell": {"type": "string"},
         "gecos": {"type": "string"},
+        "rootless": {
+          "type": "object",
+          "required": ["subuid_start", "subgid_start", "count"],
+          "properties": {
+            "subuid_start": {"type": "integer", "minimum": 65536},
+            "subgid_start": {"type": "integer", "minimum": 65536},
+            "count": {"type": "integer", "minimum": 65536},
+            "linger": {
+              "type": "boolean",
+              "default": true,
+              "description": "Enable lingering when true; false preserves existing policy without enabling or disabling it"
+            }
+          },
+          "additionalProperties": false
+        },
         "ssh_authorized_keys": {
           "type": "array",
           "items": {"type": "string"}
@@ -155,9 +170,8 @@
     },
     "group": {
       "type": "object",
-      "required": ["gid"],
       "properties": {
-        "gid": {"type": "integer"}
+        "gid": {"type": "integer", "minimum": 0}
       },
       "additionalProperties": false
     },

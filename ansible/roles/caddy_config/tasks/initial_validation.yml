@@ -1,0 +1,40 @@
+- name: Select the declared Caddy container
+  ansible.builtin.set_fact:
+    abhaile_caddy_container_entry: "{{ abhaile_rootful_quadlet_entries | selectattr('owner_ref', 'equalto', 'unit:caddy-'
+      ~ caddy_segment ~ '.service') | selectattr('kind', 'equalto', 'quadlet.container') | first }}"
+- name: Read the candidate Caddy image and environment references
+  ansible.builtin.set_fact:
+    abhaile_caddy_image_ref: "{{ lookup('ansible.builtin.ini', 'Image', section='Container', file=abhaile_rendered_root
+      ~ '/' ~ abhaile_caddy_container_entry.render_path) }}"
+    abhaile_caddy_environment_file: "{{ lookup('ansible.builtin.ini', 'EnvironmentFile', section='Container', file=abhaile_rendered_root
+      ~ '/' ~ abhaile_caddy_container_entry.render_path, default='') }}"
+- name: Resolve a managed Caddy build output
+  ansible.builtin.set_fact:
+    abhaile_caddy_image_ref: "{{ item.apply_hints.managed_build.output_image }}"
+  loop: "{{ abhaile_rootful_quadlet_entries | selectattr('kind', 'equalto', 'quadlet.build') | list }}"
+  when: item.target_path | basename == abhaile_caddy_image_ref
+- name: Observe candidate Caddy image availability
+  ansible.builtin.command:
+    argv: [/usr/bin/podman, image, exists, "{{ abhaile_caddy_image_ref }}"]
+  changed_when: false
+  check_mode: false
+  register: abhaile_caddy_image_available
+  failed_when: abhaile_caddy_image_available.rc not in [0, 1]
+- name: Report first Caddy validation pending image acquisition
+  ansible.builtin.debug:
+    msg: Initial Caddy semantic validation is pending its disposable candidate runtime; it will run before live
+      publication and activation
+  when:
+    - ansible_check_mode
+- name: Validate initial Caddy configuration in a disposable candidate runtime
+  ansible.builtin.command:
+    argv: "{{ ['/usr/bin/podman', 'run', '--rm', '--interactive', '--network=none', '--read-only', '--tmpfs=/data',
+      '--tmpfs=/config', '--pull=' ~ ('never' if ansible_check_mode else 'missing')] + (['--env-file', abhaile_caddy_environment_file]
+      if abhaile_caddy_environment_file else []) + ['--entrypoint=/usr/bin/caddy', abhaile_caddy_image_ref, 'validate',
+      '--config', '-', '--adapter', 'caddyfile'] }}"
+    stdin: "{{ abhaile_caddy_candidate.content | b64decode }}"
+    stdin_add_newline: false
+  changed_when: false
+  no_log: true
+  # A check must not create even a disposable workload or pull an image.
+  when: not ansible_check_mode

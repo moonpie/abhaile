@@ -374,7 +374,7 @@ stage_prerequisites() {
     log "=== Stage 2: Prerequisites ==="
 
     local packages=(
-        git python3 python3-venv podman crun age jq curl unzip systemd-container bind9-utils ansible-core
+        git sudo python3 python3-venv python3-apt podman uidmap crun age jq curl unzip systemd-container bind9-utils ansible-core
     )
     local to_install=()
 
@@ -646,10 +646,10 @@ stage_render_apply() {
     # the same explicitly authorized Ansible playbook used by routine reconciliation.
     local ansible_vars ansible_live_vars
     ansible_vars=$(printf \
-        '{"abhaile_rendered_root":"%s/rendered","abhaile_config_root":"%s/config","abhaile_expected_host":"%s"}' \
+        '{"abhaile_rendered_root":"%s/rendered","abhaile_config_root":"%s/config","abhaile_expected_host":"%s","abhaile_bootstrap_enrollment":true}' \
         "$OUTPUT_DIR" "$REPO_DIR" "$hostname")
     ansible_live_vars=$(printf \
-        '{"abhaile_rendered_root":"%s/rendered","abhaile_config_root":"%s/config","abhaile_expected_host":"%s","abhaile_live_apply":true}' \
+        '{"abhaile_rendered_root":"%s/rendered","abhaile_config_root":"%s/config","abhaile_expected_host":"%s","abhaile_bootstrap_enrollment":true,"abhaile_live_apply":true}' \
         "$OUTPUT_DIR" "$REPO_DIR" "$hostname")
     log "Running initial Ansible reconciliation check"
     ANSIBLE_CONFIG="${REPO_DIR}/ansible/ansible.cfg" /usr/bin/ansible-playbook \
@@ -662,6 +662,28 @@ stage_render_apply() {
         -i localhost, --connection=local \
         --extra-vars "$ansible_live_vars" \
         "${REPO_DIR}/ansible/playbooks/reconcile.yml"
+
+    # Wait for Vault Agent .ready sentinel
+    log "Waiting for Vault Agent ready sentinel (timeout=${BOOTSTRAP_READY_TIMEOUT}s)"
+    local waited=0
+    while [[ $waited -lt $BOOTSTRAP_READY_TIMEOUT ]]; do
+        if [[ -f "$READY_SENTINEL" ]]; then
+            log "Vault Agent ready sentinel found after ${waited}s"
+            break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+
+    if [[ ! -f "$READY_SENTINEL" ]]; then
+        die "Vault Agent readiness timed out; enrollment has not established a successful baseline"
+    fi
+
+    log "Checking enrollment foundations and required local services"
+    "${REPO_DIR}/.venv/bin/abhaile-integrity" --host "$hostname" \
+        --output "$OUTPUT_DIR" --scope enrollment-foundations
+    "${REPO_DIR}/.venv/bin/abhaile-health" --host "$hostname" \
+        --output "$OUTPUT_DIR" --profile local-actionable
 
     # The explicit bootstrap reconciliation is the enrollment commit boundary. Ordinary runner execution
     # must never invent this first recovery baseline for itself.
@@ -682,29 +704,6 @@ establish_last_successful(Path(sys.argv[1]), sys.argv[2])
     # The rendered recovery unit becomes boot authority only after the successful enrollment
     # boundary exists. Enabling it earlier would allow boot recovery without a valid target.
     enable_network_restore
-
-    log "Reloading abhaile user units"
-    systemctl --user -M abhaile@ daemon-reload \
-        || log "WARNING: failed to reload abhaile user units"
-    systemctl --user -M abhaile@ restart vault-agent.service \
-        || log "WARNING: failed to restart vault-agent.service; runner will retry convergence"
-
-    # Wait for Vault Agent .ready sentinel
-    log "Waiting for Vault Agent ready sentinel (timeout=${BOOTSTRAP_READY_TIMEOUT}s)"
-    local waited=0
-    while [[ $waited -lt $BOOTSTRAP_READY_TIMEOUT ]]; do
-        if [[ -f "$READY_SENTINEL" ]]; then
-            log "Vault Agent ready sentinel found after ${waited}s"
-            break
-        fi
-        sleep 2
-        waited=$((waited + 2))
-    done
-
-    if [[ ! -f "$READY_SENTINEL" ]]; then
-        log "WARNING: Vault Agent ready sentinel not found after ${BOOTSTRAP_READY_TIMEOUT}s"
-        log "Runner will handle convergence on next run"
-    fi
 
     log "Render and reconciliation OK"
 }

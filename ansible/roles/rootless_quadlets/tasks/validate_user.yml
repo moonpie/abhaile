@@ -1,0 +1,66 @@
+- name: Resolve the declared rootless account without creating it
+  ansible.builtin.getent:
+    database: passwd
+    key: '{{ abhaile_rootless_user }}'
+    fail_key: false
+- name: Record rootless account presence
+  ansible.builtin.set_fact:
+    abhaile_rootless_passwd: '{{ ansible_facts.getent_passwd[abhaile_rootless_user] }}'
+    abhaile_rootless_user_entries: '{{ abhaile_rootless_quadlet_entries | selectattr(''apply_hints.podman_user'',
+      ''equalto'', abhaile_rootless_user) | list }}'
+    abhaile_rootless_user_cleanup: '{{ abhaile_rootless_quadlet_cleanup_entries | default([]) | selectattr(''apply_hints.podman_user'',
+      ''equalto'', abhaile_rootless_user) | list }}'
+- name: Require the declared account before live rootless enrollment
+  ansible.builtin.assert:
+    that:
+      - ansible_check_mode or abhaile_rootless_passwd is not none
+    fail_msg: Declared rootless account must be provisioned before live enrollment
+    quiet: true
+- name: Validate rootless pod member relationships
+  ansible.builtin.assert:
+    that:
+      - item.owner_ref in abhaile_rootful_quadlet_owners | default({})
+      - abhaile_rootful_quadlet_owners[item.owner_ref].requires | intersect(pods) | length == 1
+    fail_msg: Manual rootless member must require exactly one pod in the same user context
+    quiet: true
+  loop: '{{ abhaile_rootless_user_entries }}'
+  loop_control:
+    label: '{{ item.owner_ref }}'
+  when: item.kind == 'quadlet.container' and item.apply_hints.restart_mode | default('try-restart') == 'manual'
+  vars:
+    pods: '{{ abhaile_rootless_user_entries | selectattr(''kind'', ''equalto'', ''quadlet.pod'') | map(attribute=''owner_ref'')
+      | list }}'
+- name: Require supported managed rootless build metadata
+  ansible.builtin.assert:
+    that:
+      - item.apply_hints.managed_build is mapping
+      - item.apply_hints.managed_build.output_image is string
+      - item.apply_hints.managed_build.output_image | length > 0
+      - item.apply_hints.managed_build.service is string
+      - item.apply_hints.managed_build.service is match('^[a-z0-9][a-z0-9-]*$')
+      - item.apply_hints.managed_build.consumers is sequence
+      - item.apply_hints.managed_build.consumers is not string
+      - item.apply_hints.managed_build.consumers | length > 0
+      - item.apply_hints.managed_build.consumers | reject('match', '^[A-Za-z0-9_.@:-]+[.]service$') | list | length
+        == 0
+      - item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build is
+        mapping
+      - item.apply_hints.managed_build.post_build is not defined or item.apply_hints.managed_build.post_build.install_unit
+        is match('^[A-Za-z0-9_.@:-]+[.]service$')
+    quiet: true
+  loop: '{{ abhaile_rootless_user_entries }}'
+  loop_control:
+    label: '{{ item.owner_ref }}'
+  when: item.kind == 'quadlet.build'
+- name: Record a pending rootless context when the declared account is absent
+  ansible.builtin.set_fact:
+    abhaile_rootless_contexts: '{{ abhaile_rootless_contexts | combine({abhaile_rootless_user: {''pending'': true}})
+      }}'
+  when: abhaile_rootless_passwd is none
+- name: Report rootless validation pending account provisioning
+  ansible.builtin.debug:
+    msg: 'Rootless validation pending declared account provisioning: {{ abhaile_rootless_user }}'
+  when: abhaile_rootless_passwd is none
+- name: Validate existing account execution context
+  ansible.builtin.include_tasks: validate_existing_user.yml
+  when: abhaile_rootless_passwd is not none

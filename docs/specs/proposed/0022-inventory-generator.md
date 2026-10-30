@@ -83,7 +83,7 @@ Service YAML is loaded only for services present in `mapping.yaml`. Missing `ser
 files produce a warning row (network mode = `unknown`) rather than aborting — unless
 `--validate` is set, in which case they fail as today.
 
-Under [spec 0032](../active/0032-container-image-authoring.md), mapping determines deployed
+Under [spec 0032](../accepted/0032-container-image-authoring.md), mapping determines deployed
 inventory entries and `podman.user`/`podman.network` provide local runtime context. Shared
 container definitions need no `podman` section and are not independently deployed inventory
 entries. Do not inherit runtime fields when collecting a mapped service's network or user context.

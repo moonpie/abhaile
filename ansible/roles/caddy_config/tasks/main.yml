@@ -41,34 +41,23 @@
   register: abhaile_caddy_candidate
   vars:
     caddy_entry_source: "{{ abhaile_rendered_root }}/{{ abhaile_caddy_config_entries[0].render_path }}"
-- name: Require the existing Caddy container for candidate validation
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/podman
-      - container
-      - exists
-      - "systemd-caddy-{{ caddy_segment }}"
-  check_mode: false
-  changed_when: false
+- name: Validate Caddy configuration with the candidate runtime
+  ansible.builtin.include_tasks: initial_validation.yml
   vars: *caddy_config_vars
-- name: Validate candidate with the installed Caddy runtime
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/podman
-      - exec
-      - --interactive
-      - "systemd-caddy-{{ caddy_segment }}"
-      - /usr/bin/caddy
-      - validate
-      - --config
-      - '-'
-      - --adapter
-      - caddyfile
-    stdin: "{{ abhaile_caddy_candidate.content | b64decode }}"
-    stdin_add_newline: false
-  check_mode: false
-  changed_when: false
-  vars: *caddy_config_vars
+- name: Inspect the Caddy configuration parent
+  ansible.builtin.stat:
+    path: "{{ abhaile_caddy_config_entries[0].target_path | dirname }}"
+    follow: false
+  register: abhaile_caddy_parent
+- name: Require an existing or managed Caddy parent
+  ansible.builtin.assert:
+    that:
+      - not abhaile_caddy_parent.stat.islnk | default(false)
+      - abhaile_caddy_parent.stat.isdir | default(false) or (ansible_check_mode and parent in managed_targets)
+    quiet: true
+  vars:
+    parent: "{{ abhaile_caddy_config_entries[0].target_path | dirname }}"
+    managed_targets: "{{ abhaile_directory_entries | default([]) | map(attribute='target_path') | list }}"
 - name: Publish Caddy configuration
   ansible.builtin.copy:
     src: "{{ abhaile_rendered_root }}/{{ caddy_entry.render_path }}"
@@ -78,6 +67,7 @@
     group: root
     mode: "0644"
   register: abhaile_caddy_publication
+  when: not ansible_check_mode or abhaile_caddy_parent.stat.exists
   vars: *caddy_config_vars
 - name: Restart Caddy after changed configuration
   ansible.builtin.systemd_service:
@@ -86,6 +76,7 @@
   when:
     - not ansible_check_mode
     - abhaile_caddy_publication.changed
+    - not abhaile_defer_activation | default(false)
   vars: *caddy_config_vars
 - name: Verify changed Caddy segment is active
   ansible.builtin.command:
@@ -98,4 +89,11 @@
   when:
     - not ansible_check_mode
     - abhaile_caddy_publication.changed
+    - not abhaile_defer_activation | default(false)
+  vars: *caddy_config_vars
+- name: Record changed Caddy configuration for final activation
+  ansible.builtin.set_fact:
+    abhaile_changed_caddy_units: "{{ (abhaile_changed_caddy_units | default([])) + ['caddy-' ~ caddy_segment ~ '.service']
+      }}"
+  when: abhaile_caddy_publication.changed
   vars: *caddy_config_vars

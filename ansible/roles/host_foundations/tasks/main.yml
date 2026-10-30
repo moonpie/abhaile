@@ -1,0 +1,207 @@
+- name: Validate declared host prerequisite sources
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_host_foundation_entries }}"
+- name: Require closed host prerequisite identities
+  ansible.builtin.assert:
+    that:
+      - item.kind in ['host.sysusers', 'host.sudoers', 'host.authorized_keys', 'host.packages']
+      - item.apply_hints is mapping
+      - abhaile_bootstrap_enrollment | default(false) is boolean
+      - item.kind != 'host.sysusers' or item.target_path == '/etc/sysusers.d/abhaile.conf'
+      - item.kind != 'host.sudoers' or item.target_path == '/etc/sudoers.d/abhaile'
+      - item.kind != 'host.packages' or item.target_path == '/etc/abhaile/packages.txt'
+    fail_msg: Host prerequisite entry violates its closed identity contract
+    quiet: true
+  loop: "{{ abhaile_host_foundation_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+- name: Require at most one account and package inventory
+  ansible.builtin.assert:
+    that:
+      - account_entries | length <= 1
+      - package_entries | length <= 1
+    quiet: true
+  vars:
+    account_entries: "{{ abhaile_host_foundation_entries | selectattr('kind', 'equalto', 'host.sysusers') | list
+      }}"
+    package_entries: "{{ abhaile_host_foundation_entries | selectattr('kind', 'equalto', 'host.packages') | list
+      }}"
+- name: Select declared account metadata
+  ansible.builtin.set_fact:
+    abhaile_host_users: "{{ (account_entries[0].apply_hints.users | default({})) if account_entries | length else
+      {} }}"
+    abhaile_host_groups: "{{ (account_entries[0].apply_hints.groups | default({})) if account_entries | length else
+      {} }}"
+  vars:
+    account_entries: "{{ abhaile_host_foundation_entries | selectattr('kind', 'equalto', 'host.sysusers') | list
+      }}"
+- name: Require account metadata mappings
+  ansible.builtin.assert:
+    that:
+      - abhaile_host_users is mapping
+      - abhaile_host_groups is mapping
+    quiet: true
+- name: Observe existing account and group identities
+  ansible.builtin.getent:
+    database: "{{ item }}"
+  loop: [passwd, group]
+- name: Record account-dependent validation pending native creation
+  ansible.builtin.set_fact:
+    abhaile_host_users_pending: "{{ (abhaile_host_users.keys() | list | difference(getent_passwd.keys() | list))
+      if ansible_check_mode else [] }}"
+- name: Validate declared group identities without renumbering
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.value is mapping
+      - item.value.gid is not defined or (item.value.gid is integer and item.value.gid >= 0)
+      - item.key not in getent_group or item.value.gid is not defined or getent_group[item.key][1] | int == item.value.gid
+      - occupied | difference([item.key]) | length == 0
+    fail_msg: Declared group name or GID conflicts with an existing identity
+    quiet: true
+  vars:
+    occupied: "{{ getent_group | dict2items | selectattr('value.1', 'equalto', item.value.gid | default(-1) | string)
+      | map(attribute='key') | list }}"
+  loop: "{{ abhaile_host_groups | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+- name: Validate declared users without renumbering or relocating homes
+  ansible.builtin.assert:
+    that:
+      - item.key is match('^[a-z_][a-z0-9_-]*[$]?$')
+      - item.value is mapping
+      - item.value.uid is not defined or (item.value.uid is integer and item.value.uid >= 0)
+      - item.key not in getent_passwd or item.value.uid is not defined or getent_passwd[item.key][1] | int == item.value.uid
+      - item.value.uid is not defined or occupied | difference([item.key]) | length == 0
+      - primary_group in abhaile_host_groups or primary_group in getent_group
+      - item.value.additional_groups | default([]) | difference((abhaile_host_groups.keys() | list) + (getent_group.keys()
+        | list)) | length == 0
+      - item.key not in getent_passwd or item.value.home | default('-') == '-' or item.value.home == getent_passwd[item.key][4]
+      - item.key not in getent_passwd or primary_group in getent_group
+      - item.key not in getent_passwd or getent_passwd[item.key][2] | int == getent_group[primary_group][1] | int
+      - item.key != 'abhaile' or item.key in getent_passwd
+      - item.key != 'abhaile' or item.value.shell | default(getent_passwd[item.key][5]) == getent_passwd[item.key][5]
+      - item.value.rootless is not defined or item.value.home | default('') == '/home/' ~ item.key
+    fail_msg: Declared user conflicts with existing identity, home or protected automation access
+    quiet: true
+  vars:
+    primary_group: "{{ item.value.primary_group | default(item.key) }}"
+    occupied: "{{ getent_passwd | dict2items | selectattr('value.1', 'equalto', item.value.uid | default(-1) | string)
+      | map(attribute='key') | list }}"
+  loop: "{{ abhaile_host_users | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+- name: Inspect host prerequisite publication targets
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_host_foundation_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_host_foundation_target_stats
+- name: Refuse redirected or non-file prerequisite targets
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or item.stat.isreg | default(false)
+    fail_msg: Host prerequisite publication target is redirected or is not a file
+    quiet: true
+  loop: "{{ abhaile_host_foundation_target_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Preserve protected automation access outside explicit enrollment
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.checksum == item.item.sha256
+    fail_msg: Protected automation access differs; explicit bootstrap or operator enrollment is required
+    quiet: true
+  loop: "{{ abhaile_host_foundation_target_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not abhaile_bootstrap_enrollment | default(false)
+    - item.item.kind == 'host.sudoers' or (item.item.kind == 'host.authorized_keys' and item.item.owner_ref == 'principal:abhaile')
+- name: Validate declared sudo policy
+  ansible.builtin.command:
+    argv: [/usr/sbin/visudo, -cf, "{{ abhaile_rendered_root }}/{{ item.render_path }}"]
+  changed_when: false
+  check_mode: false
+  loop: "{{ abhaile_host_foundation_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  when: item.kind == 'host.sudoers'
+- name: Remove matching candidate-only ordinary principal key files
+  ansible.builtin.include_tasks: cleanup.yml
+  when: abhaile_host_foundation_cleanup_entries | default([]) | length > 0
+- name: Establish explicit subordinate ID intent before native user creation
+  ansible.builtin.include_tasks: namespace.yml
+  loop: "{{ abhaile_host_users | dict2items }}"
+  loop_control:
+    loop_var: abhaile_rootless_account
+    label: "{{ abhaile_rootless_account.key }}"
+  when: abhaile_rootless_account.value.rootless is defined
+- name: Create declared groups
+  ansible.builtin.group:
+    name: "{{ item.key }}"
+    gid: "{{ item.value.gid | default(omit) }}"
+    system: true
+    state: present
+  loop: "{{ abhaile_host_groups | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+- name: Create users and add declared supplementary memberships
+  ansible.builtin.user:
+    name: "{{ item.key }}"
+    uid: "{{ item.value.uid | default(omit) }}"
+    group: "{{ item.value.primary_group | default(item.key) }}"
+    groups: "{{ item.value.additional_groups | default(omit) }}"
+    append: true
+    home: "{{ item.value.home if item.value.home | default('-') != '-' else omit }}"
+    shell: "{{ item.value.shell if item.value.shell | default('-') != '-' else omit }}"
+    comment: "{{ item.value.gecos | default(omit) }}"
+    system: "{{ item.value.system | default(true) }}"
+    create_home: "{{ item.value.home | default('-') != '-' or not item.value.system | default(true) }}"
+    move_home: false
+    state: present
+  loop: "{{ abhaile_host_users | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: >-
+    not ansible_check_mode or ((item.value.primary_group | default(item.key)) in getent_group and item.value.additional_groups
+    | default([]) | difference(getent_group.keys() | list) | length == 0)
+- name: Report account checks pending newly declared groups
+  ansible.builtin.debug:
+    msg: "User {{ item.key }} will be checked after its declared groups are created"
+  changed_when: true
+  loop: "{{ abhaile_host_users | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - ansible_check_mode
+    - >-
+      (item.value.primary_group | default(item.key)) not in getent_group or item.value.additional_groups | default([])
+      | difference(getent_group.keys() | list) | length > 0
+- name: Prepare explicitly declared rootless account foundations
+  ansible.builtin.include_tasks: rootless.yml
+  loop: "{{ abhaile_host_users | dict2items }}"
+  loop_control:
+    loop_var: abhaile_rootless_account
+    label: "{{ abhaile_rootless_account.key }}"
+  when: abhaile_rootless_account.value.rootless is defined
+- name: Install declared standard packages
+  ansible.builtin.include_tasks: packages.yml
+  loop: "{{ abhaile_host_foundation_entries | selectattr('kind', 'equalto', 'host.packages') | list }}"
+  loop_control:
+    loop_var: abhaile_package_entry
+    label: "{{ abhaile_package_entry.target_path }}"
+- name: Publish host account and package inventories
+  ansible.builtin.include_tasks: publish.yml
+  loop: "{{ abhaile_host_foundation_entries }}"
+  loop_control:
+    loop_var: abhaile_foundation_entry
+    label: "{{ abhaile_foundation_entry.target_path }}"

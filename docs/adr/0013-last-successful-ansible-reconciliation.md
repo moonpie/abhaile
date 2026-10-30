@@ -14,6 +14,9 @@ remains unchanged.
 
 2026-10-22: Spec 0029 accepted after automated and two-host production validation.
 
+2026-10-30: Amended for bounded host and service provisioning under active Spec 0034.
+Implementation and acceptance evidence remain tracked by that spec.
+
 Supersedes ADR 0012.
 
 ## Context
@@ -34,9 +37,11 @@ outside the migration's intended scope.
 ### Trust and authoring boundary
 
 - Reviewed repository commits and the existing `abhaile` automation account are trusted inputs.
-- `config/` is restored to its Phase 0 contract. In particular, software declarations keep their
-  original command-oriented content and remain future-facing render input.
-- `rendered/software/` remains deterministic but is not applied in this migration.
+- Software declarations retain their authored contract. Command-oriented downloads, builds and
+  commands remain future-facing render input; they are not a generic execution interface.
+- The original migration did not apply `rendered/software/`. The bounded enrollment amendment
+  below permits standard package provisioning and retains existing managed Quadlet builds,
+  without introducing an executor for arbitrary software actions.
 - The existing `manifest.json` is the sole inventory for resource families already managed by the
   deployed resource inventory. Manifest v2, typed software operations, and the generic operation compiler are
   removed.
@@ -151,6 +156,46 @@ This mode does not fetch, promote, run ordinary service convergence, or own anot
 timer, probe protocol, confirmation state, or success definition. Normal reconciliation and health
 remain the only path that advances `last-successful-commit`.
 
+### Host and service enrollment amendment
+
+[Spec 0034](../specs/active/0034-host-and-service-enrollment.md) extends ordinary reconciliation
+to create declared prerequisites and first-deploy advertised service patterns. This applies to
+additional hosts joining a lab with an existing reachable Vault, and to subsequent additions on
+established hosts. It does not authorize first-lab Vault initialization, disk provisioning or
+implicit adoption of conflicting identities or runtime resources.
+
+Use existing Ansible roles, standard package/account facilities and systemd/Podman dependencies:
+
+- Create declared ordinary users/groups and required named-user runtime foundations before
+  owned files or workloads. Preserve the automation identity, administrative access and reserved
+  runner-unit publication boundaries. UID/GID collisions fail; account renumbering or removal is
+  not ordinary enrollment.
+  Initial protected access publication uses the explicit bootstrap enrollment flag; ordinary
+  reconciliation rejects changed protected access files rather than publishing replacements.
+- Install declared supported packages and complete existing managed local-build workflows before
+  their consumers. Unknown acquisition mechanisms need an explicit design; do not interpret
+  command-oriented software YAML as privileged callbacks.
+- Create missing declared directories, files and supported Quadlet resources. Inspect existing
+  runtime identity/options before compatible reuse; missing files do not authorize destructive
+  volume/network replacement. Preserve application data and existing mutation safeguards.
+- Publish prerequisites and unit definitions before consumer activation. Vault Agent and managed
+  builds activate when their outputs are needed; wait boundedly for required protected outputs
+  before starting consumers. Existing service refreshes use the same activation path.
+- Keep check mode non-mutating. Report checks blocked by absent prerequisites as pending, then
+  perform them in the authorized live path after provisioning and before consumer activation.
+  Pending checks are not proof of readiness and cannot advance the successful baseline.
+
+Bootstrap establishes minimum trust/tooling and invokes these same roles; it is not a parallel
+installer. Its explicitly authorized first reconciliation needs no prior successful revision,
+but records the initial `last-successful-commit` only after required convergence and readiness
+succeed. Failed or interrupted enrollment remains retryable without a false baseline.
+
+This amendment introduces no new inventory ledger, generic operation compiler or recovery
+authority. Package acquisition, account creation and runtime data are not claimed to be
+reversibly undone by Git rollback. Preserve the existing family-specific cleanup and inert-residue
+rules; incompatible or irreversible cases remain operator concerns. Changes to recovery behavior
+still require the staged compatibility delivery described above.
+
 ### Migration boundary
 
 The existing service account, clone, credentials, virtual environment, runner service/timer,
@@ -181,8 +226,8 @@ code and operational concepts. Phase 5.2 includes an explicit go/no-go compariso
 - The migration returns to its original scope: replace common mutation mechanics with Ansible.
 - Recovery has one durable commit point and one target that operators can explain and inspect.
 - Network boot safety adds a constrained early invocation, not another transaction system.
-- Software/package/build execution remains deferred rather than being silently broadened into this
-  migration.
+- Standard package provisioning and existing managed builds are explicit enrollment extensions
+  under Spec 0034; arbitrary command-oriented software execution remains deferred.
 - Recovery depends on the last-successful revision and required inputs remaining in the local Git
   object database; destructive Git maintenance must preserve them.
 - Recovery-affecting runner, renderer, state, playbook, and role changes are first accepted in a
@@ -208,5 +253,6 @@ code and operational concepts. Phase 5.2 includes an explicit go/no-go compariso
 
 - [Spec 0028: Target Host Reconciliation Model](../specs/accepted/0028-target-host-reconciliation-model.md)
 - [Spec 0029: Adaptive Reconciliation Fast Path](../specs/accepted/0029-adaptive-reconciliation-fast-path.md)
+- [Spec 0034: Host and Service Enrollment](../specs/active/0034-host-and-service-enrollment.md)
 - [ADR 0012: Trusted-Revision Ansible Reconciliation](0012-trusted-revision-ansible-reconciliation.md)
 - [Phase 5.2 checklist](../../TODO.md)

@@ -27,7 +27,7 @@ Service configuration uses section-based semantics.
 ### Runtime Context and Container Images
 
 Delivery of this extension is tracked by
-[spec 0032](../specs/active/0032-container-image-authoring.md), including schema, shared
+[spec 0032](../specs/accepted/0032-container-image-authoring.md), including schema, shared
 validation, image resolution and migration evidence.
 
 - `podman` contains only the required runtime fields `user` and `network`. Registry image and
@@ -129,5 +129,5 @@ a separate decision; no generic parent-creation policy is introduced here.
 
 - ADR 0004: Apply Execution Model
 - ADR 0006: Secrets Model and Bootstrap Artifacts
-- [Spec 0032: Container Image Authoring](../specs/active/0032-container-image-authoring.md)
+- [Spec 0032: Container Image Authoring](../specs/accepted/0032-container-image-authoring.md)
 - [Spec 0033: Private Volume Directory Management](../specs/active/0033-private-volume-directory-management.md)

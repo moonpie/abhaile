@@ -1,0 +1,6 @@
+- name: Activate each published rootless user context
+  ansible.builtin.include_tasks: activate_user.yml
+  loop: "{{ abhaile_rootless_publications | default({}) | list | sort }}"
+  loop_control:
+    loop_var: abhaile_rootless_user
+  when: not ansible_check_mode

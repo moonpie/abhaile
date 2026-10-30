@@ -75,6 +75,7 @@ def run_health_audit(
         )
     )
     results.extend(_check_podman_images(manifest, timeout_seconds=timeout_seconds))
+    results.extend(_check_rootless_units(manifest, timeout_seconds=timeout_seconds))
     results.extend(_check_obsolete_image_units(manifest, timeout_seconds=timeout_seconds))
     if not actionable:
         results.extend(
@@ -356,9 +357,13 @@ def _check_system_units(
         unit = owner_ref.split(":", 1)[1]
         if kind in {"quadlet.container", "quadlet.pod"} and unit.endswith(".service"):
             units.add(unit)
-        if kind == "systemd.unit" and (
+        if kind in {"systemd.unit", "systemd.dropin"} and (
             unit in {"coredns.service", "vault.service"}
-            or (actionable and isinstance(hints, dict) and hints.get("activation_mode") == "start")
+            or (
+                actionable
+                and isinstance(hints, dict)
+                and hints.get("activation_mode") in {"start", "start-now"}
+            )
         ):
             units.add(unit)
 
@@ -372,13 +377,84 @@ def _check_system_units(
         except (OSError, subprocess.TimeoutExpired) as exc:
             results.append(HealthResult(f"unit-active:{unit}", False, str(exc)))
             continue
+        completed = False
+        if result.returncode != 0 and unit.endswith(".service"):
+            completed = _completed_oneshot(unit, timeout_seconds=timeout_seconds)
         results.append(
             HealthResult(
                 f"unit-active:{unit}",
-                result.returncode == 0,
+                result.returncode == 0 or completed,
                 result.stderr.strip() or result.stdout.strip(),
             )
         )
+    return results
+
+
+def _completed_oneshot(unit: str, *, timeout_seconds: int) -> bool:
+    """Accept a successfully executed oneshot that does not remain active."""
+    try:
+        result = _command(
+            [
+                "systemctl",
+                "show",
+                unit,
+                "--property=Type,ActiveState,Result,ExecMainStatus,ExecMainStartTimestampMonotonic",
+            ],
+            timeout_seconds=timeout_seconds,
+        )
+        properties = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        return (
+            result.returncode == 0
+            and properties.get("Type") == "oneshot"
+            and properties.get("ActiveState") == "inactive"
+            and properties.get("Result") == "success"
+            and properties.get("ExecMainStatus") == "0"
+            and int(properties.get("ExecMainStartTimestampMonotonic", "0")) > 0
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False
+
+
+def _check_rootless_units(manifest: dict[str, Any], *, timeout_seconds: int) -> list[HealthResult]:
+    """Check generic rootless workloads in their declared user managers."""
+    results: list[HealthResult] = []
+    entries = manifest.get("entries", [])
+    if not isinstance(entries, list):
+        return results
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        hints = entry.get("apply_hints")
+        if not isinstance(hints, dict):
+            continue
+        if not hints.get("rootless") or entry.get("kind") not in {
+            "quadlet.container",
+            "quadlet.pod",
+        }:
+            continue
+        owner = entry.get("owner_ref")
+        if not isinstance(owner, str) or not owner.startswith("unit:"):
+            continue
+        unit = owner.removeprefix("unit:")
+        if unit == "vault-agent.service":
+            continue
+        user = hints.get("podman_user")
+        try:
+            if not isinstance(user, str) or not user:
+                raise ValueError("Missing rootless runtime user")
+            result = _command(
+                ["systemctl", "--user", "-M", f"{user}@", "is-active", "--quiet", unit],
+                timeout_seconds=timeout_seconds,
+            )
+            results.append(
+                HealthResult(
+                    f"rootless-unit-active:{user}:{unit}",
+                    result.returncode == 0,
+                    result.stderr.strip(),
+                )
+            )
+        except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+            results.append(HealthResult(f"rootless-unit-active:{user}:{unit}", False, str(exc)))
     return results
 
 

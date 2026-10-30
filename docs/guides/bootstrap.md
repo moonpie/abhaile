@@ -8,6 +8,8 @@ come from `config/`, `docs/INVENTORY.md`, and operator-owned secret material.
 ## 1. Prerequisites
 
 - Debian 13 (trixie) installation complete.
+- Working package/repository access and external DNS, identified management interfaces, and local
+  storage are available independently of the services being enrolled.
 - The host name is set and present in both:
   - `config/mapping.yaml`
   - `config/network.yaml`
@@ -30,6 +32,19 @@ Bootstrap assumes the host can already reach GitHub and Vault. It prepares the l
 runtime, consumes the sealed host handoff, and performs the first live render/apply. It does not
 create external trust material or configure Vault.
 
+[Active spec 0034](../specs/active/0034-host-and-service-enrollment.md) tracks the additional-host
+enrollment extension and its implementation evidence. This means joining a lab with existing Vault;
+it is not first-lab creation, Vault initialization/unsealing, disk formatting or NAS adoption.
+The operator supplies the supported Debian baseline, access, identified interfaces and local storage.
+Ordinary reconciliation then provisions declared supported accounts, packages and service resources
+in dependency order. Bootstrap supplies minimum trust/tooling and uses those same roles.
+
+The initial successful revision is recorded only after required convergence and runtime readiness.
+Check mode does not create missing prerequisites or start workloads; checks that depend on them
+remain visibly pending until the authorized live path provisions and validates them before consumer
+activation. A missing required secret output is an enrollment failure, not a successful handoff.
+An interrupted first enrollment must be retryable without recording an incomplete baseline.
+
 | Operator prepares before running bootstrap | Bootstrap script handles |
 | --- | --- |
 | Debian 13 install, hostname, temporary network, and console fallback | Root/preflight checks and basic GitHub connectivity check |
@@ -44,6 +59,19 @@ create external trust material or configure Vault.
 Bootstrap creates the `abhaile` user/group when missing, installs host packages required for the
 bootstrap path, installs pinned `sops` and Vault CLI binaries, creates the Python virtual
 environment, and enables `systemd-networkd` and `systemd-resolved`.
+
+The minimum tooling includes `python3-apt` and Ansible so ordinary roles can install declared
+standard packages. Those roles also establish declared users/groups and supported rootless
+foundations before their dependent files and services. Software action records do not become an
+arbitrary command runner: downloads, command-oriented builds and commands remain unexecuted.
+Existing managed Quadlet builds are a separate supported path. Record any remaining hardware,
+driver, firmware or unsupported acquisition prerequisites before enrollment.
+
+Bootstrap passes the explicit `abhaile_bootstrap_enrollment: true` flag for the initial protected
+access publication. Ordinary reconciliation rejects changed protected automation access contents;
+it does not overwrite those contents to repair drift. Changing those foundations requires the reviewed
+bootstrap/operator path, not passing that flag to a routine runner invocation. Reserved runner
+units retain their separate quiescent publication procedure.
 
 Bootstrap does not create age identities, deploy keys, GitHub deploy-key authorization, Vault
 policies, Vault AppRoles, sealed SOPS artifacts, response-wrapped SecretIDs, switch/router/VLAN
@@ -75,6 +103,12 @@ acceptable when you need to place files before running the script.
 
 The host needs temporary network access for package installation, Git clone/pull, Vault AppRole
 SecretID handoff, and optional script download.
+
+The supported baseline uses systemd-networkd and systemd-resolved. An existing host still owned by
+another network backend requires the explicit networkd adoption procedure before ordinary
+reconciliation; bootstrap does not silently take over or disable a legacy backend. Ensure external
+DNS remains usable while enrolling any local DNS services. VLAN intent manages host interfaces,
+not switch/router configuration.
 
 If the installer did not leave working network configuration in place, configure a temporary
 address from the host's intended management network:

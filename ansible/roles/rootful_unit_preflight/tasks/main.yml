@@ -76,6 +76,11 @@
       check_mode: false
       changed_when: false
       when: abhaile_rootful_quadlet_entries | length > 0
+    - name: Report executable validation pending prerequisite convergence
+      ansible.builtin.debug:
+        msg: Full executable validation is pending declared packages and managed builds; it runs before live workload
+          activation
+      when: abhaile_defer_executable_validation | default(false)
     - name: Verify complete desired rootful unit graph
       ansible.builtin.command:
         argv:
@@ -94,6 +99,7 @@
         + abhaile_rootful_quadlet_entries }}
       loop_control:
         label: "{{ item.owner_ref }}"
+      when: not abhaile_defer_executable_validation | default(false)
   always:
     - name: Remove disposable rootful unit validation directory
       ansible.builtin.file:

@@ -269,15 +269,15 @@ def test_manifest_selection_accepts_rootful_quadlet_cleanup(tmp_path: Path) -> N
 
 
 @pytest.mark.integration
-def test_manifest_selection_rejects_rootless_quadlet_cleanup(tmp_path: Path) -> None:
-    """Keep rootless candidate removal outside the supported cleanup boundary."""
+def test_manifest_selection_routes_rootless_quadlet_cleanup(tmp_path: Path) -> None:
+    """Route named-user candidate files to the identity-checked rootless cleanup role."""
     code, _stdout, _stderr = _run_selection(
         tmp_path,
         [],
         cleanup_entries=[_entry("quadlet.container", "unit:obsolete.service", rootless=True)],
     )
 
-    assert code != 0
+    assert code == 0
 
 
 @pytest.mark.integration
@@ -416,15 +416,26 @@ def test_manifest_orchestration_uses_fixed_dependency_order() -> None:
         if "ansible.builtin.include_role" in task or "ansible.builtin.include_tasks" in task
     ]
 
-    assert calls == [
-        "managed_directories",
-        "rootful_unit_preflight",
-        "rootful_systemd",
-        "service_owner.yml",
-        "vault_agent_config",
-        "rootful_quadlet_files",
-        "caddy_owner.yml",
-        "coredns_config",
-        "networkd_config",
-        "local_acceptance",
+    assert calls.index("host_foundations") < calls.index("managed_directories")
+    assert calls.index("networkd_config") < calls.index("rootful_quadlet_files")
+    assert calls.index("service_owner.yml") < calls.index("rootful_quadlet_files")
+    assert calls.index("rootful_systemd") < calls.index("rootful_quadlet_files")
+    phases = [
+        (
+            task.get("ansible.builtin.include_role", {}).get("name"),
+            task.get("ansible.builtin.include_role", {}).get("tasks_from"),
+        )
+        for task in tasks
     ]
+    assert phases.index(("rootful_quadlet_files", "builds.yml")) < phases.index(
+        ("rootful_quadlet_files", "activate.yml")
+    )
+    assert phases.index(("coredns_config", None)) < phases.index(
+        ("rootful_systemd", "activate.yml")
+    )
+    caddy_index = next(
+        i
+        for i, task in enumerate(tasks)
+        if task.get("ansible.builtin.include_tasks") == "caddy_owner.yml"
+    )
+    assert caddy_index < phases.index(("rootful_quadlet_files", "activate.yml"))

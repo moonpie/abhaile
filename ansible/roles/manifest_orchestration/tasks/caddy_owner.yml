@@ -2,4 +2,5 @@
   ansible.builtin.include_role:
     name: caddy_config
   vars:
+    abhaile_defer_activation: true
     abhaile_caddy_config_entries: ["{{ abhaile_caddy_entry }}"]

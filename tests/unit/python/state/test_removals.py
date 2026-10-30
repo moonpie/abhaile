@@ -193,3 +193,46 @@ def test_invalid_identity_metadata_is_rejected(tmp_path: Path, field: str, value
 
     with pytest.raises(DiffError, match=f"invalid {field}"):
         classify_manifest_removals(desired, previous)
+
+
+@pytest.mark.parametrize("host", ["phobos", "deimos"])
+@pytest.mark.parametrize("drifted", [False, True])
+def test_recovery_retains_candidate_package_inventory_without_cleanup(
+    tmp_path: Path, host: str, drifted: bool
+) -> None:
+    """Retain additive package inventory while still classifying ordinary candidate files."""
+    packages = tmp_path / "packages.txt"
+    declared_packages = "podman\nuidmap\n"
+    live_packages = "podman\nuidmap\nvim\n" if drifted else declared_packages
+    packages.write_text(live_packages)
+    ordinary = tmp_path / "candidate.conf"
+    ordinary.write_text("candidate=yes\n")
+    accepted = tmp_path / "accepted.json"
+    candidate = tmp_path / "candidate.json"
+    _manifest(accepted, host, [])
+    _manifest(
+        candidate,
+        host,
+        [
+            _entry(
+                packages,
+                declared_packages,
+                kind="host.packages",
+                owner_ref=f"host-packages:{host}",
+            ),
+            _entry(ordinary, "candidate=yes\n"),
+        ],
+    )
+
+    result = classify_candidate_only_files(
+        accepted,
+        candidate,
+        directory_residue_kinds={"networkd.dropin", "service.directory"},
+        file_residue_kinds={"caddy.config", "host.packages"},
+    )
+
+    assert result["blocked"] == []
+    assert result["missing"] == []
+    assert [entry["target_path"] for entry in result["identity_matches"]] == [str(ordinary)]
+    assert packages.read_text() == live_packages
+    assert ordinary.read_text() == "candidate=yes\n"

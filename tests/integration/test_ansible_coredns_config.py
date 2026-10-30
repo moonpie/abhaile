@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from tests.integration.test_ansible_scaffold import _ansible, _closed_environment
+from tests.integration.test_ansible_caddy_config import _run_runtime_role
 
 
 def _entry(
@@ -228,3 +229,50 @@ def test_coredns_runtime_validates_before_one_watcher_safe_batch() -> None:
     assert batch["always"][0]["ansible.builtin.systemd_service"]["state"] == "started"
     assert "abhaile_coredns_batch_changed" in batch["block"][0]["when"]
     assert "abhaile_coredns_batch_changed" in batch["always"][0]["when"]
+
+
+@pytest.mark.integration
+def test_coredns_first_publication_defers_consumer_activation(tmp_path: Path) -> None:
+    """Publish the complete new batch before any consumer restart or watcher restoration."""
+    rendered = tmp_path / "rendered"
+    entries = _entries(rendered)
+    code, output, calls = _run_runtime_role(
+        tmp_path,
+        "coredns_config",
+        {
+            "abhaile_rendered_root": str(rendered),
+            "abhaile_coredns_entries": entries,
+            "abhaile_coredns_cleanup_entries": [],
+        },
+        check=False,
+    )
+    assert code == 0, output
+    for entry in entries:
+        assert (
+            Path(str(entry["target_path"])).read_bytes()
+            == (rendered / str(entry["render_path"])).read_bytes()
+        )
+    runtime_calls = [call["argv"] for call in calls if call["argv"][:1] == ["systemd"]]
+    # Stop coordination remains intentional for a watcher-safe publication batch.
+    assert runtime_calls == [["systemd", "stopped", "coredns-zones.path"]]
+
+
+@pytest.mark.integration
+def test_coredns_check_accepts_managed_absent_parents(tmp_path: Path) -> None:
+    """Check newly declared parents without publishing config or changing runtime state."""
+    rendered = tmp_path / "rendered"
+    entries = _entries(rendered)
+    code, output, calls = _run_runtime_role(
+        tmp_path,
+        "coredns_config",
+        {
+            "abhaile_rendered_root": str(rendered),
+            "abhaile_coredns_entries": entries,
+            "abhaile_coredns_cleanup_entries": [],
+        },
+        check=True,
+        create_parents=False,
+    )
+    assert code == 0, output
+    assert all(not Path(str(entry["target_path"])).parent.exists() for entry in entries)
+    assert all(call["argv"][:1] != ["systemd"] for call in calls)

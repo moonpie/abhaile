@@ -81,7 +81,10 @@
         "destination": {
           "type": "string",
           "description": "Destination path on target system (absolute path)"
-        }
+        },
+        "owner": {"type": "string", "minLength": 1},
+        "group": {"type": "string", "minLength": 1},
+        "mode": {"type": "string", "pattern": "^0[0-7]{3}$"}
       },
       "not": {
         "required": ["source"]

@@ -1,0 +1,20 @@
+- name: Read the declared package inventory
+  ansible.builtin.slurp:
+    src: "{{ abhaile_rendered_root }}/{{ abhaile_package_entry.render_path }}"
+  register: abhaile_package_source
+- name: Select declared package identifiers
+  ansible.builtin.set_fact:
+    abhaile_host_packages: "{{ (abhaile_package_source.content | b64decode).splitlines() }}"
+- name: Require standard package identifiers
+  ansible.builtin.assert:
+    that:
+      - abhaile_host_packages | reject('match', '^[a-z0-9][a-z0-9+.-]*(?::[a-z0-9][a-z0-9-]*)?(?:=[A-Za-z0-9.+:~_-]+)?$')
+        | list | length == 0
+    fail_msg: Declared package inventory contains an unsupported package identifier
+    quiet: true
+- name: Install declared packages through the native package manager
+  ansible.builtin.apt:
+    name: "{{ abhaile_host_packages }}"
+    state: present
+    policy_rc_d: "{{ omit if ansible_check_mode else 101 }}"
+  when: abhaile_host_packages | length > 0

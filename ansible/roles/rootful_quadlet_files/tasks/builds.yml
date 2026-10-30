@@ -1,0 +1,34 @@
+- name: Reset consumers restarted by managed rootful builds
+  ansible.builtin.set_fact:
+    abhaile_rebuilt_rootful_consumers: []
+  when: not ansible_check_mode
+- name: Observe existing managed rootful build output images
+  ansible.builtin.command:
+    argv:
+      - "{{ abhaile_podman_binary | default('/usr/bin/podman') }}"
+      - image
+      - exists
+      - "{{ item.item.apply_hints.managed_build.output_image }}"
+  changed_when: false
+  failed_when: abhaile_build_image_probe.rc not in [0, 1]
+  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  register: abhaile_build_image_probe
+  when:
+    - not ansible_check_mode
+    - item.item.kind == 'quadlet.build'
+- name: Run changed managed rootful builds
+  ansible.builtin.include_tasks: converge_build.yml
+  loop: "{{ abhaile_build_image_probe.results }}"
+  loop_control:
+    loop_var: abhaile_build_observation
+    label: "{{ abhaile_build_observation.item.item.owner_ref }}"
+  vars:
+    abhaile_build_publication: "{{ abhaile_build_observation.item }}"
+  when:
+    - not ansible_check_mode
+    - not abhaile_build_observation.skipped | default(false)
+    - >-
+      abhaile_build_publication.changed or abhaile_build_observation.rc == 1 or 'service:' ~ abhaile_build_publication.item.apply_hints.managed_build.service
+      in abhaile_changed_service_config_owners | default([])

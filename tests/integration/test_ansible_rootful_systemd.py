@@ -298,7 +298,9 @@ def test_rootful_systemd_rejects_unsafe_candidate_cleanup(
 
 def test_rootful_systemd_repairs_enablement_and_activation_without_file_change() -> None:
     """Keep desired unit enablement and activation independent of publication drift."""
-    role_path = Path(__file__).resolve().parents[2] / "ansible/roles/rootful_systemd/tasks/main.yml"
+    role_path = (
+        Path(__file__).resolve().parents[2] / "ansible/roles/rootful_systemd/tasks/activate.yml"
+    )
     tasks = yaml.safe_load(role_path.read_text(encoding="utf-8"))
 
     for task_name in ["Enable declared rootful units", "Start declared rootful units"]:
@@ -308,7 +310,7 @@ def test_rootful_systemd_repairs_enablement_and_activation_without_file_change()
     restart = next(
         item for item in tasks if item.get("name") == "Apply declared rootful unit restart"
     )
-    assert "item.changed" in restart["when"]
+    assert "item.changed or unit_config_changed" in restart["when"]
     assert any("activation_mode" in condition for condition in restart["when"])
     assert "else 'try-restart'" in restart["ansible.builtin.command"]["argv"][1]
     assert restart["vars"]["supported_restart_modes"] == [

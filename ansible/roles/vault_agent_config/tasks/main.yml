@@ -363,3 +363,13 @@
       - vault-agent.service
   changed_when: false
   when: not ansible_check_mode
+- name: Wait for declared Vault Agent outputs before their consumers
+  ansible.builtin.wait_for:
+    path: "{{ item }}"
+    state: present
+    timeout: 60
+  loop: "{{ (abhaile_vault_agent_entries | selectattr('kind', 'equalto', 'vault.config') | first).apply_hints.required_outputs
+    | default([]) }}"
+  loop_control:
+    label: "{{ item | basename }}"
+  when: not ansible_check_mode

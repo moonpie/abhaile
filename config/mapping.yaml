@@ -10,7 +10,6 @@ abhaile:
       - vault-agent
       - authelia
       - omada-controller
-      - mosquitto
   - deimos:
       - chrony-b
       - coredns-b

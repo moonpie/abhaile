@@ -42,6 +42,28 @@
     label: "{{ item.render_path }}"
   when: not item.is_directory | default(false)
   register: abhaile_preflight_source_stats
+- name: Inspect managed target leaf identities without following links
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop: "{{ abhaile_preflight_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_preflight_target_stats
+- name: Refuse redirected or conflicting managed target leaves
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or (item.stat.isdir | default(false) if item.item.is_directory | default(false) else
+        item.stat.isreg | default(false))
+    fail_msg: Managed target is a symlink or has an incompatible resource type
+    quiet: true
+  loop: "{{ abhaile_preflight_target_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
 - name: Validate rendered manifest source identity
   ansible.builtin.assert:
     that:

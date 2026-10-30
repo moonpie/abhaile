@@ -122,6 +122,23 @@
     label: "{{ item.owner_ref }}"
   when: item.kind == 'quadlet.build'
   tags: [quadlet_preflight]
+- name: Inspect the fixed rootful Quadlet directory
+  ansible.builtin.stat:
+    path: /etc/containers/systemd
+    follow: false
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  register: abhaile_rootful_quadlet_directory
+  tags: [quadlet_preflight]
+- name: Require a missing or real rootful Quadlet directory
+  ansible.builtin.assert:
+    that:
+      - not abhaile_rootful_quadlet_directory.stat.islnk | default(false)
+      - not abhaile_rootful_quadlet_directory.stat.exists or abhaile_rootful_quadlet_directory.stat.isdir | default(false)
+    fail_msg: Rootful Quadlet directory is an existing file or symlink
+    quiet: true
+  tags: [quadlet_preflight]
 - name: Inspect deferred-lifecycle rootful Quadlet targets
   ansible.builtin.stat:
     path: "{{ item.target_path }}"
@@ -157,19 +174,31 @@
     rootful_quadlet_pod_owner_refs: "{{ abhaile_rootful_quadlet_entries | selectattr('kind', 'equalto', 'quadlet.pod')
       | map(attribute='owner_ref') | list }}"
   tags: [quadlet_preflight]
-- name: Refuse deferred rootful Quadlet lifecycle changes
+- name: Refuse existing auxiliary rootful Quadlet definition changes
   ansible.builtin.assert:
     that:
-      - item.stat.exists
-      - item.stat.isreg
-      - not item.stat.islnk
-      - item.stat.checksum == item.item.sha256
-    fail_msg: Rootful Quadlet change requires a later family-specific lifecycle slice
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or (item.stat.isreg | default(false) and item.stat.checksum | default('') == item.item.sha256)
+    fail_msg: Existing auxiliary Quadlet changes require an explicit resource migration
     quiet: true
   loop: "{{ abhaile_deferred_quadlet_targets.results }}"
   loop_control:
     label: "{{ item.item.target_path }}"
   when: not item.skipped | default(false)
+  tags: [quadlet_preflight]
+- name: Validate runtime objects before enrolling missing auxiliary Quadlets
+  ansible.builtin.include_tasks:
+    file: preflight_resource.yml
+    apply:
+      tags: [quadlet_preflight]
+  loop: "{{ abhaile_deferred_quadlet_targets.results }}"
+  loop_control:
+    loop_var: abhaile_auxiliary_target
+    label: "{{ abhaile_auxiliary_target.item.target_path }}"
+  when:
+    - not abhaile_auxiliary_target.skipped | default(false)
+    - not abhaile_auxiliary_target.stat.exists
+    - abhaile_auxiliary_target.item.kind in ['quadlet.volume', 'quadlet.network']
   tags: [quadlet_preflight]
 - name: Inspect candidate-only rootful Quadlet generated units
   ansible.builtin.command:
@@ -246,6 +275,21 @@
   loop_control:
     label: "{{ item.item.target_path }}"
   register: abhaile_rootful_quadlet_removals
+- name: Ensure the fixed rootful Quadlet directory exists
+  ansible.builtin.file:
+    path: /etc/containers/systemd
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+- name: Report rootful Quadlets planned beneath their missing directory
+  ansible.builtin.debug:
+    msg: Rootful Quadlets will be published after their directory is created
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not abhaile_rootful_quadlet_directory.stat.exists
+    - abhaile_rootful_quadlet_entries | length > 0
 - name: Publish rootful Quadlet files
   ansible.builtin.copy:
     src: "{{ abhaile_rendered_root }}/{{ item.render_path }}"
@@ -258,6 +302,7 @@
   loop_control:
     label: "{{ item.target_path }}"
   register: abhaile_rootful_quadlet_publications
+  when: not ansible_check_mode or abhaile_rootful_quadlet_directory.stat.exists
 - name: Reload the system manager after rootful Quadlet publication
   ansible.builtin.systemd_service:
     daemon_reload: true
@@ -313,101 +358,9 @@
     - not ansible_check_mode
     - rootful_quadlet_changed
   vars: *rootful_quadlet_change_vars
-- name: Reset consumers restarted by managed rootful builds
-  ansible.builtin.set_fact:
-    abhaile_rebuilt_rootful_consumers: []
-  when: not ansible_check_mode
-- name: Run changed managed rootful builds
-  ansible.builtin.include_tasks: converge_build.yml
-  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
-  loop_control:
-    loop_var: abhaile_build_publication
-    label: "{{ abhaile_build_publication.item.owner_ref }}"
-  when:
-    - not ansible_check_mode
-    - abhaile_build_publication.item.kind == 'quadlet.build'
-    - >-
-      abhaile_build_publication.changed or 'service:' ~ abhaile_build_publication.item.apply_hints.managed_build.service
-      in abhaile_changed_service_config_owners | default([])
-- name: Start or restart changed automatic rootful containers and pods
-  ansible.builtin.systemd_service:
-    name: "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
-    state: restarted
-  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
-  loop_control:
-    label: "{{ item.item.owner_ref }}"
-  when:
-    - not ansible_check_mode
-    - item.changed
-    - item.item.kind in ['quadlet.container', 'quadlet.pod']
-    - item.item.apply_hints.restart_mode | default('try-restart') != 'manual'
-    - >-
-      item.item.owner_ref | regex_replace('^unit:', '') not in abhaile_rebuilt_rootful_consumers | default([])
-- name: Ensure automatic rootful containers and pods are started
-  ansible.builtin.systemd_service:
-    name: "{{ item.owner_ref | regex_replace('^unit:', '') }}"
-    state: started
-  loop: "{{ abhaile_rootful_quadlet_entries }}"
-  loop_control:
-    label: "{{ item.owner_ref }}"
-  when:
-    - not ansible_check_mode
-    - item.kind in ['quadlet.container', 'quadlet.pod']
-    - item.apply_hints.restart_mode | default('try-restart') != 'manual'
-- name: Reset changed manual rootful parent pods
-  ansible.builtin.set_fact:
-    abhaile_changed_rootful_parent_pods: []
-- name: Collect parent pods for changed manual rootful containers
-  ansible.builtin.set_fact:
-    abhaile_changed_rootful_parent_pods: "{{ (abhaile_changed_rootful_parent_pods | default([])) + (abhaile_rootful_quadlet_owners[item.item.owner_ref].requires
-      | intersect(rootful_quadlet_pod_owner_refs)) }}"
-  loop: "{{ abhaile_rootful_quadlet_publications.results }}"
-  loop_control:
-    label: "{{ item.item.owner_ref }}"
-  when:
-    - not ansible_check_mode
-    - item.changed
-    - item.item.kind == 'quadlet.container'
-    - item.item.apply_hints.restart_mode | default('try-restart') == 'manual'
-  vars:
-    rootful_quadlet_pod_owner_refs: "{{ abhaile_rootful_quadlet_entries | selectattr('kind', 'equalto', 'quadlet.pod')
-      | map(attribute='owner_ref') | list }}"
-- name: Start or restart parent pods for changed manual rootful containers
-  ansible.builtin.systemd_service:
-    name: "{{ item | regex_replace('^unit:', '') }}"
-    state: restarted
-  loop: "{{ abhaile_changed_rootful_parent_pods | default([]) | unique }}"
-  loop_control:
-    label: "{{ item }}"
-  when: item not in changed_rootful_pod_owner_refs
-  vars: &changed_rootful_pod_vars
-    changed_rootful_pod_owner_refs: "{{ abhaile_rootful_quadlet_publications.results | selectattr('changed') | selectattr('item.kind',
-      'equalto', 'quadlet.pod') | map(attribute='item.owner_ref') | list }}"
-- name: Verify parent pods for changed manual rootful containers are active
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/systemctl
-      - is-active
-      - --quiet
-      - "{{ item | regex_replace('^unit:', '') }}"
-  changed_when: false
-  loop: "{{ abhaile_changed_rootful_parent_pods | default([]) | unique }}"
-  loop_control:
-    label: "{{ item }}"
-  when: item not in changed_rootful_pod_owner_refs
-  vars: *changed_rootful_pod_vars
-- name: Verify automatic rootful containers and pods are active
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/systemctl
-      - is-active
-      - --quiet
-      - "{{ item.owner_ref | regex_replace('^unit:', '') }}"
-  changed_when: false
-  loop: "{{ abhaile_rootful_quadlet_entries }}"
-  loop_control:
-    label: "{{ item.owner_ref }}"
-  when:
-    - not ansible_check_mode
-    - item.kind in ['quadlet.container', 'quadlet.pod']
-    - item.apply_hints.restart_mode | default('try-restart') != 'manual'
+- name: Build managed rootful prerequisites before runtime activation
+  ansible.builtin.include_tasks: builds.yml
+  when: not abhaile_defer_activation | default(false)
+- name: Activate published rootful workloads
+  ansible.builtin.include_tasks: activate.yml
+  when: not abhaile_defer_activation | default(false)

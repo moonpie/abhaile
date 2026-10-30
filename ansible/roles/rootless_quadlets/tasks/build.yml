@@ -1,0 +1,82 @@
+- name: Observe the managed image in the selected user's Podman store
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_podman_binary | default(''/usr/bin/podman'') }}'
+      - image
+      - exists
+      - '{{ abhaile_rootless_build.item.apply_hints.managed_build.output_image }}'
+  become: '{{ (abhaile_rootless_current_identity.stdout | default(''0'') | trim) != (abhaile_rootless_context.uid
+    | string) }}'
+  become_user: '{{ abhaile_rootless_user }}'
+  environment:
+    HOME: '{{ abhaile_rootless_context.home }}'
+    XDG_RUNTIME_DIR: /run/user/{{ abhaile_rootless_context.uid }}
+  register: abhaile_rootless_build_image
+  changed_when: false
+  failed_when: abhaile_rootless_build_image.rc not in [0, 1]
+- name: Build changed or missing rootless images
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - restart
+      - '{{ abhaile_rootless_build.item.owner_ref | regex_replace(''^unit:'', '''') }}'
+  changed_when: true
+  when: build_needed
+  vars: &id001
+    build_needed: '{{ abhaile_rootless_build.changed or abhaile_rootless_build_image.rc == 1 or ''service:'' ~ abhaile_rootless_build.item.apply_hints.managed_build.service
+      in abhaile_changed_service_config_owners | default([]) }}'
+- name: Verify the managed rootless build output image
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_podman_binary | default(''/usr/bin/podman'') }}'
+      - image
+      - exists
+      - '{{ abhaile_rootless_build.item.apply_hints.managed_build.output_image }}'
+  become: '{{ (abhaile_rootless_current_identity.stdout | default(''0'') | trim) != (abhaile_rootless_context.uid
+    | string) }}'
+  become_user: '{{ abhaile_rootless_user }}'
+  environment:
+    HOME: '{{ abhaile_rootless_context.home }}'
+    XDG_RUNTIME_DIR: /run/user/{{ abhaile_rootless_context.uid }}
+  changed_when: false
+- name: Complete a declared rootless post-build install unit
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - start
+      - '{{ abhaile_rootless_build.item.apply_hints.managed_build.post_build.install_unit }}'
+  when:
+    - build_needed
+    - abhaile_rootless_build.item.apply_hints.managed_build.post_build is defined
+  changed_when: true
+  vars: *id001
+- name: Inspect an optional rootless post-build executable
+  ansible.builtin.stat:
+    path: '{{ abhaile_rootless_build.item.apply_hints.managed_build.post_build.verify_binary }}'
+    follow: false
+  become: '{{ (abhaile_rootless_current_identity.stdout | default(''0'') | trim) != (abhaile_rootless_context.uid
+    | string) }}'
+  become_user: '{{ abhaile_rootless_user }}'
+  register: abhaile_rootless_post_build_binary
+  when: abhaile_rootless_build.item.apply_hints.managed_build.post_build.verify_binary is defined
+- name: Require a valid rootless post-build executable when declared
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootless_post_build_binary.stat.exists
+      - abhaile_rootless_post_build_binary.stat.isreg
+      - not abhaile_rootless_post_build_binary.stat.islnk
+      - abhaile_rootless_post_build_binary.stat.executable
+    quiet: true
+  when: abhaile_rootless_build.item.apply_hints.managed_build.post_build.verify_binary is defined
+- name: Retain rootless consumers requiring refresh after builds
+  ansible.builtin.set_fact:
+    abhaile_rootless_build_consumers: '{{ (abhaile_rootless_build_consumers | default([])) + (abhaile_rootless_build.item.apply_hints.managed_build.consumers
+      | map(''regex_replace'', ''^'', ''unit:'') | list) }}'
+  when: build_needed
+  vars: *id001

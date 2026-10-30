@@ -207,6 +207,18 @@
     - not ansible_check_mode
     - not abhaile_networkd_early_restore | default(false)
     - abhaile_changed_networkd_owners | length > 0
+- name: Wait for newly declared network interfaces after networkd reload
+  ansible.builtin.command:
+    argv: [/usr/sbin/ip, link, show, dev, "{{ item | regex_replace('^iface:', '') }}"]
+  register: abhaile_networkd_link_ready
+  changed_when: false
+  retries: 10
+  delay: 1
+  until: abhaile_networkd_link_ready.rc == 0
+  loop: "{{ abhaile_changed_networkd_owners | unique }}"
+  when:
+    - not ansible_check_mode
+    - not abhaile_networkd_early_restore | default(false)
 - name: Reconfigure changed networkd owners in manifest order
   ansible.builtin.command:
     argv:

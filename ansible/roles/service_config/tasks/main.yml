@@ -167,63 +167,22 @@
     service_config_changed: >-
       {{ (abhaile_service_config_publications.results | default([]) | selectattr('changed') | list | length > 0)
       or (abhaile_service_config_removals.results | default([]) | selectattr('changed') | list | length > 0) }}
-- name: Apply the rootful owner restart once
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/systemctl
-      - try-restart
-      - "{{ owner_hints.restart_unit }}"
-  changed_when: true
+- name: Record deferred service configuration restart
+  ansible.builtin.set_fact:
+    abhaile_service_config_restarts: "{{ (abhaile_service_config_restarts | default([])) + [owner_hints | combine({'rootless':
+      owner_hints.rootless | default(false)})] }}"
   when:
     - not ansible_check_mode
     - service_config_changed
-    - not owner_hints.rootless | default(false)
     - owner_hints.restart_unit | default(none) is not none
   vars: *service_config_runtime_vars
-- name: Verify the rootful owner unit is active
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/systemctl
-      - is-active
-      - --quiet
-      - "{{ owner_hints.restart_unit }}"
-  changed_when: false
+- name: Refresh service configuration owner when activation is immediate
+  ansible.builtin.include_tasks: activate.yml
   when:
+    - not abhaile_defer_activation | default(false)
     - not ansible_check_mode
     - service_config_changed
-    - not owner_hints.rootless | default(false)
     - owner_hints.restart_unit | default(none) is not none
-  vars: *service_config_runtime_vars
-- name: Apply the rootless owner restart once
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/systemctl
-      - --user
-      - -M
-      - "{{ owner_hints.podman_user }}@"
-      - try-restart
-      - "{{ owner_hints.restart_unit }}"
-  changed_when: true
-  when:
-    - not ansible_check_mode
-    - service_config_changed
-    - owner_hints.rootless | default(false)
-    - owner_hints.restart_unit | default(none) is not none
-  vars: *service_config_runtime_vars
-- name: Verify the rootless owner unit is active
-  ansible.builtin.command:
-    argv:
-      - /usr/bin/systemctl
-      - --user
-      - -M
-      - "{{ owner_hints.podman_user }}@"
-      - is-active
-      - --quiet
-      - "{{ owner_hints.restart_unit }}"
-  changed_when: false
-  when:
-    - not ansible_check_mode
-    - service_config_changed
-    - owner_hints.rootless | default(false)
-    - owner_hints.restart_unit | default(none) is not none
-  vars: *service_config_runtime_vars
+  vars:
+    !!merge <<: *service_config_runtime_vars
+    abhaile_config_restart: "{{ owner_hints }}"

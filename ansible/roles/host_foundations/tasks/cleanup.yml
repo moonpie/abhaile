@@ -1,0 +1,79 @@
+- name: Require bounded candidate-only principal key identities
+  ansible.builtin.assert:
+    that:
+      - item is mapping
+      - item.kind == 'host.authorized_keys'
+      - item.owner_ref is match('^principal:[a-z_][a-z0-9_-]*[$]?$')
+      - principal not in ['root', 'abhaile']
+      - item.apply_hints is mapping
+      - item.apply_hints.owner_user == principal
+      - home is string
+      - home.startswith('/')
+      - home not in ['/', '/root', '/home/abhaile']
+      - "'//' not in home"
+      - "'/../' not in home"
+      - "'/./' not in home"
+      - not home.endswith('/..')
+      - not home.endswith('/.')
+      - not home.endswith('/')
+      - item.target_path == home ~ '/.ssh/authorized_keys'
+      - item.target_path not in ['/root/.ssh/authorized_keys', '/home/abhaile/.ssh/authorized_keys']
+      - item.candidate_sha256 is string
+      - item.candidate_sha256 is match('^[0-9a-f]{64}$')
+      - item.live_sha256 == item.candidate_sha256
+      - item.target_path not in desired_targets
+    fail_msg: Candidate-only key cleanup requires a matching ordinary principal identity
+    quiet: true
+  vars:
+    principal: "{{ item.owner_ref | regex_replace('^principal:', '') }}"
+    home: "{{ item.apply_hints.home | default('') }}"
+    desired_targets: "{{ abhaile_host_foundation_entries | map(attribute='target_path') | list }}"
+  loop: "{{ abhaile_host_foundation_cleanup_entries }}"
+  loop_control:
+    label: "{{ item.target_path | default('invalid principal key cleanup') }}"
+- name: Inspect candidate principal key homes and SSH directories
+  ansible.builtin.stat:
+    path: "{{ item.0.apply_hints.home ~ item.1 }}"
+    follow: false
+    get_checksum: false
+  loop: "{{ abhaile_host_foundation_cleanup_entries | product(['', '/.ssh']) | list }}"
+  loop_control:
+    label: "{{ item.0.target_path }} parent"
+  register: abhaile_principal_cleanup_parent_states
+- name: Refuse redirected candidate principal key parents
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or item.stat.isdir | default(false)
+    fail_msg: Candidate principal key home or SSH directory is redirected
+    quiet: true
+  loop: "{{ abhaile_principal_cleanup_parent_states.results }}"
+  loop_control:
+    label: "{{ item.item.0.target_path }} parent"
+- name: Reinspect candidate principal key file identity
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_host_foundation_cleanup_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_principal_cleanup_states
+- name: Refuse changed or redirected candidate principal keys
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or (item.stat.isreg and item.stat.checksum == item.item.candidate_sha256)
+    fail_msg: Candidate principal key file changed before cleanup
+    quiet: true
+  loop: "{{ abhaile_principal_cleanup_states.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Remove matching candidate-only principal key files
+  ansible.builtin.file:
+    path: "{{ item.item.target_path }}"
+    state: absent
+  loop: "{{ abhaile_principal_cleanup_states.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"

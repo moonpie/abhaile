@@ -1,7 +1,7 @@
 - name: Start managed rootful build unit
   ansible.builtin.systemd_service:
     name: "{{ abhaile_build_publication.item.owner_ref | regex_replace('^unit:', '') }}"
-    state: started
+    state: restarted
 - name: Verify managed rootful build output image
   ansible.builtin.command:
     argv:
@@ -38,7 +38,8 @@
   loop: "{{ abhaile_build_publication.item.apply_hints.managed_build.consumers }}"
   loop_control:
     label: "{{ item }}"
+  when: not abhaile_defer_build_consumers | default(false)
 - name: Record consumers restarted by managed rootful build
   ansible.builtin.set_fact:
-    abhaile_rebuilt_rootful_consumers: "{{ abhaile_rebuilt_rootful_consumers + abhaile_build_publication.item.apply_hints.managed_build.consumers
+    abhaile_rebuilt_rootful_consumers: "{{ (abhaile_rebuilt_rootful_consumers | default([])) + abhaile_build_publication.item.apply_hints.managed_build.consumers
       }}"

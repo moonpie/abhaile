@@ -1,0 +1,73 @@
+- name: Bind authorized keys to the declared principal home
+  ansible.builtin.assert:
+    that:
+      - principal in abhaile_host_users
+      - abhaile_foundation_entry.target_path == principal_home ~ '/.ssh/authorized_keys'
+      - abhaile_foundation_entry.apply_hints.owner_user == principal
+      - abhaile_foundation_entry.apply_hints.owner_group == (abhaile_host_users[principal].primary_group | default(principal))
+    fail_msg: Authorized keys do not belong to the declared principal home
+    quiet: true
+  vars:
+    principal: "{{ abhaile_foundation_entry.owner_ref | regex_replace('^principal:', '') }}"
+    principal_home: "{{ abhaile_host_users[principal].home | default('/home/' ~ principal) }}"
+  when: abhaile_foundation_entry.kind == 'host.authorized_keys'
+- name: Inspect prerequisite publication parent
+  ansible.builtin.stat:
+    path: "{{ abhaile_foundation_entry.target_path | dirname }}"
+    follow: false
+    get_checksum: false
+  register: abhaile_foundation_parent
+- name: Refuse redirected prerequisite publication parents
+  ansible.builtin.assert:
+    that:
+      - not abhaile_foundation_parent.stat.islnk | default(false)
+      - not abhaile_foundation_parent.stat.exists or abhaile_foundation_parent.stat.isdir | default(false)
+    quiet: true
+- name: Create prerequisite publication parent
+  ansible.builtin.file:
+    path: "{{ abhaile_foundation_entry.target_path | dirname }}"
+    state: directory
+    owner: "{{ abhaile_foundation_entry.apply_hints.owner_user }}"
+    group: "{{ abhaile_foundation_entry.apply_hints.owner_group }}"
+    mode: "{{ '0700' if abhaile_foundation_entry.kind == 'host.authorized_keys' else '0755' }}"
+  when: not ansible_check_mode or abhaile_foundation_parent.stat.exists
+- name: Recheck protected automation access before publication
+  ansible.builtin.stat:
+    path: "{{ abhaile_foundation_entry.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: abhaile_protected_access_recheck
+  when:
+    - not abhaile_bootstrap_enrollment | default(false)
+    - abhaile_foundation_entry.kind == 'host.sudoers' or (abhaile_foundation_entry.kind == 'host.authorized_keys'
+      and abhaile_foundation_entry.owner_ref == 'principal:abhaile')
+- name: Refuse protected access changed during reconciliation
+  ansible.builtin.assert:
+    that:
+      - abhaile_protected_access_recheck.stat.exists
+      - abhaile_protected_access_recheck.stat.isreg
+      - not abhaile_protected_access_recheck.stat.islnk
+      - abhaile_protected_access_recheck.stat.checksum == abhaile_foundation_entry.sha256
+    fail_msg: Protected automation access changed before publication
+    quiet: true
+  when:
+    - not abhaile_bootstrap_enrollment | default(false)
+    - abhaile_foundation_entry.kind == 'host.sudoers' or (abhaile_foundation_entry.kind == 'host.authorized_keys'
+      and abhaile_foundation_entry.owner_ref == 'principal:abhaile')
+- name: Publish canonical host prerequisite source
+  ansible.builtin.copy:
+    src: "{{ abhaile_rendered_root }}/{{ abhaile_foundation_entry.render_path }}"
+    dest: "{{ abhaile_foundation_entry.target_path }}"
+    remote_src: true
+    owner: "{{ abhaile_foundation_entry.apply_hints.owner_user }}"
+    group: "{{ abhaile_foundation_entry.apply_hints.owner_group }}"
+    mode: "{{ abhaile_foundation_entry.apply_hints.mode }}"
+  when: not ansible_check_mode or abhaile_foundation_parent.stat.exists
+- name: Report prerequisite publication pending parent creation
+  ansible.builtin.debug:
+    msg: "Host prerequisite {{ abhaile_foundation_entry.target_path }} will be published after creating its parent"
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - not abhaile_foundation_parent.stat.exists

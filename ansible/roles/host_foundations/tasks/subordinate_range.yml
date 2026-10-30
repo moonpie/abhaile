@@ -1,0 +1,56 @@
+- name: Inspect subordinate ID database without following links
+  ansible.builtin.stat:
+    path: "{{ abhaile_subordinate_range.path }}"
+    follow: false
+    get_checksum: false
+  register: abhaile_subordinate_database
+- name: Refuse redirected subordinate ID databases
+  ansible.builtin.assert:
+    that:
+      - not abhaile_subordinate_database.stat.islnk | default(false)
+      - not abhaile_subordinate_database.stat.exists or abhaile_subordinate_database.stat.isreg | default(false)
+    quiet: true
+- name: Refuse subordinate ranges that include existing host identities
+  ansible.builtin.assert:
+    that:
+      - >-
+        identity_ids | map('int') | select('ge', abhaile_subordinate_range.start | int) | select('lt', abhaile_subordinate_range.start
+        | int + abhaile_rootless_account.value.rootless.count) | list | length == 0
+    fail_msg: Declared subordinate ID range overlaps an existing host account or group
+    quiet: true
+  vars:
+    identities: "{{ getent_passwd if abhaile_subordinate_range.path == '/etc/subuid' else getent_group }}"
+    identity_ids: "{{ identities | dict2items | map(attribute='value.1') | list }}"
+- name: Read existing subordinate ID assignments
+  ansible.builtin.slurp:
+    src: "{{ abhaile_subordinate_range.path }}"
+  register: abhaile_subordinate_contents
+  when: abhaile_subordinate_database.stat.exists
+- name: Require compatible existing subordinate assignments
+  ansible.builtin.assert:
+    that:
+      - item is match('^[^:]+:[0-9]+:[0-9]+$')
+      - >-
+        (parts[0] == abhaile_rootless_account.key and parts[1] | int == abhaile_subordinate_range.start | int and
+        parts[2] | int == abhaile_rootless_account.value.rootless.count) or (parts[0] != abhaile_rootless_account.key
+        and (parts[1] | int + parts[2] | int <= abhaile_subordinate_range.start | int or parts[1] | int >= abhaile_subordinate_range.start
+        | int + abhaile_rootless_account.value.rootless.count))
+    fail_msg: Existing subordinate ID assignment conflicts with the declared rootless range
+    quiet: true
+  vars:
+    parts: "{{ item.split(':') }}"
+  loop: "{{ ((abhaile_subordinate_contents.content | default('') | b64decode).splitlines()) | reject('match', '^(#|$)')
+    | list }}"
+  loop_control:
+    label: "{{ abhaile_subordinate_range.path }} assignment"
+- name: Create the declared subordinate ID assignment
+  ansible.builtin.lineinfile:
+    path: "{{ abhaile_subordinate_range.path }}"
+    regexp: "^{{ abhaile_rootless_account.key | regex_escape }}:"
+    line: "{{ abhaile_rootless_account.key }}:{{ abhaile_subordinate_range.start }}:{{ abhaile_rootless_account.value.rootless.count
+      }}"
+    create: true
+    owner: root
+    group: root
+    mode: '0644'
+  when: not ansible_check_mode

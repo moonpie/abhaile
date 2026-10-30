@@ -101,6 +101,25 @@
     not item.stat.exists or not item.stat.isreg | default(false) or item.stat.islnk | default(false) or item.stat.checksum
     | default('') != item.item.sha256 or item.stat.pw_name | default('') != 'root' or item.stat.gr_name | default('')
     != 'root' or item.stat.mode | default('') != '0644'
+- name: Inspect CoreDNS publication parents
+  ansible.builtin.stat:
+    path: "{{ item.target_path | dirname }}"
+    follow: false
+  loop: "{{ abhaile_coredns_entries }}"
+  register: abhaile_coredns_parent_states
+- name: Require existing or managed CoreDNS parents
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - item.stat.isdir | default(false) or (ansible_check_mode and item.item.target_path | dirname in managed_targets)
+    quiet: true
+  loop: "{{ abhaile_coredns_parent_states.results }}"
+  vars:
+    managed_targets: "{{ abhaile_directory_entries | default([]) | map(attribute='target_path') | list }}"
+- name: Record CoreDNS parents available during check
+  ansible.builtin.set_fact:
+    abhaile_existing_coredns_targets: "{{ abhaile_coredns_parent_states.results | selectattr('stat.exists') | map(attribute='item.target_path')
+      | list }}"
 - name: Publish CoreDNS configuration as one watcher-safe batch
   block:
     - name: Stop the CoreDNS zone watcher
@@ -152,6 +171,7 @@
       loop_control:
         label: "{{ item.target_path }}"
       register: abhaile_coredns_publications
+      when: not ansible_check_mode or item.target_path in abhaile_existing_coredns_targets
     - name: Record changed CoreDNS resource families
       ansible.builtin.set_fact:
         abhaile_coredns_config_changed: "{{ abhaile_coredns_publications.results | selectattr('changed') | selectattr('item.kind',
@@ -166,6 +186,7 @@
         state: restarted
       when:
         - not ansible_check_mode
+        - not abhaile_defer_activation | default(false)
         - abhaile_coredns_config_changed
     - name: Reload CoreDNS after zone-only publication
       ansible.builtin.systemd_service:
@@ -173,6 +194,7 @@
         state: reloaded
       when:
         - not ansible_check_mode
+        - not abhaile_defer_activation | default(false)
         - not abhaile_coredns_config_changed
         - abhaile_coredns_zones_changed
     - name: Verify CoreDNS is active after changed publication
@@ -185,6 +207,7 @@
       changed_when: false
       when:
         - not ansible_check_mode
+        - not abhaile_defer_activation | default(false)
         - abhaile_coredns_config_changed or abhaile_coredns_zones_changed
   always:
     - name: Restore the CoreDNS zone watcher
@@ -193,4 +216,5 @@
         state: started
       when:
         - not ansible_check_mode
+        - not abhaile_defer_activation | default(false)
         - abhaile_coredns_batch_changed

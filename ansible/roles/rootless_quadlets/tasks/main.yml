@@ -1,0 +1,97 @@
+- name: Require a rootless Quadlet publication or cleanup selection
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootless_quadlet_entries is sequence
+      - abhaile_rootless_quadlet_entries is not string
+      - abhaile_rootful_quadlet_owners | default({}) is mapping
+      - abhaile_rootless_quadlet_cleanup_entries | default([]) is sequence
+      - abhaile_rootless_quadlet_cleanup_entries | default([]) is not string
+      - (abhaile_rootless_quadlet_entries | length) + (abhaile_rootless_quadlet_cleanup_entries | default([]) |
+        length) > 0
+    quiet: true
+- name: Read the current Quadlet validation identity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/id
+      - -u
+  check_mode: false
+  changed_when: false
+  register: abhaile_rootless_current_identity
+- name: Validate rootless manifest sources
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: '{{ abhaile_rootless_quadlet_entries }}'
+- name: Require coherent named-user Quadlet identities
+  ansible.builtin.assert:
+    that:
+      - item.kind in suffixes
+      - item.apply_hints is mapping
+      - item.apply_hints.rootless is sameas true
+      - item.apply_hints.podman_user is string
+      - item.apply_hints.podman_user != 'root'
+      - item.apply_hints.podman_user is match('^[A-Za-z_][A-Za-z0-9_.-]*[$]?$')
+      - item.owner_ref == 'unit:' ~ (item.target_path | basename | splitext | first) ~ suffixes[item.kind]
+      - item.target_path | basename is match('^[A-Za-z0-9][A-Za-z0-9_.-]*$')
+      - item.target_path.endswith('.' ~ (item.kind | split('.') | last))
+      - item.apply_hints.restart_mode | default('try-restart') in ['try-restart', 'manual']
+      - item.apply_hints.restart_mode | default('try-restart') != 'manual' or item.kind == 'quadlet.container'
+    fail_msg: Rootless Quadlet selection violates its named-user file contract
+    quiet: true
+  loop: '{{ abhaile_rootless_quadlet_entries + (abhaile_rootless_quadlet_cleanup_entries | default([])) }}'
+  loop_control:
+    label: '{{ item.target_path }}'
+  vars:
+    suffixes:
+      quadlet.container: .service
+      quadlet.pod: -pod.service
+      quadlet.volume: -volume.service
+      quadlet.network: -network.service
+      quadlet.image: -image.service
+      quadlet.build: -build.service
+- name: Require unique rootless publication targets
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootless_quadlet_entries | map(attribute='target_path') | unique | length == abhaile_rootless_quadlet_entries
+        | length
+      - cleanup_targets | unique | length == cleanup_targets | length
+      - cleanup_targets | intersect(abhaile_rootless_quadlet_entries | map(attribute='target_path') | list) | length
+        == 0
+    quiet: true
+  vars:
+    cleanup_targets: '{{ abhaile_rootless_quadlet_cleanup_entries | default([]) | map(attribute=''target_path'')
+      | list }}'
+- name: Require closed candidate-only rootless cleanup identities
+  ansible.builtin.assert:
+    that:
+      - item.candidate_sha256 is string
+      - item.candidate_sha256 is match('^[0-9a-f]{64}$')
+      - item.live_sha256 == item.candidate_sha256
+      - item.target_path.startswith('/')
+      - '''/../'' not in item.target_path'
+      - '''/./'' not in item.target_path'
+      - '''//'' not in item.target_path'
+    quiet: true
+  loop: '{{ abhaile_rootless_quadlet_cleanup_entries | default([]) }}'
+  loop_control:
+    label: '{{ item.target_path }}'
+- name: Reset named-user publication state
+  ansible.builtin.set_fact:
+    abhaile_rootless_contexts: {}
+    abhaile_rootless_publications: {}
+    abhaile_rootless_cleanup_changed_users: []
+- name: Validate each named-user execution context before publication
+  ansible.builtin.include_tasks: validate_user.yml
+  loop: '{{ (abhaile_rootless_quadlet_entries + (abhaile_rootless_quadlet_cleanup_entries | default([]))) | map(attribute=''apply_hints.podman_user'')
+    | unique | sort }}'
+  loop_control:
+    loop_var: abhaile_rootless_user
+- name: Publish validated named-user Quadlets
+  ansible.builtin.include_tasks: publish_user.yml
+  loop: '{{ abhaile_rootless_contexts.keys() | list | sort }}'
+  loop_control:
+    loop_var: abhaile_rootless_user
+  when: not abhaile_rootless_contexts[abhaile_rootless_user].pending
+- name: Activate rootless workloads after publication when not deferred
+  ansible.builtin.include_tasks: activate.yml
+  when: not abhaile_defer_activation | default(false)

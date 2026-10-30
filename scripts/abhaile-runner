@@ -395,7 +395,7 @@ if desired and removal_source:
         Path(removal_source),
         included_kinds=included_kinds,
         directory_residue_kinds={"networkd.dropin", "service.directory"},
-        file_residue_kinds={"caddy.config"},
+        file_residue_kinds={"caddy.config", "host.packages"},
     )
     if classification["blocked"]:
         blocked = ", ".join(

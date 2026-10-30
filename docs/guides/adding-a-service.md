@@ -11,6 +11,14 @@ Sequential checklist for adding a service to Abhaile. For design rationale, see
 - [ ] Decide the pattern: **container**, **pod**, **rootless container**, or **host-mode**
 - [ ] Decide the host: phobos, deimos, or both
 
+The enrollment contract in [active spec 0034](../specs/active/0034-host-and-service-enrollment.md)
+covers native services, rootful/rootless containers and pods, managed builds, and configuration-only
+or shared definitions. Implementation and verification progress are recorded there. A service
+must not depend on its own previous manual installation. Declare needed accounts, supported
+packages, directories and networking in host/service intent, and arrange operator-owned Vault or
+other external prerequisites before activation. Preserve existing applications and data; conflicting
+identities or runtime volume/network options require resolution rather than destructive adoption.
+
 ## Publish Prerequisites Before Service Activation
 
 Deliver a new service in two parts when it needs operator-applied prerequisites, such as Vault
@@ -134,7 +142,7 @@ and delivery status are tracked in that spec.
 
 For example, `blocky-common.composition.container` declares the shared image once while `blocky-a`
 and `blocky-b` each declare their runtime context and include the common container definition. See
-[spec 0032](../specs/active/0032-container-image-authoring.md) for the full contract, including
+[spec 0032](../specs/accepted/0032-container-image-authoring.md) for the full contract, including
 the supported include-only container pattern that predates this change.
 
 A non-empty local `composition.container` replaces the inherited container definition. If you
@@ -187,14 +195,19 @@ Reference: `config/services/blocky-a/service.yaml` and `config/services/blocky-c
 - [ ] Add `composition.config[]` for rendered config files
 - [ ] If a config parent is a private named-volume host directory, its volume declaration already
   supplies managed directory intent; do not duplicate it in `composition.config[]`.
-- [ ] Other config parents need existing or explicit directory intent. A directory entry uses
-  `destination`, `owner`, `group`, and `mode`. Incidental render-tree directories alone do not
-  supply intent. Matching duplicate declarations preserve provenance; conflicting metadata fails.
+- [ ] Review inferred parents for other managed files. Rootful parents default to `root:root`
+  mode `0755`; rootless private parents default to their runtime user/group and mode `0700`.
+  Outside the user's home, more distant ancestors default to `root:root` mode `0755` so another
+  service does not inherit a private ancestor. Distribution roots and account homes remain
+  prerequisites. Declare a directory with `destination`, `owner`, `group`, and `mode` when these
+  defaults are unsuitable. Explicit metadata takes precedence; conflicting inferred metadata
+  fails rather than depending on render order. Incidental output directories alone are not intent.
 - [ ] Create `quadlets/container.container.j2`; include `Image={{ image }}` and
   `Pull={{ pull_policy }}`
 
-See [spec 0033](../specs/active/0033-private-volume-directory-management.md) for private-directory
-management, rootless defaults and its remaining file-only parent provisioning boundary.
+See [spec 0033](../specs/active/0033-private-volume-directory-management.md) for private volume-root
+management and [spec 0034](../specs/active/0034-host-and-service-enrollment.md) for the subsequent
+managed-file parent provisioning and enrollment contract.
 
 ## Pattern: Pod Service
 
@@ -229,6 +242,16 @@ Reference: `config/services/vault-agent/service.yaml`
 - [ ] Create quadlet sources under `quadlets/`
 
 Output placed under `/home/<user>/.config/containers/systemd/` (not `/etc/containers/systemd/`).
+The supported runtime account home is `/home/<user>`; a different account home is rejected rather
+than publishing units to a directory its user manager does not read. Rootless pods use the same
+named-user execution context and nested container definitions as other pods.
+
+For a new rootless account, declare its user/group in host `composition.user_management`, including
+that home and an explicit `rootless` mapping with `subuid_start`, `subgid_start`, and `count`.
+Each start and the count must be at least `65536`; select non-overlapping subordinate ranges and
+retain compatible existing assignments. `rootless.linger` defaults to `true`; `false` preserves
+existing lingering policy without enabling or disabling it. Reconciliation prepares the user
+manager before workload activation. It does not renumber existing accounts or namespace ranges.
 
 ## Pattern: Host-Mode Service
 
@@ -238,6 +261,18 @@ Reference: `config/services/coredns-filtered/service.yaml`
 - [ ] Add `composition.config[]` for config files
 - [ ] Add `composition.systemd[]` for unit files (set `enable: true`, `start: true`)
 - [ ] Set `apply.config_change_restart_unit: <unit>.service` for config-change restarts
+
+When customizing a packaged daemon such as Chrony or ddclient, place its drop-in in
+`composition.systemd`. A drop-in's `enable` and `start` fields refer to the parent vendor unit,
+not the drop-in filename. Package installation and all configuration publication precede parent
+activation; a changed drop-in refreshes the parent. Keep successful oneshots and path/timer triggers
+distinct from long-running daemon readiness.
+
+Declare supported standard packages in host software intent. Existing managed Quadlet builds
+remain available for local image or binary production. Command-oriented software downloads,
+builds and commands remain rendered records, not automatically executed installers. Record any
+unsupported acquisition, hardware, kernel-driver, firmware or device-access prerequisites and
+complete them explicitly; enrollment must not assume that a previous manual service installed them.
 
 ## Optional: Vault-Agent Secrets
 

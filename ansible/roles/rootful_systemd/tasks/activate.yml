@@ -1,0 +1,78 @@
+- name: Enable declared rootful units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+    enabled: true
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.item.kind in ['systemd.unit', 'systemd.dropin']
+    - item.item.apply_hints | default({}, true) | length > 0
+    - item.item.apply_hints.enable_mode | default('none') == 'enable'
+- name: Apply declared rootful unit restart
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - "{{ declared_restart_mode if declared_restart_mode in supported_restart_modes else 'try-restart' }}"
+      - "{{ item.item.target_path | basename }}"
+  changed_when: true
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.changed or unit_config_changed
+    - item.item.kind == 'systemd.unit'
+    - item.item.target_path | basename not in abhaile_rebuilt_rootful_consumers | default([])
+    - unit_config_changed or declared_restart_mode in supported_restart_modes or activation_mode in ['start', 'start-now']
+  vars:
+    unit_config_changed: "{{ item.item.target_path | basename in abhaile_deferred_config_units | default([]) }}"
+    declared_restart_mode: "{{ item.item.apply_hints.restart_mode | default('none') }}"
+    activation_mode: "{{ item.item.apply_hints.activation_mode | default('none') }}"
+    supported_restart_modes: [try-restart, reload-or-restart]
+- name: Restart parent units after drop-in publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - try-restart
+      - "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+  changed_when: true
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.changed or unit_config_changed
+    - item.item.kind == 'systemd.dropin'
+  vars:
+    unit_config_changed: "{{ item.item.owner_ref | regex_replace('^unit:', '') in abhaile_deferred_config_units
+      | default([]) }}"
+- name: Start declared rootful units
+  ansible.builtin.systemd_service:
+    name: "{{ item.item.owner_ref | regex_replace('^unit:', '') }}"
+    state: started
+  loop: "{{ abhaile_rootful_systemd_publications.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.item.kind in ['systemd.unit', 'systemd.dropin']
+    - item.item.apply_hints | default({}, true) | length > 0
+    - item.item.apply_hints.activation_mode | default('none') in ['start', 'start-now']
+- name: Reload systemd-resolved after configuration publication
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/systemctl
+      - reload-or-restart
+      - systemd-resolved.service
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - >-
+      abhaile_rootful_systemd_publications.results | selectattr('changed', 'equalto', true) | map(attribute='item')
+      | selectattr('kind', 'in', ['resolved.config', 'resolved.dropin']) | list | length > 0

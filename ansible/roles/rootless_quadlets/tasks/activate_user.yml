@@ -1,0 +1,113 @@
+- name: Select rootless activation inputs
+  ansible.builtin.set_fact:
+    abhaile_rootless_context: '{{ abhaile_rootless_contexts[abhaile_rootless_user] }}'
+    abhaile_rootless_user_results: '{{ abhaile_rootless_publications[abhaile_rootless_user] }}'
+    abhaile_rootless_changed_pods: []
+    abhaile_rootless_build_consumers: []
+    abhaile_rootless_config_restart_owners: '{{ abhaile_service_config_restarts | default([]) | selectattr(''rootless'',
+      ''defined'') | selectattr(''rootless'', ''equalto'', true) | selectattr(''podman_user'', ''equalto'', abhaile_rootless_user)
+      | map(attribute=''restart_unit'') | map(''regex_replace'', ''^'', ''unit:'') | list }}'
+- name: Reload the selected user manager after publication
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - daemon-reload
+  changed_when: true
+  when: abhaile_rootless_user_results | selectattr('changed') | list | length > 0 or abhaile_rootless_user in abhaile_rootless_cleanup_changed_users
+    | default([])
+- name: Require generated named-user units to load
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - show
+      - '{{ item.owner_ref | regex_replace(''^unit:'', '''') }}'
+      - --property=LoadState
+      - --value
+  register: abhaile_rootless_load_state
+  changed_when: false
+  failed_when: abhaile_rootless_load_state.stdout | trim != 'loaded'
+  loop: '{{ abhaile_rootless_context.entries }}'
+  loop_control:
+    label: '{{ item.owner_ref }}'
+- name: Complete named-user managed builds before workload activation
+  ansible.builtin.include_tasks: build.yml
+  loop: '{{ abhaile_rootless_user_results }}'
+  loop_control:
+    loop_var: abhaile_rootless_build
+    label: '{{ abhaile_rootless_build.item.owner_ref }}'
+  when: abhaile_rootless_build.item.kind == 'quadlet.build'
+- name: Collect parent pods affected by changed manual members
+  ansible.builtin.set_fact:
+    abhaile_rootless_changed_pods: '{{ abhaile_rootless_changed_pods + (abhaile_rootful_quadlet_owners[item.item.owner_ref].requires
+      | intersect(pods)) }}'
+  loop: '{{ abhaile_rootless_user_results }}'
+  loop_control:
+    label: '{{ item.item.owner_ref }}'
+  when:
+    - item.changed or item.item.owner_ref in abhaile_rootless_build_consumers or item.item.owner_ref in abhaile_rootless_config_restart_owners
+    - item.item.kind == 'quadlet.container'
+    - item.item.apply_hints.restart_mode | default('try-restart') == 'manual'
+  vars:
+    pods: '{{ abhaile_rootless_context.entries | selectattr(''kind'', ''equalto'', ''quadlet.pod'') | map(attribute=''owner_ref'')
+      | list }}'
+- name: Observe automatic rootless workload activity
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - is-active
+      - --quiet
+      - '{{ item.owner_ref | regex_replace(''^unit:'', '''') }}'
+  changed_when: false
+  failed_when: false
+  loop: '{{ abhaile_rootless_context.entries }}'
+  loop_control:
+    label: '{{ item.owner_ref }}'
+  when:
+    - item.kind in ['quadlet.container', 'quadlet.pod']
+    - item.apply_hints.restart_mode | default('try-restart') != 'manual'
+  register: abhaile_rootless_workload_states
+- name: Activate automatic rootless workloads with their user manager
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - '{{ ''restart'' if restart_needed else ''start'' }}'
+      - '{{ item.item.owner_ref | regex_replace(''^unit:'', '''') }}'
+  changed_when: restart_needed or item.rc != 0
+  loop: '{{ abhaile_rootless_workload_states.results }}'
+  loop_control:
+    label: '{{ item.item.owner_ref }}'
+  when:
+    - not item.skipped | default(false)
+  vars:
+    restart_needed: '{{ item.item.owner_ref in changed_owners or item.item.owner_ref in abhaile_rootless_changed_pods
+      or item.item.owner_ref in abhaile_rootless_build_consumers or item.item.owner_ref in abhaile_rootless_config_restart_owners
+      }}'
+    changed_owners: '{{ abhaile_rootless_user_results | selectattr(''changed'') | map(attribute=''item.owner_ref'')
+      | list }}'
+- name: Verify rootless containers and pods are active
+  ansible.builtin.command:
+    argv:
+      - '{{ abhaile_systemctl_binary | default(''/usr/bin/systemctl'') }}'
+      - --user
+      - -M
+      - '{{ abhaile_rootless_user }}@'
+      - is-active
+      - --quiet
+      - '{{ item.owner_ref | regex_replace(''^unit:'', '''') }}'
+  changed_when: false
+  loop: '{{ abhaile_rootless_context.entries }}'
+  loop_control:
+    label: '{{ item.owner_ref }}'
+  when: item.kind in ['quadlet.container', 'quadlet.pod']

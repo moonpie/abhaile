@@ -1,0 +1,123 @@
+- name: Inspect named-user Quadlet target identities
+  ansible.builtin.stat:
+    path: '{{ item.target_path }}'
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: '{{ abhaile_rootless_user_entries }}'
+  loop_control:
+    label: '{{ item.target_path }}'
+  register: abhaile_rootless_target_stats
+- name: Refuse redirected files and changes to existing auxiliary definitions
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or item.stat.isreg | default(false)
+      - item.item.kind in ['quadlet.container', 'quadlet.pod', 'quadlet.build'] or not item.stat.exists or item.stat.checksum
+        == item.item.sha256
+    fail_msg: Existing rootless auxiliary definition requires explicit migration or target is redirected
+    quiet: true
+  loop: '{{ abhaile_rootless_target_stats.results }}'
+  loop_control:
+    label: '{{ item.item.target_path }}'
+- name: Validate missing rootless volume and network resource identities
+  ansible.builtin.include_role:
+    name: rootful_quadlet_files
+    tasks_from: preflight_resource
+    apply:
+      become: '{{ (abhaile_rootless_current_identity.stdout | default(''0'') | trim) != (abhaile_rootless_uid |
+        string) }}'
+      become_user: '{{ abhaile_rootless_user }}'
+      environment:
+        HOME: '{{ abhaile_rootless_home }}'
+        XDG_RUNTIME_DIR: /run/user/{{ abhaile_rootless_uid }}
+  vars:
+    abhaile_auxiliary_target: '{{ rootless_target }}'
+  loop: '{{ abhaile_rootless_target_stats.results }}'
+  loop_control:
+    loop_var: rootless_target
+    label: '{{ rootless_target.item.target_path }}'
+  when:
+    - not rootless_target.stat.exists
+    - rootless_target.item.kind in ['quadlet.volume', 'quadlet.network']
+- name: Validate the complete named-user Quadlet graph in isolation
+  vars:
+    rootless_validation_entries: '{{ abhaile_rootless_user_entries + (abhaile_vault_agent_quadlet_entries | default([])
+      | selectattr(''apply_hints.podman_user'', ''equalto'', abhaile_rootless_user) | list) }}'
+  block:
+    - name: Create disposable rootless validation directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: abhaile-rootless-verify-
+      check_mode: false
+      changed_when: false
+      register: abhaile_rootless_validation_root
+    - name: Prepare private rootless validation paths
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: directory
+        owner: '{{ abhaile_rootless_user }}'
+        group: '{{ abhaile_rootless_gid }}'
+        mode: '0700'
+      loop:
+        - '{{ abhaile_rootless_validation_root.path }}'
+        - '{{ abhaile_rootless_validation_root.path }}/quadlets'
+        - '{{ abhaile_rootless_validation_root.path }}/generated'
+        - '{{ abhaile_rootless_validation_root.path }}/early'
+        - '{{ abhaile_rootless_validation_root.path }}/late'
+      check_mode: false
+      changed_when: false
+    - name: Stage the named-user Quadlet graph
+      ansible.builtin.copy:
+        src: '{{ abhaile_rendered_root }}/{{ item.render_path }}'
+        dest: '{{ abhaile_rootless_validation_root.path }}/quadlets/{{ item.target_path | basename }}'
+        remote_src: true
+        owner: '{{ abhaile_rootless_user }}'
+        group: '{{ abhaile_rootless_gid }}'
+        mode: '0600'
+      loop: '{{ rootless_validation_entries }}'
+      loop_control:
+        label: '{{ item.target_path }}'
+      check_mode: false
+      changed_when: false
+    - name: Generate and verify rootless units as their runtime user
+      become: '{{ (abhaile_rootless_current_identity.stdout | default(''0'') | trim) != (abhaile_rootless_uid |
+        string) }}'
+      become_user: '{{ abhaile_rootless_user }}'
+      environment:
+        HOME: '{{ abhaile_rootless_home }}'
+        XDG_RUNTIME_DIR: /run/user/{{ abhaile_rootless_uid }}
+        QUADLET_UNIT_DIRS: '{{ abhaile_rootless_validation_root.path }}/quadlets'
+        SYSTEMD_UNIT_PATH: '{{ abhaile_rootless_validation_root.path }}/generated:{{ abhaile_rootless_validation_root.path
+          }}/early:{{ abhaile_rootless_validation_root.path }}/late:'
+      block:
+        - name: Generate candidate named-user Quadlet units
+          ansible.builtin.command:
+            argv:
+              - /usr/lib/systemd/system-generators/podman-system-generator
+              - '{{ abhaile_rootless_validation_root.path }}/generated'
+              - '{{ abhaile_rootless_validation_root.path }}/early'
+              - '{{ abhaile_rootless_validation_root.path }}/late'
+          check_mode: false
+          changed_when: false
+        - name: Verify candidate named-user generated units
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/systemd-analyze
+              - --user
+              - verify
+              - '{{ item.owner_ref | regex_replace(''^unit:'', '''') }}'
+          loop: '{{ abhaile_rootless_user_entries }}'
+          loop_control:
+            label: '{{ item.owner_ref }}'
+          check_mode: false
+          changed_when: false
+  always:
+    - name: Remove disposable rootless validation files
+      ansible.builtin.file:
+        path: '{{ abhaile_rootless_validation_root.path }}'
+        state: absent
+      check_mode: false
+      changed_when: false
+      when: abhaile_rootless_validation_root.path is defined
+  when: abhaile_rootless_user_entries | length > 0

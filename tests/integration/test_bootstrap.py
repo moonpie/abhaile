@@ -399,12 +399,19 @@ class TestBootstrapPreflight:
         assert "unseal_keys" not in script
         assert "/v1/sys/unseal" not in script
 
-    def test_bootstrap_reloads_vault_agent_after_first_apply(self) -> None:
-        """Bootstrap reloads rootless user units before waiting for Vault Agent readiness."""
+    def test_bootstrap_requires_readiness_before_recording_initial_success(self) -> None:
+        """Keep enrollment success behind required readiness and local service health."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
-        assert "systemctl --user -M abhaile@ daemon-reload" in script
-        assert "systemctl --user -M abhaile@ restart vault-agent.service" in script
-        assert "Waiting for Vault Agent ready sentinel" in script
+        stage = script.split("stage_render_apply() {", 1)[1].split("# --- Stage 8", 1)[0]
+        assert stage.index("Waiting for Vault Agent ready sentinel") < stage.index(
+            "establish_last_successful"
+        )
+        assert stage.index("--scope enrollment-foundations") < stage.index(
+            "establish_last_successful"
+        )
+        assert stage.index("--profile local-actionable") < stage.index("establish_last_successful")
+        assert 'die "Vault Agent readiness timed out' in stage
+        assert "systemctl --user -M abhaile@ restart vault-agent.service" not in stage
 
 
 @pytest.mark.integration

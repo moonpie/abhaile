@@ -1,0 +1,77 @@
+- name: Recheck rootless candidate-only files before deactivation
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootless_context.cleanup | reverse | list }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootless_cleanup_stats
+- name: Refuse changed or redirected rootless candidate files
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or (item.stat.isreg | default(false) and item.stat.checksum == item.item.candidate_sha256)
+    fail_msg: Rootless candidate-only file identity changed before cleanup
+    quiet: true
+  loop: "{{ abhaile_rootless_cleanup_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Observe candidate-only rootless workload units
+  ansible.builtin.command:
+    argv: ["{{ abhaile_systemctl_binary | default('/usr/bin/systemctl') }}", --user, -M, "{{ abhaile_rootless_user
+        }}@", show, "{{ item.item.owner_ref | regex_replace('^unit:', '') }}", --property=LoadState, --value]
+  changed_when: false
+  loop: "{{ abhaile_rootless_cleanup_stats.results }}"
+  loop_control:
+    label: "{{ item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - item.stat.exists
+    - item.item.kind in ['quadlet.container', 'quadlet.pod', 'quadlet.build']
+  register: abhaile_rootless_cleanup_unit_states
+- name: Stop loaded candidate-only rootless workloads without deleting runtime resources
+  ansible.builtin.command:
+    argv: ["{{ abhaile_systemctl_binary | default('/usr/bin/systemctl') }}", --user, -M, "{{ abhaile_rootless_user
+        }}@", stop, "{{ item.item.item.owner_ref | regex_replace('^unit:', '') }}"]
+  changed_when: true
+  loop: "{{ abhaile_rootless_cleanup_unit_states.results }}"
+  loop_control:
+    label: "{{ item.item.item.owner_ref }}"
+  when:
+    - not ansible_check_mode
+    - not item.skipped | default(false)
+    - item.stdout | trim == 'loaded'
+- name: Recheck candidate-only identities immediately before file removal
+  ansible.builtin.stat:
+    path: "{{ item.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  loop: "{{ abhaile_rootless_context.cleanup | reverse | list }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+  register: abhaile_rootless_cleanup_removal_stats
+- name: Refuse changed rootless files immediately before removal
+  ansible.builtin.assert:
+    that:
+      - not item.stat.islnk | default(false)
+      - not item.stat.exists or (item.stat.isreg | default(false) and item.stat.checksum == item.item.candidate_sha256)
+    quiet: true
+  loop: "{{ abhaile_rootless_cleanup_removal_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+- name: Remove only matching candidate-only rootless unit files
+  ansible.builtin.file:
+    path: "{{ item.item.target_path }}"
+    state: absent
+  loop: "{{ abhaile_rootless_cleanup_removal_stats.results }}"
+  loop_control:
+    label: "{{ item.item.target_path }}"
+  register: abhaile_rootless_cleanup_removals
+- name: Record rootless managers requiring reload after cleanup
+  ansible.builtin.set_fact:
+    abhaile_rootless_cleanup_changed_users: "{{ (abhaile_rootless_cleanup_changed_users | default([])) + [abhaile_rootless_user]
+      }}"
+  when: abhaile_rootless_cleanup_removals.results | selectattr('changed') | list | length > 0

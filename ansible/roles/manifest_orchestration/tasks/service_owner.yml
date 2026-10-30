@@ -2,6 +2,7 @@
   ansible.builtin.include_role:
     name: service_config
   vars:
+    abhaile_defer_activation: true
     abhaile_service_config_entries: >-
       {{ owner_entries | selectattr('owner_ref', 'equalto', owner_ref) | list }}
     abhaile_service_config_cleanup_entries: >-

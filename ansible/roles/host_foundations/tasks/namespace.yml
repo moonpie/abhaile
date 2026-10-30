@@ -1,0 +1,26 @@
+- name: Validate explicit rootless namespace intent
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootless_account.value.rootless is mapping
+      - abhaile_rootless_account.value.rootless.subuid_start is integer
+      - abhaile_rootless_account.value.rootless.subgid_start is integer
+      - abhaile_rootless_account.value.rootless.count is integer
+      - abhaile_rootless_account.value.rootless.subuid_start >= 65536
+      - abhaile_rootless_account.value.rootless.subgid_start >= 65536
+      - abhaile_rootless_account.value.rootless.count >= 65536
+      - abhaile_rootless_account.value.rootless.subuid_start + abhaile_rootless_account.value.rootless.count <=
+        4294967296
+      - abhaile_rootless_account.value.rootless.subgid_start + abhaile_rootless_account.value.rootless.count <=
+        4294967296
+    fail_msg: Rootless users require explicit usable subordinate UID and GID ranges
+    quiet: true
+- name: Validate and create subordinate namespace ranges
+  ansible.builtin.include_tasks: subordinate_range.yml
+  loop:
+    - path: /etc/subuid
+      start: "{{ abhaile_rootless_account.value.rootless.subuid_start }}"
+    - path: /etc/subgid
+      start: "{{ abhaile_rootless_account.value.rootless.subgid_start }}"
+  loop_control:
+    loop_var: abhaile_subordinate_range
+    label: "{{ abhaile_subordinate_range.path }}:{{ abhaile_rootless_account.key }}"

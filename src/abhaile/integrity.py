@@ -173,8 +173,14 @@ def _validate_entries(entries: list[Any], *, expected_host: str) -> None:
                 expected_target = f"/home/{principal}/.ssh/authorized_keys"
                 if principal == "root":
                     expected_target = "/root/.ssh/authorized_keys"
+                if isinstance(hints, dict) and isinstance(hints.get("home"), str):
+                    home = hints["home"]
+                    if not home.startswith("/") or ".." in Path(home).parts:
+                        raise ValueError("Invalid authorized_keys home")
+                    expected_target = home.rstrip("/") + "/.ssh/authorized_keys"
                 if (
-                    not principal
+                    not owner_ref.startswith("principal:")
+                    or not principal
                     or target_path != expected_target
                     or not isinstance(hints, dict)
                     or hints.get("owner_user") != principal

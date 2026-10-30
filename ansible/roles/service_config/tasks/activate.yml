@@ -1,0 +1,12 @@
+- name: Refresh the changed configuration owner
+  ansible.builtin.command:
+    argv: "{{ ['/usr/bin/systemctl'] + (['--user', '-M', abhaile_config_restart.podman_user ~ '@'] if abhaile_config_restart.rootless
+      | default(false) else []) + ['try-restart', abhaile_config_restart.restart_unit] }}"
+  changed_when: true
+  when: not ansible_check_mode
+- name: Verify the refreshed configuration owner
+  ansible.builtin.command:
+    argv: "{{ ['/usr/bin/systemctl'] + (['--user', '-M', abhaile_config_restart.podman_user ~ '@'] if abhaile_config_restart.rootless
+      | default(false) else []) + ['is-active', '--quiet', abhaile_config_restart.restart_unit] }}"
+  changed_when: false
+  when: not ansible_check_mode

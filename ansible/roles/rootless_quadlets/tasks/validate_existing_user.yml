@@ -1,0 +1,44 @@
+- name: Record the existing rootless runtime context
+  ansible.builtin.set_fact:
+    abhaile_rootless_uid: '{{ abhaile_rootless_passwd[1] | string }}'
+    abhaile_rootless_home: '{{ abhaile_rootless_passwd[4] }}'
+    abhaile_rootless_gid: '{{ abhaile_rootless_passwd[2] | string }}'
+- name: Require the user's actual Quadlet directory
+  ansible.builtin.assert:
+    that:
+      - abhaile_rootless_uid != '0'
+      - item.target_path | dirname == abhaile_rootless_home ~ '/.config/containers/systemd'
+    fail_msg: Rootless Quadlet target is outside the declared account's home
+    quiet: true
+  loop: '{{ abhaile_rootless_user_entries + abhaile_rootless_user_cleanup }}'
+  loop_control:
+    label: '{{ item.target_path }}'
+- name: Inspect rootless runtime directory
+  ansible.builtin.stat:
+    path: /run/user/{{ abhaile_rootless_uid }}
+    follow: false
+  register: abhaile_rootless_runtime_directory
+- name: Require prepared user runtime foundations for live enrollment
+  ansible.builtin.assert:
+    that:
+      - ansible_check_mode or runtime_ready
+    fail_msg: Rootless runtime directory must be prepared before live enrollment
+    quiet: true
+  vars:
+    runtime_ready: '{{ abhaile_rootless_runtime_directory.stat.isdir | default(false) and not abhaile_rootless_runtime_directory.stat.islnk
+      | default(false) }}'
+- name: Save the resolved rootless context
+  ansible.builtin.set_fact:
+    abhaile_rootless_contexts: '{{ abhaile_rootless_contexts | combine({abhaile_rootless_user: {''uid'': abhaile_rootless_uid,
+      ''gid'': abhaile_rootless_gid, ''home'': abhaile_rootless_home, ''entries'': abhaile_rootless_user_entries,
+      ''cleanup'': abhaile_rootless_user_cleanup, ''pending'': not runtime_ready}}) }}'
+  vars:
+    runtime_ready: '{{ abhaile_rootless_runtime_directory.stat.isdir | default(false) and not abhaile_rootless_runtime_directory.stat.islnk
+      | default(false) }}'
+- name: Report rootless validation pending user runtime preparation
+  ansible.builtin.debug:
+    msg: 'Rootless validation pending runtime directory preparation: {{ abhaile_rootless_user }}'
+  when: abhaile_rootless_contexts[abhaile_rootless_user].pending
+- name: Validate rootless files and generated units
+  ansible.builtin.include_tasks: preflight_user.yml
+  when: not abhaile_rootless_contexts[abhaile_rootless_user].pending
