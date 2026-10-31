@@ -1,6 +1,8 @@
 """Verify protected Zigbee2MQTT deployment without owning mutable application files."""
 
+import os
 import shlex
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -119,3 +121,51 @@ def test_zigbee2mqtt_ingress_has_sso_and_matching_restrictive_policy() -> None:
     ).read_text()
     rule = auth.split("- domain: zigbee2mqtt.abhaile.home.arpa", 1)[1]
     assert "policy: one_factor" in rule and "group:admins" in rule
+
+
+def test_zigbee2mqtt_health_command_survives_native_quadlet_generation(tmp_path: Path) -> None:
+    generator = Path("/usr/libexec/podman/quadlet")
+    if not generator.is_file():
+        pytest.skip("Native Quadlet generator is unavailable")
+    render_service_quadlets(
+        "phobos",
+        ["zigbee2mqtt"],
+        read_yaml(REPO / "config/network.yaml"),
+        REPO / "config",
+        tmp_path / "services",
+    )
+    rendered = (
+        tmp_path / "services/zigbee2mqtt/etc/containers/systemd/zigbee2mqtt.container"
+    ).read_text()
+    probe = next(line for line in rendered.splitlines() if line.startswith("HealthCmd="))
+    # Podman 5.4's UnitFile.Lookup trims double quotes at either end.
+    # Local generator versions differ, so check that target behavior explicitly.
+    target_value = probe.split("=", 1)[1].rstrip().strip('"')
+    subprocess.run(["/bin/sh", "-n", "-c", target_value], check=True, capture_output=True)
+    assert len(shlex.split(target_value)) == 3
+    # Isolate the actual rendered probe from network and volume dependencies.
+    units = tmp_path / "quadlets"
+    units.mkdir()
+    (units / "probe.container").write_text(
+        "[Container]\nImage=localhost/probe:latest\n" + probe + "\n"
+    )
+    generated = subprocess.run(
+        [str(generator), "--dryrun"],
+        env={**os.environ, "QUADLET_UNIT_DIRS": str(units)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    unit = generated.stdout + generated.stderr
+    exec_start = next(
+        line.split("=", 1)[1] for line in unit.splitlines() if line.startswith("ExecStart=")
+    )
+    arguments = shlex.split(exec_start)
+    health = arguments[arguments.index("--health-cmd") + 1]
+    # Exercise the generated shell command without starting a container.
+    subprocess.run(["/bin/sh", "-n", "-c", health], check=True, capture_output=True)
+    command = shlex.split(health)
+    assert command[:2] == ["node", "-e"]
+    assert len(command) == 3
+    assert 'fetch("http://172.20.20.223:8080")' in command[2]
+    assert 'console.log("Frontend HTTP status:",r.status)' in command[2]

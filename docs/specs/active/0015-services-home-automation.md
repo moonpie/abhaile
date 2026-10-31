@@ -688,3 +688,19 @@ quoted as one argument to `node -e`. Preserve the diagnostic messages, event log
 endpoint, readiness gate and timeouts. The rendered probe regression now checks shell
 argument boundaries rather than accepting syntactically valid JSON that did not
 produce a working Podman command. Deployment verification remains pending.
+
+### Quadlet Quote Trimming Correction (2026-10-31)
+
+The `d8fc09f` health events reported an unterminated quoted string while the
+application again connected to MQTT and started its frontend. Quadlet's key lookup
+trims double quotes from the ends of the value, removing the closing quote from
+`node -e "expression"`. Use single quotes around the JavaScript expression and
+double quotes within JavaScript so the shell command survives that lookup unchanged.
+
+The regression now runs the installed native Quadlet generator against the actual
+rendered health command in an isolated temporary unit directory, checks shell syntax
+on its generated `--health-cmd` argument, and verifies the complete Node expression
+remains one argument. The available local generator is 4.9.3; the test also checks
+the quote-trimming lookup behavior from Podman 5.4 explicitly rather than claiming
+a local 5.4 runtime test. This generator check skips when the native tool is unavailable;
+the existing rendering checks still run. No container or live unit is created.
