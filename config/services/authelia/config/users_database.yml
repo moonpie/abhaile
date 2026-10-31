@@ -1,7 +1,7 @@
 users:
   admin:
     displayname: Admin
-    password: $argon2id$v=19$m=65536,t=3,p=4$INCzSCTlh71ZKOrUOnDoJw$yTkPGPX9CvUqZbTywWTuC32Ve1NIxuprchEXBXLlRGw
+    password: $argon2id$v=19$m=65536,t=3,p=4$NEod0UsPdGQeyUVQdi5MBg$3EFQV8X458EhGL9tr6j2nR7HK84A31qWOhirB0/6T7I
     email: admin@abhaile.home.arpa
     groups:
       - admins
