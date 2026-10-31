@@ -704,3 +704,18 @@ remains one argument. The available local generator is 4.9.3; the test also chec
 the quote-trimming lookup behavior from Podman 5.4 explicitly rather than claiming
 a local 5.4 runtime test. This generator check skips when the native tool is unavailable;
 the existing rendering checks still run. No container or live unit is created.
+
+### Browser Content Security Policy Compatibility (2026-10-31)
+
+Operator header inspection confirmed that the Authelia portal received both Caddy's
+shared CSP and Authelia's native nonce-bearing CSP. The extra policy blocks the inline
+styles that Authelia explicitly authorizes. Preserve Authelia's own security headers by
+removing the portal's `common_headers` import; do not change Authelia's nonce policy.
+
+The pinned Zigbee2MQTT frontend package embeds SVG image resources as `data:` URLs.
+Its ingress replaces the shared CSP with an application-specific policy adding only
+`img-src 'self' data:`. Deferred header replacement ensures a single effective response
+policy. Other services retain the shared default; no inline script/style allowance is
+introduced. Native Caddy 2.10.2 response tests in
+`tests/integration/test_caddy_ca_download.py` verify policy preservation, replacement,
+and unchanged shared defaults. Browser verification remains pending deployment.

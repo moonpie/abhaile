@@ -34,19 +34,17 @@ ca.abhaile.home.arpa {
 
 	root * /data/pki/authorities/local
 
-	# Provide a friendly filename
-	@rootcrt path /root.crt
+	# Both download names serve only the public root certificate.
+	@rootcrt path /root.crt /abhaile-ca.crt
 	handle @rootcrt {
-		try_files {path} /root.crt
-		file_server
-	}
-
-	# Also expose a stable alias path
-	handle /abhaile-ca.crt {
 		rewrite * /root.crt
 		file_server
 	}
-	file_server
+
+	# Never serve other files from the CA storage directory.
+	handle {
+		respond "Not found" 404
+	}
 }
 
 test.abhaile.home.arpa {

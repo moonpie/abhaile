@@ -1,6 +1,6 @@
 authelia.abhaile.home.arpa {
 	import tls_internal
-	import common_headers
+	# Preserve Authelia's native headers, including its per-response CSP nonce.
 
 	reverse_proxy http://authelia.svc.abhaile.home.arpa:9091
 }

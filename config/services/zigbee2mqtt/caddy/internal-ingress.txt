@@ -3,5 +3,8 @@ zigbee2mqtt.abhaile.home.arpa {
 	import common_headers
 	import authelia_forward_auth
 
+	# Replace the shared CSP for this application only; its CSS embeds SVG images.
+	header >Content-Security-Policy "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"
+
 	reverse_proxy http://zigbee2mqtt.svc.abhaile.home.arpa:8080
 }
