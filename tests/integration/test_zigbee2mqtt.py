@@ -1,5 +1,6 @@
 """Verify protected Zigbee2MQTT deployment without owning mutable application files."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,17 @@ def test_zigbee2mqtt_preserves_mutable_configuration_and_orders_secure_startup(
     assert "Requires=mosquitto.service" not in quadlet
     assert "PublishPort=" not in quadlet and "AddDevice=" not in quadlet
     assert "Notify=healthy" in quadlet
+    health_command = next(
+        line.split("=", 1)[1] for line in quadlet.splitlines() if line.startswith("HealthCmd=")
+    )
+    command = json.loads(health_command)
+    assert command[:3] == ["CMD", "node", "-e"]
+    assert "Frontend HTTP status:" in command[3]
+    assert "Frontend request failed:" in command[3]
+    assert "e.cause?.code" in command[3]
+    assert "HealthLogDestination=events_logger" in quadlet
+    assert "HealthTimeout=5s" in quadlet
+    assert "TimeoutStartSec=240s" in quadlet
     artifacts = {entry.target_path: entry for entry in collector.get_all_artifacts()}
     assert "/srv/zigbee2mqtt/data/configuration.yaml" not in artifacts
     assert artifacts["/srv/zigbee2mqtt/data"].apply_hints == {

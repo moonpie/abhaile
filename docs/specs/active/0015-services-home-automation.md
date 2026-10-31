@@ -8,7 +8,7 @@ title: Home Automation Services
 status: active
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-30
+updated: 2026-10-31
 related_adrs:
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -655,3 +655,22 @@ Regression coverage in `tests/integration/test_zigbee2mqtt.py` checks complete r
 assignments, including absence of surrounding quotes or transformations. Runtime MQTT
 connection and frontend authentication remain pending host verification. The separate
 recovery correction is tracked by spec 0034 (`1ac21d7`).
+
+### Zigbee2MQTT Readiness Diagnostics (2026-10-31)
+
+Operator logs confirm `1e0adf3` connected to MQTT and started the frontend within
+two seconds, but systemd timed out waiting for Podman health readiness. Recovery
+successfully restored `4b216d6`; subsequent retries of the failed target are suppressed.
+The health event reported unhealthy with an empty log, so the probe failure cause
+is still unconfirmed.
+
+Report the frontend HTTP status or fetch error name and underlying error code,
+without logging response bodies, credentials, or environment values. Set native
+`HealthLogDestination=events_logger` to preserve diagnostic output in Podman events
+after recovery removes the candidate container. Keep `Notify=healthy`, the existing
+probe endpoint, and all health/startup timeouts unchanged. The probe tests HTTP
+frontend availability only, not MQTT state or native frontend authorization.
+
+Regression coverage in `tests/integration/test_zigbee2mqtt.py` parses the rendered
+probe command and checks diagnostic output, event retention, and unchanged timeouts.
+Host validation and diagnosis remain pending the next deployment attempt.
