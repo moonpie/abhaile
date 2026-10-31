@@ -1,6 +1,6 @@
 """Verify protected Zigbee2MQTT deployment without owning mutable application files."""
 
-import json
+import shlex
 from pathlib import Path
 
 import pytest
@@ -53,11 +53,12 @@ def test_zigbee2mqtt_preserves_mutable_configuration_and_orders_secure_startup(
     health_command = next(
         line.split("=", 1)[1] for line in quadlet.splitlines() if line.startswith("HealthCmd=")
     )
-    command = json.loads(health_command)
-    assert command[:3] == ["CMD", "node", "-e"]
-    assert "Frontend HTTP status:" in command[3]
-    assert "Frontend request failed:" in command[3]
-    assert "e.cause?.code" in command[3]
+    command = shlex.split(health_command)
+    assert command[:2] == ["node", "-e"]
+    assert len(command) == 3
+    assert "Frontend HTTP status:" in command[2]
+    assert "Frontend request failed:" in command[2]
+    assert "e.cause?.code" in command[2]
     assert "HealthLogDestination=events_logger" in quadlet
     assert "HealthTimeout=5s" in quadlet
     assert "TimeoutStartSec=240s" in quadlet

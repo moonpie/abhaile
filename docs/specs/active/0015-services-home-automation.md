@@ -674,3 +674,17 @@ frontend availability only, not MQTT state or native frontend authorization.
 Regression coverage in `tests/integration/test_zigbee2mqtt.py` parses the rendered
 probe command and checks diagnostic output, event retention, and unchanged timeouts.
 Host validation and diagnosis remain pending the next deployment attempt.
+
+### Zigbee2MQTT Probe Command Correction (2026-10-31)
+
+Operator inspection of the diagnostic deployment (`fc57786`) showed that Podman
+stored the JSON probe text as separate command words, including literal JSON
+punctuation. A direct `podman exec` invocation of Node against the same frontend
+returned HTTP 200. This isolates the observed failure to health-command parsing,
+not frontend availability or MQTT authentication.
+
+Use the documented plain-command form of `HealthCmd`, with the JavaScript expression
+quoted as one argument to `node -e`. Preserve the diagnostic messages, event logging,
+endpoint, readiness gate and timeouts. The rendered probe regression now checks shell
+argument boundaries rather than accepting syntactically valid JSON that did not
+produce a working Podman command. Deployment verification remains pending.
