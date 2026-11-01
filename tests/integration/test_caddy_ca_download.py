@@ -165,7 +165,10 @@ def test_application_csp_headers_with_native_caddy(tmp_path: Path) -> None:
                     time.sleep(0.05)
             for host, expected in (
                 ("authelia", upstream_policy),
-                ("zigbee2mqtt", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'"),
+                (
+                    "zigbee2mqtt",
+                    "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",
+                ),
                 ("default", "default-src 'self'; frame-ancestors 'none'"),
             ):
                 request = Request(

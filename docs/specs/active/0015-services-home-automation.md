@@ -8,7 +8,7 @@ title: Home Automation Services
 status: active
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-31
+updated: 2026-11-01
 related_adrs:
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -719,3 +719,20 @@ policy. Other services retain the shared default; no inline script/style allowan
 introduced. Native Caddy 2.10.2 response tests in
 `tests/integration/test_caddy_ca_download.py` verify policy preservation, replacement,
 and unchanged shared defaults. Browser verification remains pending deployment.
+
+### WindFront Inline Style Compatibility (2026-11-01)
+
+After `54a0b56`, operator verification confirmed correct Authelia styling; restarting
+Chrome also cleared its lingering insecure-resource indicator. Zigbee2MQTT icons
+remained absent through HTTPS while working through direct access.
+
+Zigbee2MQTT 2.14.2 defaults to WindFront, whose bundled Font Awesome code injects
+inline CSS. The earlier image-source allowance does not permit those styles. Add
+`style-src 'self' 'unsafe-inline'` only to Zigbee2MQTT's application-specific CSP,
+retaining its image allowance, default source and frame-ancestor restriction. This
+permits inline styling but does not authorize inline scripts; other services keep
+their existing policies. The operator approved this scoped compatibility exception.
+
+The native Caddy response regression in `tests/integration/test_caddy_ca_download.py`
+checks the complete policy and verifies Authelia's upstream policy and the shared
+default remain unchanged. Browser verification remains pending deployment.
