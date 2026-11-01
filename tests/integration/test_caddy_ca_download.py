@@ -104,8 +104,8 @@ def test_application_csp_headers_with_native_caddy(tmp_path: Path) -> None:
         pytest.skip("Set CADDY_BINARY or install Caddy for the native HTTP regression")
     render_ingress_configs(
         "phobos",
-        ["caddy-internal", "authelia", "zigbee2mqtt"],
-        ["caddy-internal", "authelia", "zigbee2mqtt"],
+        ["caddy-internal", "authelia", "zigbee2mqtt", "home-assistant"],
+        ["caddy-internal", "authelia", "zigbee2mqtt", "home-assistant"],
         REPO / "config",
         tmp_path,
     )
@@ -128,13 +128,15 @@ def test_application_csp_headers_with_native_caddy(tmp_path: Path) -> None:
     for host, service in (
         ("authelia.abhaile.home.arpa", "authelia"),
         ("zigbee2mqtt.abhaile.home.arpa", "zigbee2mqtt"),
+        ("home-assistant.abhaile.home.arpa", "home-assistant"),
     ):
         site = rendered.split(host + " {\n", 1)[1].split("\n}\n", 1)[0]
         site = site.replace("\timport tls_internal\n", "")
         upstream = f"http://{service}.svc.abhaile.home.arpa:"
         # Keep the rendered route and headers; replace only its backend address.
         site = site.replace(
-            upstream + ("9091" if service == "authelia" else "8080"),
+            upstream
+            + {"authelia": "9091", "zigbee2mqtt": "8080", "home-assistant": "8123"}[service],
             f"http://127.0.0.1:{backend_port}",
         )
         config += f"http://{host}:{port} {{\n bind 127.0.0.1\n{site}\n}}\n"
@@ -165,6 +167,7 @@ def test_application_csp_headers_with_native_caddy(tmp_path: Path) -> None:
                     time.sleep(0.05)
             for host, expected in (
                 ("authelia", upstream_policy),
+                ("home-assistant", upstream_policy),
                 (
                     "zigbee2mqtt",
                     "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'",

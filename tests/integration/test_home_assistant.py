@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from abhaile.renderers.collector import ArtifactCollector
+from abhaile.renderers.ingress import render_ingress_configs
 from abhaile.renderers.quadlets.renderer import render_service_quadlets
 from abhaile.renderers.services import render_service_configs
 from abhaile.utils.config import read_json, read_yaml
@@ -52,3 +53,20 @@ def test_home_assistant_preserves_configuration_and_uses_isolated_network(tmp_pa
     assert not any(
         path.startswith("/srv/home-assistant/config/") for path in artifacts
     ), "Application configuration and credentials must remain application-owned"
+
+
+def test_home_assistant_ingress_preserves_native_authentication(tmp_path: Path) -> None:
+    render_ingress_configs(
+        "phobos",
+        ["caddy-internal", "home-assistant"],
+        ["caddy-internal", "home-assistant"],
+        REPO / "config",
+        tmp_path,
+    )
+    rendered = (tmp_path / "caddy-internal/srv/caddy/internal/Caddyfile").read_text()
+    site = rendered.split("home-assistant.abhaile.home.arpa {", 1)[1].split("\n}", 1)[0]
+    assert "import tls_internal" in site
+    assert "reverse_proxy http://home-assistant.svc.abhaile.home.arpa:8123" in site
+    assert "authelia_forward_auth" not in site
+    assert "common_headers" not in site
+    assert "header_up" not in site

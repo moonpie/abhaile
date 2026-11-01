@@ -3,6 +3,10 @@ podman:
   user: root
   network: ipvlan-l2
 composition:
+  ingress:
+    internal:
+      blocks:
+        - home-assistant/caddy/internal-ingress.txt
   container:
     image: ghcr.io/home-assistant/home-assistant:2026.10.4
     pull_policy: missing

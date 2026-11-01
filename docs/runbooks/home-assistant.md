@@ -45,7 +45,12 @@ normal login/dashboard appears and owner creation is no longer offered.
 In **Settings > System > Network > HTTP server**, enable forwarding support and trust only internal
 Caddy's address `172.20.20.200`, not an entire VLAN. Confirm the settings after the
 application restarts; Home Assistant reverts unconfirmed HTTP changes after five minutes.
-Publish the reviewed internal Caddy route with Home Assistant's native authentication.
+The next publication adds `https://home-assistant.abhaile.home.arpa` through internal
+Caddy, retaining Home Assistant's native login and response headers. No Authelia gate
+is added. Use the trusted Caddy root on the client device. After reconciliation, verify
+login, dashboard rendering and live state updates through that HTTPS URL. Set it as
+Home Assistant's local URL where appropriate; do not change external/remote access.
+The direct service URL remains HTTP and requires native authentication after setup.
 
 Configure Home Assistant's MQTT integration using the existing Mosquitto broker and
 its dedicated identity from Vault. Do not install another broker or configure ZHA to

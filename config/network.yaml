@@ -28,9 +28,9 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20261030
+        date: 20261101
         counter: 00
-        content_hash: 7887c1a6f3780bdfaa01f1b85a197733e369fb086d14f4b944ffe9e51d92914b
+        content_hash: 17854866f47939ae50622f5af0f877643f48d1e432d3cdadc7120a9e711e877b
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
@@ -333,6 +333,11 @@ services:
             name: home-assistant
             rdata: "%%network.services.home-assistant.address | strip_cidr%%"
             ptr: true
+      - zone: abhaile.home.arpa.
+        records:
+          - type: cname
+            name: home-assistant
+            rdata: caddy.abhaile.home.arpa.
   mosquitto:
     address: 172.20.20.222/32
     vlan: services

@@ -774,3 +774,18 @@ under `/srv/home-assistant/config`. The image's normal process/container startup
 checked by reconciliation; HTTP availability, owner creation and runtime persistence
 require operator verification. No bespoke startup/bootstrap script or managed seed
 configuration is introduced.
+
+### Home Assistant Internal Ingress (2026-11-01)
+
+Phobos accepted activation commit `5c361b8` with a clean 182-entry audit and no rollback.
+The operator created the Home Assistant owner account, completed basic setup, and
+confirmed trusted proxy configuration for internal Caddy at `172.20.20.200`.
+
+Publish `home-assistant.abhaile.home.arpa` as an internal Caddy alias and proxy to
+`home-assistant.svc.abhaile.home.arpa:8123`. Preserve Home Assistant's native login and
+application response headers; do not impose the shared CSP or an Authelia gate. Caddy
+handles WebSocket upgrades using ordinary reverse proxy behavior. Reconciliation
+continues to preserve UI-managed HTTP settings and all application configuration.
+MQTT integration and Zigbee2MQTT discovery remain subsequent operator/configuration
+steps. The rendering and native Caddy header regression cover this route; live HTTPS
+login and dashboard verification remain pending deployment.

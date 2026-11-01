@@ -1,0 +1,6 @@
+home-assistant.abhaile.home.arpa {
+	import tls_internal
+	# Preserve Home Assistant's native authentication and application headers.
+
+	reverse_proxy http://home-assistant.svc.abhaile.home.arpa:8123
+}
