@@ -1,0 +1,26 @@
+[Unit]
+Description=Home Assistant
+Wants=network-online.target mosquitto.service
+After=network-online.target mosquitto.service abhaile-secrets-ready.service
+Requires=abhaile-secrets-ready.service
+
+[Container]
+Image={{ image }}
+Pull={{ pull_policy }}
+Network={{ network.services[service_name].vlan }}.network
+PodmanArgs=--umask=0077
+PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
+Timezone=local
+{% for line in volume_lines %}
+{{ line }}
+{% endfor %}
+StopTimeout=300
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+TimeoutStartSec=300s
+TimeoutStopSec=330s
+
+[Install]
+WantedBy=abhaile-secrets-ready.service

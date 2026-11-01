@@ -123,6 +123,12 @@ container definitions, ingress, secret delivery, storage mounts, and service lif
 Supply required settings through the existing service composition mechanisms; deployment must not
 expose an insecure default merely to defer configuration.
 
+For Home Assistant, a short operator-attended first-run owner-account creation window
+on the existing open lab network is approved (2026-11-01). Create the owner promptly
+after startup. This does not require new ACLs solely for onboarding and does not permit
+leaving the instance indefinitely without its native account authentication. Configure
+trusted proxy settings through the application before publishing its Caddy route.
+
 After all five services deploy successfully, configure each application manually on the host and
 inspect its supported configuration files, UI behaviour, and file rewrites. With that evidence,
 agree which settings are stable, which are mutable, and whether supported separate files can keep
@@ -736,3 +742,35 @@ their existing policies. The operator approved this scoped compatibility excepti
 The native Caddy response regression in `tests/integration/test_caddy_ca_download.py`
 checks the complete policy and verifies Authelia's upstream policy and the shared
 default remain unchanged. Browser verification remains pending deployment.
+
+### Zigbee Adoption and Home Assistant Preparation (2026-11-01)
+
+Following publication of `69157bc`, the operator confirmed correct Zigbee2MQTT icon
+rendering through HTTPS and added three SONOFF S60ZBTPG plugs. The dashboard shows
+three routers, meaningful device names, switch-state changes and telemetry. Joining
+uses a five-minute window and the operator confirmed it is currently disabled.
+Paired-device persistence across a subsequent reconciliation/restart and backup
+validation remain outstanding; do not treat those checks as completed.
+
+Prepare the Home Assistant Container 2026.10.4 definition with application-owned
+persistent `/config`, existing ipvlan addressing and ordinary secrets/broker ordering.
+No host mapping, ingress, DNS or Zigbee2MQTT discovery setting is changed at this stage.
+The operator confirmed there are no Omada ACLs. Activation therefore awaits an agreed
+protected owner-account bootstrap procedure or an explicitly approved temporary setup
+exception; do not expose unauthenticated onboarding by assumption. The staged procedure
+is recorded in `docs/runbooks/home-assistant.md`.
+
+### Home Assistant Initial Activation (2026-11-01)
+
+The operator approved the attended initial owner-account setup on the existing open
+VLANs. Map Home Assistant to Phobos using the prepared container definition. The initial
+operator URL is `http://home-assistant.svc.abhaile.home.arpa:8123`; use the existing
+service DNS record and address. Defer Caddy ingress until the owner exists and HTTP
+trusted proxy settings have been configured through Home Assistant. MQTT discovery
+remains disabled until the Home Assistant integration stage.
+
+The activation uses application defaults and preserves every application-created file
+under `/srv/home-assistant/config`. The image's normal process/container startup is
+checked by reconciliation; HTTP availability, owner creation and runtime persistence
+require operator verification. No bespoke startup/bootstrap script or managed seed
+configuration is introduced.

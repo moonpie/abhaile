@@ -3,4 +3,13 @@ podman:
   user: root
   network: ipvlan-l2
 composition:
-  container: {}
+  container:
+    image: ghcr.io/home-assistant/home-assistant:2026.10.4
+    pull_policy: missing
+    named_volumes:
+      - name: config
+        host_path: /srv/home-assistant/config
+        mount_path: /config
+        host_owner: root
+        host_group: root
+        host_mode: '0750'

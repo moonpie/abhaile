@@ -12,6 +12,7 @@ abhaile:
       - omada-controller
       - mosquitto
       - zigbee2mqtt
+      - home-assistant
   - deimos:
       - chrony-b
       - coredns-b
