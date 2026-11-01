@@ -18,7 +18,7 @@ Environment=ZIGBEE2MQTT_CONFIG_SERIAL_PORT=tcp://172.20.50.10:6638
 Environment=ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER=zstack
 Environment=ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED=true
 Environment=ZIGBEE2MQTT_CONFIG_FRONTEND_HOST={{ network.services[service_name].address | strip_cidr }}
-Environment=ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED=false
+Environment=ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED=true
 {% for line in volume_lines %}
 {{ line }}
 {% endfor %}

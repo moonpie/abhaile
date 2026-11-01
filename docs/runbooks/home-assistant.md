@@ -54,8 +54,17 @@ The direct service URL remains HTTP and requires native authentication after set
 
 Configure Home Assistant's MQTT integration using the existing Mosquitto broker and
 its dedicated identity from Vault. Do not install another broker or configure ZHA to
-connect to the SLZB-06. Enable Zigbee2MQTT Home Assistant discovery through its declared
-startup setting when the integration is ready; existing paired devices remain paired.
+connect to the SLZB-06. Once MQTT connects, publish `ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED=true` in the
+Zigbee2MQTT Quadlet. Reconciliation restarts Zigbee2MQTT, which publishes discovery
+information through the broker; existing paired devices remain paired. Keep MQTT
+discovery enabled in Home Assistant. No new Vault fields or policies are needed.
+
+After the discovery revision reconciles, open **Settings > Devices & services > MQTT**.
+Confirm the three paired SONOFF plugs appear (a Zigbee2MQTT bridge device may appear too).
+Test one plug from Home Assistant and confirm its state also updates in Zigbee2MQTT.
+Do not reset devices, re-pair them, install another broker or attach the coordinator
+through ZHA. If devices do not appear, check Zigbee2MQTT logs and the MQTT integration
+before changing network or broker configuration.
 
 ## References
 

@@ -382,8 +382,9 @@ spec. Device migration can proceed independently once the relevant service is co
   preserves application-owned state without a new seed-only mechanism.
 - [ ] Zigbee2MQTT connects to the SMLIGHT SLZB-06 at `172.20.50.10:6638` using `zstack` and persists
   its network state.
-- [ ] Home Assistant persists UI-managed state, connects to MQTT, and is reachable through internal
-  Caddy using native authentication.
+- [x] Home Assistant persists UI-managed state, connects to MQTT, and is reachable through internal
+  Caddy using native authentication. See [Home Assistant MQTT Discovery](#home-assistant-mqtt-discovery-2026-11-01)
+  for implementation and operator validation evidence.
 - [ ] ESPHome is deployed, persistent, and reachable through internal Caddy without requiring
   cross-VLAN mDNS.
 - [ ] Frigate uses bundled go2rtc, detects the Coral TPU, reaches the initial Reolink cameras, and is
@@ -789,3 +790,21 @@ continues to preserve UI-managed HTTP settings and all application configuration
 MQTT integration and Zigbee2MQTT discovery remain subsequent operator/configuration
 steps. The rendering and native Caddy header regression cover this route; live HTTPS
 login and dashboard verification remain pending deployment.
+
+### Home Assistant MQTT Discovery (2026-11-01)
+
+Implementation evidence: `5c361b8` deploys persistent application-owned configuration;
+`5331378` publishes internal HTTPS ingress while retaining native authentication.
+Validation evidence: Phobos accepted `5c361b8` with zero drift and no rollback; after
+creating the owner and configuring trusted proxies, the operator verified login and
+dashboard access through the subsequently published HTTPS route. The owner/configuration
+survived reconciliation. The operator then confirmed the Home Assistant MQTT integration
+connected using its existing dedicated broker identity. These observations satisfy the
+Home Assistant configuration/connectivity criterion; full-spec acceptance remains open.
+
+Enable Zigbee2MQTT's declared Home Assistant discovery environment setting now that the
+consumer is ready. Its normal container restart preserves paired devices and publishes
+discovery through Mosquitto. This does not change coordinator ownership, network keys,
+MQTT credentials or broker policy. The focused Zigbee2MQTT rendering regression checks
+that discovery is enabled. Operator verification that all three plugs appear in Home
+Assistant and can be controlled through it remains pending deployment.

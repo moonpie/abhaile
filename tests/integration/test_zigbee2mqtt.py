@@ -47,7 +47,7 @@ def test_zigbee2mqtt_preserves_mutable_configuration_and_orders_secure_startup(
     assert "ZIGBEE2MQTT_CONFIG_SERIAL_ADAPTER=zstack" in quadlet
     assert "mqtt://172.20.20.222:1883" in quadlet
     assert "ZIGBEE2MQTT_CONFIG_FRONTEND_ENABLED=true" in quadlet
-    assert "ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED=false" in quadlet
+    assert "ZIGBEE2MQTT_CONFIG_HOMEASSISTANT_ENABLED=true" in quadlet
     assert "Requires=abhaile-secrets-ready.service zigbee2mqtt-env.service" in quadlet
     assert "Requires=mosquitto.service" not in quadlet
     assert "PublishPort=" not in quadlet and "AddDevice=" not in quadlet
