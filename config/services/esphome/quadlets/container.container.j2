@@ -1,0 +1,25 @@
+[Unit]
+Description=ESPHome Device Builder
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image={{ image }}
+Pull={{ pull_policy }}
+Network={{ network.services[service_name].vlan }}.network
+PodmanArgs=--ip={{ network.services[service_name].address | strip_cidr }}
+PodmanArgs=--umask=0077
+Entrypoint=esphome-device-builder
+Exec=/config --socket /run/esphome/dashboard.sock
+HealthCmd=none
+Timezone=local
+{% for line in volume_lines %}
+{{ line }}
+{% endfor %}
+
+[Service]
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

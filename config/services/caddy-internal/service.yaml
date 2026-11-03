@@ -32,3 +32,6 @@ composition:
     mounted_files:
       - host_path: /srv/caddy/internal/Caddyfile
         mount_path: /etc/caddy/Caddyfile
+      - host_path: /srv/esphome/socket
+        mount_path: /run/esphome
+        mode: ro

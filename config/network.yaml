@@ -20,25 +20,25 @@ dns:
         type: internal
         name: coredns-common
       serial:
-        date: 20261101
+        date: 20261103
         counter: 00
-        content_hash: 2361b18b2b0327264417076656617677524f3f3cc9d313cab181b9cc004a37af
+        content_hash: d0538df1b560ad1ffc96ce8765d17232fd5f77d53a30efb7d4d910ebf2c27e05
     - name: abhaile.home.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20261101
+        date: 20261103
         counter: 00
-        content_hash: 17854866f47939ae50622f5af0f877643f48d1e432d3cdadc7120a9e711e877b
+        content_hash: 7bd09cd7bcf8411782f0077809ccdd1ebaaf320c3d5dbf484c00c453774e85e4
     - name: 20.20.172.in-addr.arpa.
       provider:
         type: internal
         name: coredns-common
       serial:
-        date: 20261101
+        date: 20261103
         counter: 00
-        content_hash: c32163637038d1f3914eec0a08554e96da9d657278e2aefa710cf61e83e15073
+        content_hash: 0d34e5b3fce66f42f521984723f2872e9cf5520c5f3e2de919990f34bfc72adc
     - name: 100.20.172.in-addr.arpa.
       provider:
         type: internal
@@ -373,6 +373,11 @@ services:
             name: esphome
             rdata: "%%network.services.esphome.address | strip_cidr%%"
             ptr: true
+      - zone: abhaile.home.arpa.
+        records:
+          - type: cname
+            name: esphome
+            rdata: caddy.abhaile.home.arpa.
   frigate:
     address: 172.20.20.225/32
     vlan: services

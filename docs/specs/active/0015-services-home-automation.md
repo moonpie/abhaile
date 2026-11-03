@@ -404,9 +404,10 @@ spec. Device migration can proceed independently once the relevant service is co
 - [x] Home Assistant persists UI-managed state, connects to MQTT, and is reachable through internal
   Caddy using native authentication. See [Home Assistant MQTT Discovery](#home-assistant-mqtt-discovery-2026-11-01)
   for implementation and operator validation evidence.
-- [ ] Home Assistant has an additional Let's Encrypt Caddy-DMZ route at
+- [x] Home Assistant has an additional Let's Encrypt Caddy-DMZ route at
   `home-assistant.abhaile.dedyn.io`, with native login, dashboard, WebSocket and Companion-client
   access verified on LAN and through WireGuard; the internal route and UI state remain intact.
+  See [Home Assistant DMZ verification](#home-assistant-dmz-verification).
 - [ ] Home Assistant trusts the specific DMZ proxy address; untrusted forwarded requests are
   rejected and no internal CA installation is needed on end-user clients.
 - [ ] ESPHome is deployed, persistent, and reachable through internal Caddy without requiring
@@ -832,3 +833,27 @@ discovery through Mosquitto. This does not change coordinator ownership, network
 MQTT credentials or broker policy. The focused Zigbee2MQTT rendering regression checks
 that discovery is enabled. Operator verification that all three plugs appear in Home
 Assistant and can be controlled through it remains pending deployment.
+
+### Home Assistant DMZ Verification
+
+Phobos reconciled `63c484e` and `bd9658d`. After the ARP fix, a cold-cache lookup
+from Caddy-DMZ through Phobos CoreDNS returned the Home Assistant service address.
+The operator confirmed Home Assistant access on home Wi-Fi and in the Android
+Companion app over mobile data with WireGuard. The app uses the same trusted
+HTTPS URL on both paths. The operator also added the DMZ proxy to Home Assistant.
+Explicit rejection of untrusted forwarded requests remains to be verified.
+
+### ESPHome Device Builder Deployment
+
+Pin ESPHome 2026.10.2 and run its bundled Device Builder on a Unix socket.
+The container retains its Services VLAN address for outbound device access.
+Internal Caddy mounts only the dedicated socket directory read-only and gates the
+route with the Authelia admins policy. The builder has no dashboard TCP listener.
+Device YAML and secrets remain operator-owned in `/srv/esphome/config`.
+Use stable device addresses for cross-VLAN operations.
+
+After reconciliation, verify the socket exists, the direct TCP port 6052 is
+unreachable, and the internal HTTPS route redirects unauthenticated clients to
+Authelia. Confirm an admin can open the dashboard and use its live UI, then
+verify a temporary device configuration persists across an ESPHome restart.
+Live checks remain pending.

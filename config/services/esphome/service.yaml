@@ -3,4 +3,23 @@ podman:
   user: root
   network: ipvlan-l2
 composition:
-  container: {}
+  ingress:
+    internal:
+      blocks:
+        - esphome/caddy/internal-ingress.txt
+  container:
+    image: ghcr.io/esphome/esphome:2026.10.2
+    pull_policy: missing
+    named_volumes:
+      - name: config
+        host_path: /srv/esphome/config
+        mount_path: /config
+        host_owner: root
+        host_group: root
+        host_mode: '0750'
+      - name: socket
+        host_path: /srv/esphome/socket
+        mount_path: /run/esphome
+        host_owner: root
+        host_group: root
+        host_mode: '0700'

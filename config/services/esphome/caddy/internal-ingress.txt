@@ -1,0 +1,6 @@
+esphome.abhaile.home.arpa {
+	import tls_internal
+	import authelia_forward_auth
+
+	reverse_proxy unix//run/esphome/dashboard.sock
+}

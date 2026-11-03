@@ -55,3 +55,7 @@ access_control:
       policy: one_factor
       subject:
         - group:admins
+    - domain: esphome.abhaile.home.arpa
+      policy: one_factor
+      subject:
+        - group:admins
