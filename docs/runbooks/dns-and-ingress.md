@@ -61,6 +61,37 @@ not establish that every application route or authentication flow works.
 For failures, distinguish DNS resolution, VPN/DMZ routing, TLS trust, Caddy routing and application
 authentication. See [operations](operations.md) and [break-glass procedures](break-glass.md).
 
+## Phobos DMZ DNS Replies and ARP
+
+On 2026-11-03, Home Assistant and Omada returned HTTP 502 through Caddy-DMZ.
+From Caddy-DMZ, CoreDNS on Deimos answered, while CoreDNS on Phobos logged
+successful queries but its replies never reached the container.
+
+With an empty neighbour cache, Phobos used the Services VLAN address
+`172.20.20.235` as the ARP sender on `ipvlan-l2.100`. The request went
+unanswered. Setting `arp_announce=2` on that host interface changed the
+ARP sender to `172.20.100.20`. The cold-cache lookup then succeeded, with
+DNS replies still sourced from `172.20.20.235`.
+
+GitOps publishes `/etc/sysctl.d/70-abhaile-dmz-arp.conf` on Phobos.
+The `abhaile-dmz-arp.service` oneshot applies that file during reconciliation
+when the interface already exists. Systemd applies interface-specific
+sysctl settings when the interface appears. Slash notation preserves the
+dot in the interface name.
+
+```ini
+net/ipv4/conf/ipvlan-l2.100/arp_announce = 2
+```
+
+After reconciliation, read the value under
+`/proc/sys/net/ipv4/conf/ipvlan-l2.100/arp_announce`. Clear only the
+neighbour entry for `172.20.100.200` during an attended check, then query
+`172.20.20.235` from Caddy-DMZ without priming the cache with ping.
+Verify Home Assistant and Omada over DMZ HTTPS. If DMZ addressing changes,
+recheck the ARP sender address. The previous interface value was `0`. Removing the drop-in does not reset a
+live kernel value. If reverting the fix, restore that value explicitly after
+reconciling the removal.
+
 ## Future Public Exposure
 
 The architecture prepares stable public names, trusted certificates and application routes before
