@@ -4,6 +4,9 @@ podman:
   network: ipvlan-l2
 composition:
   ingress:
+    dmz:
+      blocks:
+        - home-assistant/caddy/dmz-ingress.txt
     internal:
       blocks:
         - home-assistant/caddy/internal-ingress.txt

@@ -8,14 +8,15 @@ title: Media Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-22
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0005-service-authoring-model
   - 0014-host-storage-and-nas-mount-boundaries
 supersedes: null
 superseded_by: null
 scope:
-  hosts: [deimos]
+  hosts: [phobos, deimos]
   services: [immich, jellyfin, tdarr, radarr, sonarr, lidarr, readarr, bazarr, prowlarr, jellyseerr, flaresolverr]
 ```
 
@@ -261,8 +262,8 @@ All web-accessible services contribute internal ingress blocks to caddy-internal
 
 Flaresolverr has no web UI for end users; accessed only by Prowlarr via direct IP.
 
-All ingress blocks use Authelia forward-auth protection except Jellyfin (which has
-its own authentication) and Jellyseerr (which handles its own user management).
+Internal administration ingress uses Authelia forward-auth. Jellyfin, Immich and Jellyseerr
+use their native authentication on both internal and DMZ sites for client compatibility.
 
 ### Dependency Ordering
 
@@ -312,21 +313,64 @@ Already defined in `config/network.yaml`. Each service has:
   where their workflows require hardlinks; a transcode workspace may be separate.
 - ADR: ADR 0014.
 
+## End-User DMZ Ingress
+
+These are additional `composition.ingress.dmz.blocks` routes; retain the existing internal
+sites. Follow [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md):
+local wildcard DNS selects Caddy-DMZ, explicit Caddy sites select applications, and unknown
+names retain HTTP 404. Use Let's Encrypt certificates without requiring the end-user device
+to trust the internal CA. LAN clients connect directly; remote clients use WireGuard and home
+DNS with DMZ routing. No per-application local DNS record or backend relocation is required.
+Direct public Internet exposure is outside this scope.
+
+| Service | Additional FQDN | Authentication |
+| --- | --- | --- |
+| Jellyfin | `jellyfin.abhaile.dedyn.io` | Native application authentication |
+| Immich | `immich.abhaile.dedyn.io` | Native application authentication |
+| Jellyseerr | `jellyseerr.abhaile.dedyn.io` | Native application authentication |
+
+Do not put an Authelia forward-auth gate in front of these client-facing routes. Verify browser
+and supported native-client flows, uploads, playback and WebSocket behavior as applicable.
+Immich's internal route also uses native authentication, avoiding a separate gate for its clients.
+Tdarr, the \*arr applications, Bazarr and Prowlarr retain internal administration ingress.
+The phobos Caddy-DMZ aggregator must include contributions from services running on deimos.
+
 ## Acceptance Criteria
 
+- [ ] Additional Jellyfin, Immich and Jellyseerr DMZ blocks aggregate into phobos Caddy-DMZ,
+  preserving internal sites and using native authentication without an Authelia gate.
+
+- [ ] Browser and supported native clients work on LAN and through WireGuard with trusted
+  certificates; verify playback, uploads and persistent connections as applicable.
+
+- [ ] Unknown wildcard names retain HTTP 404 and no public Internet publication is introduced.
+
 - [ ] Detail `service.yaml` definitions for all services in this group
+
 - [ ] Shared media storage volume layout is defined and consistent across all consuming services.
+
 - [ ] Hardware acceleration device passthrough is configured for Jellyfin and Tdarr containers.
+
 - [ ] deimos host.yaml includes Intel media driver in software requirements.
+
 - [ ] API key delivery model is chosen and documented (vault-agent or application-managed).
+
 - [ ] All 11 services added to deimos in `config/mapping.yaml`.
+
 - [ ] caddy-internal ingress blocks are defined for all web-accessible services.
-- [ ] Authelia forward-auth applied to appropriate services (exclude Jellyfin, Jellyseerr).
+
+- [ ] Authelia forward-auth applied to appropriate services (exclude Jellyfin, Immich, Jellyseerr).
+
 - [ ] Immich pod composition renders correctly (server + ML + postgres + redis).
+
 - [ ] DNS CNAME records for `*.abhaile.home.arpa` added to `config/network.yaml` for ingress-fronted services.
+
 - [ ] Systemd dependency ordering documented and rendered in quadlet output.
+
 - [ ] Unit tests pass for new service rendering.
+
 - [ ] Integration test renders deimos with all media services without regression.
+
 - [ ] No secrets appear in rendered output.
 
 ### Evidence
@@ -339,8 +383,7 @@ For each completed criterion, include:
 ## Out of Scope
 
 - Download client (qBittorrent + Gluetun VPN) — separate spec with network isolation concerns.
-- Jellyfin DMZ/external access via caddy-dmz.
-- Immich external access via caddy-dmz.
+- Direct public Internet exposure of media applications.
 - Monitoring and alerting for media services (Prometheus exporters, Grafana dashboards).
 - Backup strategy for media databases and configuration.
 - Media storage provisioning is owned by SPEC-2026-030 and remains outside service config.

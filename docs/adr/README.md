@@ -24,6 +24,7 @@ Add one row per ADR. Keep links current when ADR status changes.
 | [0012](0012-trusted-revision-ansible-reconciliation.md) | Trusted-Revision Ansible Reconciliation | Superseded | 2026-10-05 | 0010, 0011 | 0013 | 028 |
 | [0013](0013-last-successful-ansible-reconciliation.md) | Last-Successful Ansible Reconciliation | Accepted (amended 2026-10-30) | 2026-10-30 | 0012 | - | 028, 029, 034 |
 | [0014](0014-host-storage-and-nas-mount-boundaries.md) | Host Storage and NAS Mount Boundaries | Accepted | 2026-10-26 | - | - | 030, 031 |
+| [0015](0015-dns-ingress-and-certificate-trust-boundaries.md) | DNS, Ingress, and Certificate Trust Boundaries | Accepted (retrospective) | 2026-11-03 | - | - | 003, 011, 015, 016, 017, 018, 019, 021 |
 
 ## Status Values
 

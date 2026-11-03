@@ -8,8 +8,9 @@ title: Core Services
 status: accepted
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0004-apply-execution-model
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -21,6 +22,16 @@ scope:
 ```
 
 ## Context
+
+The additional trusted-certificate Authelia portal for end-user DMZ routes is planned in
+[SPEC-2026-019](../proposed/0019-services-utilities.md#shared-authelia-prerequisite).
+It is not part of this spec's accepted implementation evidence. Existing Omada DMZ ingress
+remains unchanged; infrastructure administration otherwise retains its internal ingress.
+
+> **Architectural context clarified 2026-11-03:**
+> [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md) records the original
+> LAN/WireGuard access intent, public certificate trust and future Caddy-DMZ exposure boundary.
+> These documentation clarifications preserve the accepted delivery history.
 
 Phase 1 core services are deployed and running on phobos and deimos. This
 accepted spec documents the service group as implemented: composition patterns,
@@ -155,7 +166,8 @@ addresses. coredns-common and chrony-common are composition-only targets
 - Named volumes: `config`, `data`, `host-certs`.
 - Internal CA for `*.abhaile.home.arpa` TLS.
 
-**caddy-dmz** — public-facing reverse proxy on phobos.
+**caddy-dmz** — end-user ingress on phobos, currently intended for LAN/WireGuard access,
+with public certificate trust and an entry point for possible future Internet exposure.
 
 - `podman.user: root`, `podman.network: ipvlan-l2`
 - Defines `composition.ingress.dmz.base` — aggregation target for DMZ ingress.
@@ -238,7 +250,7 @@ addresses. coredns-common and chrony-common are composition-only targets
 - `systemd.network: host` (no /32 address, runs on host network).
 - Vault-agent template: `ddclient.conf.ctmpl` for deSEC API credentials.
 - Systemd path/service: `ddclient-conf.path` watches conf file for restart.
-- Updates `*.abhaile.dedyn.io` records via deSEC API.
+- Updates `vpn.abhaile.dedyn.io` to the WAN IPv4 address via deSEC API.
 
 **omada-controller** — TP-Link network controller on phobos.
 
@@ -267,7 +279,7 @@ addresses. coredns-common and chrony-common are composition-only targets
   `/usr/local/lib/abhaile/tools/rebuild-omada-cert.sh`, concatenate leaf + root CA,
   copy the matching key, and try-restart the controller container.
 - Contributes ingress blocks to both caddy-internal (internal + svc-cert) and
-  caddy-dmz (dmz-ingress for hairpin NAT).
+  caddy-dmz (DMZ ingress reached directly through the local DNS override).
 - Controller named volumes: `cert`, `data`, `logs`, `host-certs`.
 - MongoDB named volumes: `config`, `data`.
 
@@ -435,9 +447,10 @@ Core services register in two internal zones:
 - `abhaile.home.arpa.` — direct A records for `ns1`/`ns2` authoritative
   nameserver targets, plus CNAME aliases for user-facing names.
 
-caddy-dmz additionally holds the external wildcard:
-
-- `*.abhaile.dedyn.io` → 172.20.100.200 (A record in `abhaile.dedyn.io.` zone).
+The external zone declaration contains `*.abhaile.dedyn.io` → `172.20.100.200`, but external
+zones are skipped by the DNS renderer; this is not evidence of public-provider state.
+The shared CoreDNS template supplies local wildcard A answers pointing to Caddy-DMZ.
+Queries for `vpn.abhaile.dedyn.io` and its descendants follow upstream DNS (ADR 0015).
 
 Zone files are rendered by the DNS renderer from `config/network.yaml` records
 and served by coredns-filtered/coredns-clean via included coredns-common zone

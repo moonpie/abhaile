@@ -28,6 +28,20 @@
     }
 }
 {% endfor %}
+# ----- WireGuard endpoint and reserved VPN namespace -----
+vpn.abhaile.dedyn.io:53 {
+    bind {{ service.config.bind_ip }}
+
+    log
+    errors
+
+    forward . 9.9.9.9 149.112.112.112 1.1.1.1 1.0.0.1 {
+        force_tcp
+    }
+
+    cache 300
+}
+
 # ----- Filtered recursive resolver -----
 .:53 {
     bind {{ service.config.bind_ip }}

@@ -8,8 +8,9 @@ title: Home Automation Services
 status: active
 owner: moonpie
 created: 2026-06-05
-updated: 2026-11-01
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
   - 0014-host-storage-and-nas-mount-boundaries
@@ -55,13 +56,31 @@ address also remain from the earlier proposal.
 - Permit supported Hive and Tuya cloud integrations during initial adoption without making them
   architectural dependencies of the service deployment.
 
+## End-User DMZ Ingress
+
+These are additional `composition.ingress.dmz.blocks` routes; retain the existing internal
+sites. Follow [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md):
+local wildcard DNS selects Caddy-DMZ, explicit Caddy sites select applications, and unknown
+names retain HTTP 404. Use Let's Encrypt certificates without requiring the end-user device
+to trust the internal CA. LAN clients connect directly; remote clients use WireGuard and home
+DNS with DMZ routing. No per-application local DNS record or backend relocation is required.
+Direct public Internet exposure is outside this scope.
+
+Add `home-assistant.abhaile.dedyn.io` alongside the existing internal site. Preserve Home
+Assistant's native authentication and application security headers, including WebSocket support;
+do not add an Authelia gate. Configure trust for the actual Caddy-DMZ proxy address alongside
+the existing internal proxy before activation, without trusting entire VLANs.
+Zigbee2MQTT and ESPHome remain internal administration interfaces. Frigate's household-facing
+DMZ route remains an open choice; its existing authenticated internal ingress remains in scope.
+
 ## Non-Goals
 
 - Pairing or migrating every existing device as part of service deployment.
 - Removing the Hive or IKEA hubs during the initial rollout.
 - Converting Smart Life plugs to local firmware.
 - Managing Omada VLANs, ACLs, multicast relays, or DHCP reservations.
-- External Home Assistant access or a public DMZ ingress.
+- Direct public Internet exposure of Home Assistant or other applications.
+- Frigate DMZ ingress until household viewing requirements are agreed.
 - High availability or multi-host failover for the home-automation group.
 - Cross-spec host capacity validation; assess capacity after the planned service estate is deployed,
   unless operational symptoms require earlier investigation.
@@ -385,6 +404,11 @@ spec. Device migration can proceed independently once the relevant service is co
 - [x] Home Assistant persists UI-managed state, connects to MQTT, and is reachable through internal
   Caddy using native authentication. See [Home Assistant MQTT Discovery](#home-assistant-mqtt-discovery-2026-11-01)
   for implementation and operator validation evidence.
+- [ ] Home Assistant has an additional Let's Encrypt Caddy-DMZ route at
+  `home-assistant.abhaile.dedyn.io`, with native login, dashboard, WebSocket and Companion-client
+  access verified on LAN and through WireGuard; the internal route and UI state remain intact.
+- [ ] Home Assistant trusts the specific DMZ proxy address; untrusted forwarded requests are
+  rejected and no internal CA installation is needed on end-user clients.
 - [ ] ESPHome is deployed, persistent, and reachable through internal Caddy without requiring
   cross-VLAN mDNS.
 - [ ] Frigate uses bundled go2rtc, detects the Coral TPU, reaches the initial Reolink cameras, and is

@@ -5,6 +5,10 @@ When normal operations fail. Use direct IPs. No DNS, no Vault, no runner require
 > **Offline access:** Bookmark this file on your phone (`raw.githubusercontent.com` URL).
 > Keep a printed copy in the rack cabinet. Last verified: 2026-06-07.
 
+For DNS, certificate and LAN/WireGuard ingress diagnosis, see the
+[DNS and ingress access runbook](dns-and-ingress.md). DMZ access is not synonymous with
+public Internet exposure.
+
 ## Quick Triage (Start Here)
 
 | Symptom | Go to |

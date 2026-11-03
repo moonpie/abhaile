@@ -46,7 +46,8 @@ Key rules:
 - Unprivileged render phase; privileged Ansible reconciliation
 - Validation before publication and last-successful recovery for supported effects
 - Deterministic `/32` service addressing (ipvlan-l2)
-- Split-horizon DNS for internal vs external resolution
+- Internal DNS and local public-name overrides for LAN/VPN access; see the
+  [DNS and ingress model](docs/adr/0015-dns-ingress-and-certificate-trust-boundaries.md)
 - Secrets boundary between bootstrap (encrypted) and runtime (templated)
 - Reconciliation pattern: desired state in git, drift analysis, idempotent apply
 

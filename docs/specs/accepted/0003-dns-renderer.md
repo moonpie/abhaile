@@ -8,8 +8,9 @@ title: DNS Renderer
 status: accepted
 owner: moonpie
 created: 2026-06-04
-updated: 2026-06-05
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
   - 0005-service-authoring-model
@@ -21,6 +22,11 @@ scope:
 ```
 
 ## Context
+
+> **Architectural context clarified 2026-11-03:**
+> [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md) records the original
+> LAN/WireGuard access intent, public certificate trust and future Caddy-DMZ exposure boundary.
+> These documentation clarifications preserve the accepted delivery history.
 
 The DNS renderer is implemented and in production use. This accepted spec documents
 what was built as reference material for future maintenance and audits.
@@ -142,9 +148,13 @@ Behavior:
 1. PTR TTL defaults to `3600` unless source record provides `ttl`.
 1. IPv6 reverse zones (`*.ip6.arpa.`) currently raise `RenderError` for PTR generation.
 
-### Split-Horizon Internal and External Behavior
+### Internal and External Zone Rendering
 
-Split-horizon behavior is implemented through zone provider typing:
+The historical split-horizon terminology below refers to provider selection. Actual local
+resolution overrides are configured in the shared CoreDNS template, not by skipping external
+zones. See ADR 0015 for the full DNS and ingress access model.
+
+Zone rendering is selected through provider typing (distinct from resolver overrides):
 
 - Internal zones (`provider.type: internal`) are rendered into CoreDNS zone files for provider services.
 - External zones (`provider.type: external`) are not rendered by DNS renderer and are skipped.

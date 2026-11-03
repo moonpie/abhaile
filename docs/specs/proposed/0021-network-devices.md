@@ -8,8 +8,9 @@ title: Network Device Configuration
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-22
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0001-output-root-and-environment-paths
   - 0002-hash-based-drift-detection-and-state-model
   - 0004-apply-execution-model
@@ -23,6 +24,11 @@ scope:
 
 ## Context
 
+> **Architectural context clarified 2026-11-03:**
+> [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md) records the original
+> LAN/WireGuard access intent, public certificate trust and future Caddy-DMZ exposure boundary.
+> DMZ ingress does not by itself authorize public Internet access.
+>
 > **Reconciliation drift note (2026-10-20):** This proposal predates ADR 0013 and the retirement of
 > apply-owned `out/state/`. Before activation, its write and state-safety language must be rebased
 > onto the Ansible reconciliation and runner recovery model.
@@ -76,7 +82,7 @@ other high-impact network state.
 - [ ] Document DHCP scope configuration for all VLANs
 - [ ] Document inter-VLAN ACL policy with explicit allow/deny rules
 - [ ] Document WireGuard VPN server configuration and client profiles
-- [ ] Document NAT hairpin rules for DMZ service access
+- [ ] Document home DNS and direct DMZ routing for LAN/WireGuard service access
 - [ ] Document switch port profiles and spanning tree configuration
 - [ ] Document wireless SSID-to-VLAN mappings and Wi-Fi 6 settings
 - [ ] Document QoS policy for gaming and real-time traffic
@@ -213,7 +219,7 @@ adapter surface is proven.
 | 80 | Guest | 172.20.80.0/24 | 172.20.80.1 | an t-idirlion.guest | Guest network (internet only, isolated) |
 | 90 | VPN | 172.20.90.0/24 | 172.20.90.1 | N/A | WireGuard VPN clients |
 | 99 | Mgmt | 172.20.99.0/24 | 172.20.99.1 | an t-idirlion.mgmt | Network device management (switches, APs, ER605) |
-| 100 | DMZ | 172.20.100.0/24 | 172.20.100.1 | N/A | Public-facing services (Caddy-DMZ) |
+| 100 | DMZ | 172.20.100.0/24 | 172.20.100.1 | N/A | LAN/VPN ingress; future public entry point (Caddy-DMZ) |
 
 ### ER605 Gateway Configuration
 
@@ -223,41 +229,45 @@ Each VLAN gets a DHCP scope with appropriate options:
 
 | VLAN | Range | Option 6 (DNS) | Option 42 (NTP) | Option 15/119 (Domain) |
 | --- | --- | --- | --- | --- |
-| 1 | .100–.199 | coredns-clean | chrony-a, chrony-b | — |
-| 99 | .100–.199 | coredns-clean | chrony-a, chrony-b | mgmt.abhaile.home.arpa |
-| 20 | .100–.199 | coredns-clean | chrony-a, chrony-b | svc.abhaile.home.arpa |
-| 30 | .100–.199 | coredns-filtered | chrony-a, chrony-b | abhaile.home.arpa |
-| 40 | .100–.199 | coredns-filtered-light | chrony-a, chrony-b | abhaile.home.arpa |
-| 50 | .100–.199 | coredns-filtered-strict | chrony-a, chrony-b | iot.abhaile.home.arpa |
-| 60 | .100–.199 | coredns-filtered-strict | chrony-a, chrony-b | camera.abhaile.home.arpa |
-| 70 | .100–.199 | coredns-filtered-light | chrony-a, chrony-b | abhaile.home.arpa |
-| 80 | .100–.199 | coredns-filtered-strict | chrony-a, chrony-b | guest.abhaile.home.arpa |
+| 1 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | — |
+| 99 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | mgmt.abhaile.home.arpa |
+| 20 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | svc.abhaile.home.arpa |
+| 30 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | abhaile.home.arpa |
+| 40 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | abhaile.home.arpa |
+| 50 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | iot.abhaile.home.arpa |
+| 60 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | camera.abhaile.home.arpa |
+| 70 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | abhaile.home.arpa |
+| 80 | .100–.199 | coredns-a, coredns-b | chrony-a, chrony-b | guest.abhaile.home.arpa |
 
 VPN (90) and DMZ (100) do not run DHCP on the ER605 — VPN addresses are
 assigned by WireGuard, and DMZ uses static /32 addressing.
 
 DNS server addresses reference service IPs from `config/network.yaml`:
 
-- coredns-filtered: 172.20.20.235
-- coredns-clean: 172.20.20.236
+- coredns-a: 172.20.20.235
+- coredns-b: 172.20.20.236
 - chrony-a: 172.20.20.237
 - chrony-b: 172.20.20.238
 
-If CoreDNS implements source-CIDR policy internally, ER605 DHCP may instead
-provide the same highly available CoreDNS pair to every VLAN and let CoreDNS
-select clean, filtered, lightly filtered, or strictly filtered upstream policy
-from the client source subnet.
+Advertise the same resolver pair on each DHCP-enabled VLAN. Both instances apply one
+policy based on the source IP CoreDNS sees. General (30), IoT (50), Camera (60), and
+Guest (80) queries use the local Blocky instance for external resolution. Gaming (40),
+Cast (70), and other source subnets forward directly upstream. Verify the source IP
+seen by CoreDNS for WireGuard clients before assigning them a filtering expectation.
 
 #### Inter-VLAN ACL Policy
 
-Default stance: deny all inter-VLAN traffic, then add explicit allows.
+Default stance: deny all inter-VLAN traffic, then add explicit allows. Reserve SSH and HTTPS
+management access to VLAN 99 for designated Admin clients and admin WireGuard peers. General
+clients and user/travel WireGuard peers receive no management grant. Identify eligible clients
+and peers in gateway policy before enabling these rules. Client-side WireGuard Allowed IPs
+describe routing and do not enforce gateway authorization.
 
 Key allow rules:
 
 | Source | Destination | Ports/Protocol | Purpose |
 | --- | --- | --- | --- |
 | VLAN 30 (General) | VLAN 20 (Services) | TCP/\* | Full service access |
-| VLAN 30 (General) | VLAN 99 (Mgmt) | TCP/443, TCP/22 | Network device management |
 | VLAN 30 (General) | VLAN 50 (IoT) | TCP/\* | IoT device management |
 | VLAN 30 (General) | VLAN 70 (Cast) | TCP/UDP/\* | Casting |
 | VLAN 40 (Gaming) | WAN | TCP/UDP/\* | Internet access (QoS priority) |
@@ -267,7 +277,8 @@ Key allow rules:
 | VLAN 20 (Services) | VLAN 50 (IoT) | TCP/554 | RTSP pull (go2rtc → cameras, if needed) |
 | VLAN 20 (Services) | VLAN 60 (Camera) | TCP/554 | RTSP pull (go2rtc → cameras) |
 | VLAN 90 (VPN) | VLAN 20 (Services) | TCP/\* | VPN admin access |
-| VLAN 90 (VPN) | VLAN 99 (Mgmt) | TCP/443, TCP/22 | VPN network management |
+| Admin clients | VLAN 99 (Mgmt) | TCP/443, TCP/22 | Network device management |
+| Admin WireGuard peers | VLAN 99 (Mgmt) | TCP/443, TCP/22 | Remote network device management |
 | All VLANs | VLAN 20 (Services) | UDP/53, TCP/53 | DNS resolution |
 | All VLANs | VLAN 20 (Services) | UDP/123 | NTP synchronization |
 
@@ -276,7 +287,6 @@ Key deny rules:
 | Source | Destination | Ports/Protocol | Purpose |
 | --- | --- | --- | --- |
 | VLAN 80 (Guest) | RFC1918 | `*` | Guest isolation — internet only |
-| VLAN 50 (IoT) | WAN | UDP/53, TCP/53, TCP/443 (DoH/DoT) | Force local DNS |
 | VLAN 60 (Camera) | WAN | `*` | Camera internet block |
 | All (except Admin/VPN) | WAN | UDP/123 | Block direct NTP to internet |
 | All | All | UPnP | UPnP disabled (exception VLAN 40) |
@@ -293,19 +303,25 @@ Client profiles:
 | Profile | Allowed IPs | Purpose |
 | --- | --- | --- |
 | admin | 0.0.0.0/0 (full tunnel) | Full network access including management |
-| user | 172.20.20.0/24, 172.20.30.0/24, 172.20.70.0/24 | Service, general, and cast VLAN access |
+| user | 172.20.20.0/24, 172.20.30.0/24, 172.20.70.0/24, 172.20.100.0/24 | Service, general, cast, and DMZ access |
 | travel | 0.0.0.0/0 (full tunnel) | Internet privacy, DNS through home |
 
-#### NAT Hairpin
+#### LAN and WireGuard DNS and DMZ Access
 
-Allow internal clients to access DMZ services (\*.abhaile.dedyn.io) via the
-public IP without leaving the network. Hairpin NAT rewrites traffic destined
-for the WAN IP back to the DMZ VLAN (172.20.100.0/24).
+Clients use the home DNS resolvers. Local wildcard A answers for `*.abhaile.dedyn.io`
+point directly to Caddy-DMZ at `172.20.100.200`; this path does not require hairpin NAT.
+The `vpn.abhaile.dedyn.io` exception resolves upstream to the WAN address.
+VPN profiles must provide home DNS
+and routes to the DNS resolver addresses and DMZ subnet. These are planned requirements,
+not evidence that existing router/client profiles already implement them.
+
+Direct Internet access to application routes is not currently intended. Future exposure
+requires a separate review of public DNS, WAN firewall/NAT and all Caddy routes sharing
+an exposed listener. See ADR 0015.
 
 #### Additional WAN Rules
 
-- DoH/DoT blocklist enforcement: block outbound TCP/443 and TCP/853 to known
-  DoH/DoT resolvers from IoT, Camera, and Guest VLANs.
+- DNS bypass enforcement is deferred. Clients can select alternate resolvers.
 - UPnP disabled globally, exception for VLAN 40 (Gaming).
 
 ### Switch Configuration
@@ -460,16 +476,13 @@ Allows general client devices to discover casting targets without full L2 bridgi
 
 - ADR: null
 
-- Decision: Separate DNS pools (filtered vs clean) per VLAN purpose.
+- Decision: Use mirrored CoreDNS instances with one source-subnet filtering policy.
 
-- Rationale: Services, Mgmt, DMZ, and Adoption need predictable clean DNS for infrastructure
-  and recovery. General, IoT, Camera, Cast, and Guest need filtered DNS policy, with lighter
-  filtering for Gaming/Cast where compatibility is more fragile and stricter filtering for
-  IoT/Camera/Guest.
+- Rationale: Both servers provide the same answers and filtering behavior for availability.
+  Gaming and Cast bypass local Blocky for compatibility, while infrastructure can resolve
+  upstream independently of Blocky.
 
-- Impact: DHCP Option 6 may differ between VLANs, or CoreDNS may apply source-CIDR policy
-  while DHCP provides the same HA resolver pair everywhere. Devices cannot bypass local DNS
-  due to ACL blocking outbound DoH/DoT.
+- Impact: DHCP advertises both resolvers. Blocking alternate DNS, DoH, or DoT is deferred.
 
 - ADR: null
 
@@ -491,11 +504,12 @@ Allows general client devices to discover casting targets without full L2 bridgi
 - [ ] Network render/normalization produces deterministic output without contacting the controller
 - [ ] Network diff compares desired state with live controller state in read-only mode
 - [ ] Network apply defaults to dry-run and requires an explicit live flag for writes
-- [ ] Document DHCP scopes with correct DNS, NTP, and domain options per VLAN
+- [ ] Document DHCP scopes with correct DNS, NTP, and domain options per VLAN. Verify both
+  CoreDNS instances apply the same Blocky selection by source subnet.
 - [ ] Document inter-VLAN ACL rules with explicit allow/deny matrix
 - [ ] Document WireGuard VPN configuration and validate admin/user/travel profiles
-- [ ] Document NAT hairpin configuration for DMZ access
-- [ ] Document DoH/DoT blocking and NTP WAN restrictions
+- [ ] Validate home DNS resolution and DMZ routing for LAN/WireGuard access
+- [ ] Document NTP WAN restrictions
 - [ ] Document switch port profiles for all three switches
 - [ ] Document RSTP topology with root/secondary bridge assignment
 - [ ] Document IGMP snooping and storm control settings

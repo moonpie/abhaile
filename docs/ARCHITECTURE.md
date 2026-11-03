@@ -51,6 +51,21 @@ flowchart TD
 
 Each containerized service gets a deterministic /32 address on ipvlan-l2. See [INVENTORY.md](INVENTORY.md) for the full address table.
 
+## DNS, Ingress and Trust
+
+[ADR 0015](adr/0015-dns-ingress-and-certificate-trust-boundaries.md) records the original intent.
+Internal `home.arpa` routes use internal DNS and the internal CA. End-user `dedyn.io` routes use
+Caddy-DMZ and Let's Encrypt certificates, avoiding internal CA installation on end-user devices.
+Home DNS overrides wildcard A queries to the private DMZ proxy; the intended VPN hostname
+exception follows upstream DNS. Application selection belongs to Caddy routes, with a
+wildcard 404 fallback. LAN clients connect directly; remote clients use WireGuard and home DNS.
+
+The architecture prepares the same URLs, certificates and routes for possible later Internet
+exposure at Caddy-DMZ. That future edge change requires review of DNS, firewall/NAT and all routes
+on the listener; it does not require moving backend services. Public certificates do not imply
+public reachability or VLAN isolation. See the [access runbook](runbooks/dns-and-ingress.md) for
+current behavior, verification limits and troubleshooting.
+
 ## Secrets Flow
 
 ```mermaid

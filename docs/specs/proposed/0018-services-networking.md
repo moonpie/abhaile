@@ -8,8 +8,9 @@ title: Networking Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
 supersedes: null
@@ -21,11 +22,8 @@ scope:
 
 ## Context
 
-Media acquisition traffic (qBittorrent) must egress exclusively through a VPN tunnel. If the
-tunnel drops, traffic must not leak to the host's default route. The old project planned this
-via Gluetun as a VPN gateway container with qBittorrent sharing its network namespace
-(`Network=container:gluetun`), plus host-level nftables rules enforcing per-UID egress routing
-so the service user can only reach the internet through the VPN container.
+Media acquisition traffic (qBittorrent) must egress exclusively through a VPN tunnel. qBittorrent shares Gluetun’s network namespace (`Network=container:gluetun`).
+Gluetun’s firewall provides leak protection.
 
 Gluetun already has a `service.yaml` stub (`podman.network: ipvlan-l2`, rootful) and a
 deterministic `/32` address at `172.20.20.239` on the services VLAN. qBittorrent has a stub
@@ -33,9 +31,7 @@ declaring `podman.network: container:gluetun`, meaning it shares Gluetun's netwo
 and has no independent network identity.
 
 This spec covers the service definitions, container composition, VPN credential delivery via
-Vault Agent, and the coordination surface with host-level kill-switch rules. The actual nftables
-ruleset and per-UID policy routing belong to the host-hardening spec (SPEC-2026-020); this spec defines what
-that hardening must enforce for this service group.
+Vault Agent, and verification of Gluetun’s kill switch.
 
 ## Requirements
 
@@ -43,7 +39,6 @@ that hardening must enforce for this service group.
 - [ ] Route all qBittorrent egress through Gluetun's VPN tunnel with no direct internet path
 - [ ] Deliver VPN provider credentials to Gluetun via Vault Agent templates (no secrets in git)
 - [ ] Enforce start ordering: Gluetun must be healthy before qBittorrent starts
-- [ ] Define the contract between this service group and the host-hardening spec for kill-switch enforcement
 
 ## Constraints
 
@@ -52,7 +47,6 @@ that hardening must enforce for this service group.
 - Gluetun requires `NET_ADMIN` and access to `/dev/net/tun` for WireGuard/OpenVPN tunnel creation.
 - VPN credentials are runtime secrets — Vault Agent renders them to a host path consumed by the Gluetun container at startup.
 - No secrets in rendered output. VPN credential paths are references only.
-- Kill-switch nftables rules and per-UID routing table configuration are out of scope for this spec (owned by host-hardening) but the interface contract is defined here.
 - The service must tolerate VPN provider reconnections without manual intervention.
 
 ## Design
@@ -168,37 +162,17 @@ and references Vault paths for:
 Vault Agent collects this template via the standard `vault_agent.templates` mechanism
 (ADR 0005, existing vault-agent service inclusion).
 
-### Kill-Switch Interface Contract (Host-Hardening Boundary)
+### VPN Leak Protection
 
-This spec defines what the host-hardening spec must enforce. The kill-switch operates at
-two levels:
-
-**Level 1 — Container-internal (Gluetun built-in):**
-
-Gluetun's built-in iptables rules block all container egress except through `tun0`. This is
-the first line of defense and operates without host cooperation.
-
-**Level 2 — Host-level nftables (owned by host-hardening spec):**
-
-The host-hardening spec must implement:
-
-1. **Per-UID egress restriction:** Traffic from the UID running the Gluetun container process
-   may only egress to the VPN endpoint IP(s) on the WAN interface. All other egress from
-   that UID is dropped.
-1. **Policy routing table (`vpn`):** A dedicated routing table that forces traffic from the
-   service UID through the VPN tunnel interface.
-1. **Default deny for the service network namespace:** If the VPN tunnel is down and Gluetun's
-   internal firewall is somehow bypassed, host nftables drop any traffic from the
-   `172.20.20.239` source that is not destined for the local network.
-
-This spec provides the host-hardening spec with:
-
-- The container UID (rootful, so `root` or a mapped sub-UID depending on user namespace config)
-- The service IP (`172.20.20.239/32`)
-- The VPN endpoint IP range (provider-dependent, defined at implementation time)
-- The allowed local destinations (services VLAN `172.20.20.0/24`, gateway `172.20.20.1`)
+Use Gluetun’s firewall in the shared network namespace. Prevent direct Internet egress
+from qBittorrent during startup, tunnel loss, reconnects, and service restarts.
+Protection against a disabled or bypassed Gluetun firewall is outside scope.
 
 ### Ingress Path
+
+Under [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md), qBittorrent
+is an administration interface and remains internal-only by default. This proposal does not add
+a Caddy-DMZ route or authorize public exposure of the WebUI.
 
 qBittorrent's WebUI listens on port 8080 within Gluetun's network namespace. Since Gluetun
 has the ipvlan-l2 address `172.20.20.239`, the WebUI is reachable at `172.20.20.239:8080`
@@ -223,14 +197,24 @@ _To be recorded during implementation._
 
 ## Acceptance Criteria
 
+- [ ] Verify no direct Internet egress from qBittorrent during startup, tunnel loss with an
+  active transfer, reconnects, and restarts of either service. Verify transfers resume through
+  the tunnel and the local WebUI remains reachable during a tunnel outage.
+
 - [ ] Detail `service.yaml` definitions for all services in this group
+
 - [ ] Gluetun quadlet renders with `NET_ADMIN` capability, `/dev/net/tun` device, ipvlan-l2 networking, and health check.
+
 - [ ] qBittorrent quadlet renders with `Network=container:gluetun` and `After=/Requires=gluetun.service`.
+
 - [ ] Vault Agent template for VPN credentials is defined and collected by the vault-agent service.
+
 - [ ] No secret values appear in rendered output; only Vault template references and destination paths.
-- [ ] Kill-switch interface contract is documented with specific UIDs, IPs, and allowed destinations for the host-hardening spec.
+
 - [ ] Gluetun container forwards port 8080 (qBittorrent WebUI) through its internal firewall.
+
 - [ ] Integration test validates render output for both services on deimos.
+
 - [ ] Systemd dependency chain prevents qBittorrent from running without a healthy Gluetun.
 
 ### Evidence
@@ -242,8 +226,6 @@ For each completed criterion, include:
 
 ## Out of Scope
 
-- Host-level nftables ruleset implementation (host-hardening spec owns this).
-- Per-UID policy routing table setup (host-hardening spec).
 - Caddy ingress configuration for qBittorrent WebUI (covered by the media services or ingress spec).
 - VPN provider account creation or credential provisioning in Vault (operator task).
 - Download directory layout, media library integration, or \*arr stack connectivity.
@@ -252,21 +234,9 @@ For each completed criterion, include:
 ## Open Questions
 
 1. **VPN provider selection:** Which provider will Gluetun connect to? This determines the
-   credential format (WireGuard private key vs OpenVPN user/pass), endpoint IPs for
-   kill-switch rules, and any provider-specific Gluetun environment variables. Mullvad and
+   credential format (WireGuard private key vs OpenVPN user/pass), VPN endpoint settings, and any provider-specific Gluetun environment variables. Mullvad and
    AirVPN both support WireGuard and port forwarding; ProtonVPN supports WireGuard but has
    limited port forwarding. Decision needed before implementation.
-
-1. **Kill-switch implementation detail:** Should the host-level nftables rules use cgroup-based
-   matching (matching the container's cgroup path) or UID-based matching? Rootful podman
-   containers run as root, so UID-based matching is insufficient without user namespaces. The
-   host-hardening spec needs to determine the most reliable matching strategy for
-   container-originated traffic.
-
-1. **Interaction with host-hardening spec:** Should this spec block on host-hardening, or
-   can the services deploy without host-level kill-switch (relying solely on Gluetun's
-   internal firewall) and have host-level rules applied later? Gluetun's built-in firewall
-   provides defense-in-depth, but the host-level rules are the authoritative kill-switch.
 
 1. **Port forwarding for seeding:** Does the VPN provider support port forwarding, and should
    Gluetun be configured to request a forwarded port? This affects Gluetun environment
@@ -284,5 +254,4 @@ For each completed criterion, include:
 - `config/network.yaml` — gluetun address `172.20.20.239/32` on services VLAN
 - `docs/adr/0005-service-authoring-model.md` — service.yaml contract
 - `docs/adr/0006-secrets-model-and-bootstrap-artifacts.md` — secrets boundary
-- `docs/specs/proposed/0020-host-hardening.md` (SPEC-2026-020 — kill-switch implementation owner)
 - `.old_docs/TODO.md` — Phase 3 Networking & VPN section

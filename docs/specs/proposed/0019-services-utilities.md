@@ -8,18 +8,24 @@ title: Utility Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
 supersedes: null
 superseded_by: null
 scope:
   hosts: [phobos, deimos]
-  services: [homepage, netbox, vaultwarden, postfix, crowdsec]
+  services: [homepage, netbox, vaultwarden, postfix, crowdsec, authelia, caddy-dmz]
 ```
 
 ## Context
+
+> **Architectural context clarified 2026-11-03:**
+> [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md) records the original
+> LAN/WireGuard access intent, public certificate trust and future Caddy-DMZ exposure boundary.
+> DMZ ingress does not by itself authorize public Internet access.
 
 This spec covers the utility service group: a dashboard, IPAM/DCIM inventory,
 password management, email relay, and intrusion detection. All five services
@@ -37,7 +43,7 @@ This group introduces patterns beyond Phase 1 core services:
 - Pod-based multi-container deployment with database sidecar (Netbox + PostgreSQL)
 - VLAN-based SMTP relay restrictions (Postfix accepts mail only from services VLAN)
 - Host-log and reverse-proxy log consumption for intrusion detection (CrowdSec)
-- Cross-service integration with ingress and firewall layers (CrowdSec bouncers for Caddy, nftables, ER605)
+- CrowdSec detection from ingress and host logs
 - Service discovery aggregation for dashboard rendering (Homepage reads service metadata)
 
 The existing quadlet renderer, ingress aggregation, vault-agent template
@@ -54,7 +60,7 @@ points require coordination with other service groups.
 - [ ] Define ingress blocks for web-accessible services (homepage, netbox,
   vaultwarden).
 - [ ] Define Postfix relay restrictions scoped to the services VLAN.
-- [ ] Define CrowdSec integration points (log acquisition, bouncer outputs).
+- [ ] Define CrowdSec integration points (log acquisition and alerts).
 - [ ] Define the Netbox pod pattern (app + PostgreSQL sidecar).
 
 ## Constraints
@@ -65,14 +71,13 @@ points require coordination with other service groups.
   runtime per ADR 0006.
 - Postfix must not relay mail from outside the services VLAN (172.20.20.0/24).
   VLAN-based restrictions enforce this at the MTA level.
-- CrowdSec operates in alert-only mode for LAN-sourced traffic. Active blocking
-  applies only to WAN-facing sources via the ER605 bouncer.
+- CrowdSec starts in detection-only mode for every source.
 - CrowdSec's API and dashboard are restricted to Admin/VPN and Prometheus
   scraping — no general LAN access.
 - Netbox uses the pod pattern: app container and PostgreSQL container share a
   pod network namespace, communicating over localhost.
-- Homepage runs on both hosts to provide dashboard availability regardless of
-  which host is reachable.
+- Homepage runs as a single instance on phobos. Dashboard availability depends on phobos,
+  Caddy and Authelia; no independent fallback or automatic failover is required.
 
 ## Design
 
@@ -80,7 +85,7 @@ points require coordination with other service groups.
 
 | Service | Address | Host | Role |
 | --- | --- | --- | --- |
-| homepage | 172.20.20.202/32 | phobos, deimos | Dashboard / service index |
+| homepage | 172.20.20.202/32 | phobos | Dashboard / service index |
 | netbox | 172.20.20.203/32 | phobos | IPAM/DCIM documentation |
 | vaultwarden | 172.20.20.205/32 | phobos | Password management (Bitwarden-compatible) |
 | postfix | 172.20.20.206/32 | phobos | SMTP relay for internal services |
@@ -106,8 +111,8 @@ Design notes:
 
 - Homepage reads service metadata at render time to produce a static dashboard
   config. No runtime service discovery API calls.
-- Runs on both hosts — each instance renders its own dashboard config reflecting
-  the services mapped to that host plus cross-links.
+- Runs once on phobos. Dashboard service-selection scope is defined separately below;
+  deployment on one host does not imply that links are limited to that host.
 - No vault-agent templates needed — dashboard content is non-secret.
 
 #### netbox
@@ -169,7 +174,7 @@ Design notes:
 - WebSocket support needed for live sync — Caddy must proxy `/notifications/hub`
   to port 3012.
 - External access via caddy-dmz allows mobile/browser clients to sync outside
-  the LAN.
+  the LAN through WireGuard; direct Internet publication remains a separate decision.
 - SQLite is adequate for single-household use — no external database needed.
 
 #### postfix
@@ -200,8 +205,7 @@ Design notes:
 
 #### crowdsec
 
-Intrusion detection engine that parses logs, detects attack patterns, and
-pushes decisions to bouncers (Caddy, nftables, ER605).
+Intrusion detection engine that parses logs and alerts on attack patterns.
 
 Composition:
 
@@ -209,10 +213,9 @@ Composition:
 - `composition.container.mounted_files` for log access (Caddy access logs,
   host auth logs via bind-mount)
 - `composition.config` for `acquis.yaml` (log acquisition sources),
-  `profiles.yaml` (alert-only for LAN, ban for WAN), and
+  `profiles.yaml` (detection-only for all sources), and
   `local_api_credentials.yaml`
-- `composition.vault_agent.templates` for LAPI credentials, bouncer API
-  keys, and optional CrowdSec Central API enrollment key
+- `composition.vault_agent.templates` for LAPI credentials and optional CrowdSec Central API enrollment key
 
 Ports: 8080 (LAPI), 6060 (Prometheus metrics)
 
@@ -220,15 +223,7 @@ Design notes:
 
 - CrowdSec reads caddy-internal and caddy-dmz access logs via host bind-mounts.
   The renderer maps log paths from the caddy services' known output locations.
-- Three bouncers integrate with CrowdSec LAPI:
-  - **Caddy bouncer**: runs as a Caddy module or sidecar, queries LAPI for
-    ban decisions on incoming requests.
-  - **nftables bouncer**: runs on the host, manages an nftables set of banned
-    IPs for direct packet filtering.
-  - **ER605 bouncer**: pushes ban decisions to the gateway ACL via API
-    (implementation deferred — requires ER605 API access pattern).
-- LAN sources (172.20.0.0/16) trigger alerts but not bans — `profiles.yaml`
-  routes these to alert-only remediation.
+- Defer automated remediation and bouncer deployment until alert behavior is reviewed.
 - CrowdSec LAPI access is restricted via Caddy/nftables to Admin VLAN
   (172.20.99.0/24), VPN VLAN (172.20.90.0/24), and Prometheus scraping
   address.
@@ -244,7 +239,7 @@ collected by vault-agent on the target host. New templates for this group:
 | netbox | `netbox-env.ctmpl` | `netbox.env` | DB credentials, secret key, superuser password |
 | vaultwarden | `vaultwarden-env.ctmpl` | `vaultwarden.env` | Admin token, SMTP credentials, push keys |
 | postfix | `postfix-relay.ctmpl` | `postfix-relay-credentials` | Smarthost username/password (sasl_passwd format) |
-| crowdsec | `crowdsec-env.ctmpl` | `crowdsec.env` | LAPI credentials, bouncer keys, enrollment key |
+| crowdsec | `crowdsec-env.ctmpl` | `crowdsec.env` | LAPI credentials, enrollment key |
 
 Homepage does not need vault-agent templates — its config is non-secret.
 
@@ -258,11 +253,12 @@ Web-accessible services contribute internal ingress blocks to caddy-internal:
 | netbox | `netbox.abhaile.home.arpa` | Authelia forward auth | |
 | vaultwarden | `passwords.abhaile.home.arpa` | None (client auth) | Admin panel uses Authelia |
 
-Vaultwarden also contributes a DMZ ingress block to caddy-dmz:
+Homepage and Vaultwarden also contribute DMZ ingress blocks to caddy-dmz:
 
 | Service | FQDN | Auth | Notes |
 | --- | --- | --- | --- |
-| vaultwarden | `vault.abhaile.dedyn.io` | None (client auth) | Bitwarden client sync |
+| homepage | `home.abhaile.dedyn.io` | Authelia forward auth | Household service index |
+| vaultwarden | `vault.abhaile.dedyn.io` | Native client auth | Bitwarden client sync |
 
 Postfix and CrowdSec do not need ingress — they serve non-HTTP protocols or
 are access-restricted via nftables.
@@ -311,12 +307,7 @@ Log Sources:
   (future: nftables log) ─────┘           │
                                           ▼
                                     CrowdSec LAPI
-                                    ┌─────┼─────┐
-                                    ▼     ▼     ▼
-                              Caddy    nftables  ER605
-                              bouncer  bouncer   bouncer
-                              (ban at  (ban at   (ban at
-                               L7)     L3/L4)    gateway)
+                                    Alerts for review
 ```
 
 ### Postfix Relay Topology
@@ -345,11 +336,13 @@ Internal services (172.20.20.0/24)
 
 - ADR: null
 
-- Decision: CrowdSec operates alert-only for LAN sources.
+- Decision: Start CrowdSec in detection-only mode for every source.
 
-- Rationale: Banning LAN IPs risks locking out legitimate users on shared subnets. Alert-only mode provides visibility without disruption for internal traffic while still blocking external attackers.
+- Rationale: Review alerts from normal household, WireGuard, and admin use to identify
+  false positives before introducing automated blocking.
 
-- Impact: CrowdSec profiles must distinguish LAN (172.20.0.0/16) from WAN sources and route them to different remediation actions.
+- Impact: Defer bouncers. A future blocking policy must define covered traffic and a
+  procedure to reverse mistaken bans.
 
 - ADR: null
 
@@ -365,32 +358,89 @@ Internal services (172.20.20.0/24)
 
 - Rationale: Mobile and browser Bitwarden clients need to sync outside the LAN. Caddy-dmz with public ACME provides TLS termination. Bitwarden's own client authentication handles access control.
 
-- Impact: Adds a public DNS record and DMZ ingress block. Attack surface is limited to Vaultwarden's authentication layer.
+- Impact: Adds an explicit Caddy-DMZ route under the wildcard namespace. LAN clients and
+  remote WireGuard clients use the same URL and public certificate trust. No per-service
+  local DNS record or public Internet exposure is required. Native client authentication remains
+  necessary; future WAN exposure requires a separate review.
 
 - ADR: null
 
-- Decision: Homepage runs on both hosts.
+- Decision (clarified 2026-11-03): Homepage runs as a single instance on phobos.
 
-- Rationale: A dashboard should be reachable regardless of which host is available. Homepage is stateless and lightweight — running two instances adds negligible overhead.
+- Rationale: Duplicating Homepage does not provide high availability while Caddy and
+  authentication remain on phobos. The operator selected a single instance and accepts
+  dashboard unavailability during a phobos outage.
 
-- Impact: Homepage appears in mapping.yaml for both phobos and deimos. Each instance renders a dashboard config reflecting all services.
+- Impact: Map Homepage only to phobos at `172.20.20.202/32`. No duplicate address ownership,
+  independent fallback dashboard or failover mechanism is required.
 
 - ADR: null
+
+## End-User DMZ Ingress
+
+These are additional `composition.ingress.dmz.blocks` routes; retain the existing internal
+sites. Follow [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md):
+local wildcard DNS selects Caddy-DMZ, explicit Caddy sites select applications, and unknown
+names retain HTTP 404. Use Let's Encrypt certificates without requiring the end-user device
+to trust the internal CA. LAN clients connect directly; remote clients use WireGuard and home
+DNS with DMZ routing. No per-application local DNS record or backend relocation is required.
+Direct public Internet exposure is outside this scope.
+
+Homepage adds an Authelia-protected household route. Its end-user links must use the configured
+`dedyn.io` application URLs; internal administration links must not imply those services are
+available without internal CA trust. NetBox remains internal. Vaultwarden retains native client
+authentication on the DMZ route; do not put a forward-auth gate in its client/API flows or publish
+its admin panel through the DMZ route. Retain the internal protected administration path.
+
+### Shared Authelia Prerequisite
+
+This proposal owns the additional `auth.abhaile.dedyn.io` login route, session cookie configuration
+for `abhaile.dedyn.io`, explicit service/group access policies and the DMZ forward-auth integration.
+Retain the existing internal portal and cookie scope. One Authelia instance serves both domains;
+do not duplicate the user database. The browser's complete login, logout and redirect flow must
+stay on publicly trusted HTTPS when starting from a DMZ application. Avoid broad wildcard policy
+access and unrestricted redirect destinations. Deliver this prerequisite before protected DMZ
+application routes. It does not authorize publicly exposing the authentication portal.
 
 ## Acceptance Criteria
 
+- [ ] Authelia serves `auth.abhaile.dedyn.io` with a trusted certificate, explicit dedyn.io session
+  scope and application/group policies; existing home.arpa login remains functional.
+
+- [ ] Homepage DMZ login, return redirect, authorization and logout work on LAN and WireGuard
+  without visiting an internal-CA URL; unauthorized users and unsafe redirects are rejected.
+
+- [ ] Homepage end-user links use the agreed DMZ URLs; native Vaultwarden client sync works
+  without a forward-auth gate and the DMZ route does not expose Vaultwarden administration.
+
+- [ ] Existing internal sites and the wildcard HTTP 404 fallback are preserved.
+
 - [ ] Detail `service.yaml` definitions for all services in this group
+
 - [ ] Netbox pod composition renders app + PostgreSQL containers with shared pod network
+
 - [ ] All services added to `config/mapping.yaml` under target hosts
+
 - [ ] Vault-agent templates defined for netbox, vaultwarden, postfix, and crowdsec
+
 - [ ] Postfix main.cf restricts relay to services VLAN (mynetworks = 172.20.20.0/24, 127.0.0.0/8)
+
 - [ ] CrowdSec acquis.yaml references correct log paths for caddy-internal and caddy-dmz
-- [ ] CrowdSec profiles route LAN sources to alert-only remediation
-- [ ] Ingress blocks render for homepage, netbox, and vaultwarden with Authelia forward auth
+
+- [ ] CrowdSec generates alerts for local and remote test traffic with no automated blocks
+
+- [ ] Internal Homepage and NetBox ingress use Authelia; Vaultwarden client flows use native
+  authentication and its internal administration path remains protected.
+
 - [ ] Vaultwarden DMZ ingress block renders for external client sync
-- [ ] Homepage renders on both phobos and deimos
+
+- [ ] Homepage renders only on phobos at `172.20.20.202/32`; no Homepage instance is
+  mapped to or rendered on deimos.
+
 - [ ] Unit tests pass for new composition patterns
+
 - [ ] Integration test: full render of phobos produces correct artifacts for all five services
+
 - [ ] No regressions in existing integration tests
 
 ### Evidence
@@ -418,10 +468,6 @@ For each completed criterion, include:
    and caddy-dmz containers (likely `/srv/caddy-internal/logs/access.log` and
    `/srv/caddy-dmz/logs/access.log`). Are these volume-backed or host-path?
 
-1. **CrowdSec bouncer deployment model** — Should the Caddy bouncer run as a
-   Caddy HTTP module (compiled in), a sidecar container querying LAPI, or a
-   Caddy layer4 plugin? Each has different build and runtime implications.
-
 1. **Postfix smarthost provider** — Which external SMTP relay? Fastmail,
    Mailgun, AWS SES, or another provider? This affects credential format in the
    vault-agent template and `main.cf` relay configuration.
@@ -441,8 +487,7 @@ For each completed criterion, include:
    can Netbox operate without it for a documentation-only use case?
 
 1. **CrowdSec LAPI access control** — The spec restricts LAPI to Admin/VPN/
-   Prometheus. Should bouncers on the same host connect via localhost (pod
-   network), or via the /32 address with API key authentication?
+   Prometheus. Confirm the intended access paths during implementation.
 
 ## References
 

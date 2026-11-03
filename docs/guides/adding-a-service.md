@@ -290,6 +290,15 @@ complete them explicitly; enrollment must not assume that a previous manual serv
 
 ## Optional: Caddy Ingress
 
+Choose the ingress namespace using [ADR 0015](../adr/0015-dns-ingress-and-certificate-trust-boundaries.md).
+The checklist below is for internal-CA ingress. End-user routes can instead contribute
+`composition.ingress.dmz.blocks[]` for trusted HTTPS under `*.abhaile.dedyn.io`.
+The existing local wildcard A override sends names to Caddy-DMZ; an explicit Caddy route selects
+the application, so no individual local DNS record is needed. Choose native authentication or
+Authelia according to application/client requirements. DMZ ingress currently means LAN/WireGuard
+access, not authorization for public exposure. Backend placement need not change.
+See the [access runbook](../runbooks/dns-and-ingress.md).
+
 - [ ] Create Caddyfile snippet in `config/services/<name>/caddy/`
 - [ ] Add `composition.ingress.internal.blocks[]` referencing it
 - [ ] Add CNAME record in `config/network.yaml` DNS section

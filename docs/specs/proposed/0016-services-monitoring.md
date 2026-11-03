@@ -8,8 +8,9 @@ title: Monitoring and Observability Services
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-10-27
+updated: 2026-11-03
 related_adrs:
+  - 0015-dns-ingress-and-certificate-trust-boundaries
   - 0005-service-authoring-model
 supersedes: null
 superseded_by: null
@@ -33,6 +34,11 @@ scope:
 ```
 
 ## Context
+
+> **Architectural context clarified 2026-11-03:**
+> [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md) records the original
+> LAN/WireGuard access intent, public certificate trust and future Caddy-DMZ exposure boundary.
+> DMZ ingress does not by itself authorize public Internet access.
 
 The homelab runs 20+ containerized services across two hosts with no centralized visibility
 into service health, resource usage, network performance, or log aggregation. Operators
@@ -170,7 +176,8 @@ Host-bound exporters and log shippers run on both hosts to provide full coverage
 - Container image: `grafana/grafana` (pinned tag)
 - Volumes: `/srv/grafana/data` (dashboards, plugins, sqlite)
 - Config: provisioning directory with datasource YAML (Prometheus URL, Loki URL)
-- Vault-agent template: admin password, optional OIDC client secret (Authelia integration)
+- Vault-agent template: Grafana administrator password.
+- Use Grafana native accounts for sign-in and role assignment. Defer shared sign-in via OIDC.
 - Caddy ingress: `grafana.abhaile.home.arpa` → internal reverse proxy
 - Systemd: After prometheus, loki (datasource availability)
 
@@ -219,7 +226,7 @@ Host-bound exporters and log shippers run on both hosts to provide full coverage
 - Config: rendered `blackbox.yml` with probe modules (http, dns, tcp, icmp)
 - Probe targets (rendered into Prometheus relabeling config):
   - Internal HTTP: `*.abhaile.home.arpa`, `*.svc.abhaile.home.arpa` services
-  - DMZ HTTP: `*.abhaile.dedyn.io` via hairpin NAT
+  - DMZ HTTP: configured `*.abhaile.dedyn.io` routes via home DNS and direct DMZ routing
   - TCP: DNS :53, MQTT :1883, Vault :8200
   - External: `1.1.1.1`, `9.9.9.9`, `desec.io`, `deb.debian.org`
 
@@ -365,7 +372,6 @@ an inhibited Frigate. The local guard operates independently of this monitoring 
 | Secret | Delivery | Consumer |
 | --- | --- | --- |
 | Grafana admin password | vault-agent template → env file | Grafana container |
-| Grafana OIDC client secret | vault-agent template → env file | Grafana container |
 | Alertmanager SMTP credentials | vault-agent template → alertmanager.yml section | Alertmanager container |
 | SNMP community strings | vault-agent template → snmp.yml or env file | SNMP exporter container |
 
@@ -373,7 +379,7 @@ an inhibited Frigate. The local guard operates independently of this monitoring 
 
 | Service | FQDN | Auth |
 | --- | --- | --- |
-| grafana | grafana.abhaile.home.arpa | Authelia forward-auth |
+| grafana | grafana.abhaile.home.arpa | Grafana native authentication |
 | uptime-kuma | uptime.abhaile.home.arpa | Authelia forward-auth |
 | librespeed | speed.abhaile.home.arpa | none (LAN-only utility) |
 | smokeping | smokeping.abhaile.home.arpa | Authelia forward-auth |
@@ -386,7 +392,7 @@ an inhibited Frigate. The local guard operates independently of this monitoring 
 vault → vault-agent → abhaile-secrets-ready
                           │
                           ├── alertmanager (needs notification creds)
-                          └── grafana (needs admin password + OIDC)
+                          └── grafana (needs admin password)
 
 prometheus → alertmanager (alerting route)
 loki (independent)
@@ -396,44 +402,107 @@ node-exporter, podman-exporter (independent, early boot)
 
 ## Decision Notes
 
-_To be recorded during implementation._
+- Decision (2026-11-03): Centralized monitoring remains on phobos. Monitoring services while
+  phobos is running is sufficient for the initial deployment; no independent observer is required.
+- Rationale: Keep the initial monitoring deployment simple. The operator explicitly accepts
+  the host-outage detection and notification gap for now.
+- Impact: Do not add a second monitoring stack or external observer as an implicit dependency.
+  Revisit independent outage detection separately when its operational value warrants it.
+
+## Known Gaps and Risks
+
+- **Phobos outage blind spot:** Prometheus, Alertmanager and Uptime Kuma share phobos. If that
+  host stops, they cannot detect and deliver a new notification about its own failure or
+  continue observing other services. The planned Postfix relay on phobos is another shared
+  notification dependency. Silence from monitoring is not proof that the lab is healthy.
+- **Accepted initial limitation:** An independent observer and notification path are deferred,
+  not implemented or proven unnecessary. Revisit after a missed outage, a change in availability
+  requirements, or a later monitoring review. Any future solution must work without phobos and
+  its local notification dependencies; it need not duplicate the full monitoring stack.
+
+## End-User DMZ Ingress
+
+These are additional `composition.ingress.dmz.blocks` routes; retain the existing internal
+sites. Follow [ADR 0015](../../adr/0015-dns-ingress-and-certificate-trust-boundaries.md):
+local wildcard DNS selects Caddy-DMZ, explicit Caddy sites select applications, and unknown
+names retain HTTP 404. Use Let's Encrypt certificates without requiring the end-user device
+to trust the internal CA. LAN clients connect directly; remote clients use WireGuard and home
+DNS with DMZ routing. No per-application local DNS record or backend relocation is required.
+Direct public Internet exposure is outside this scope.
+
+Add `speed.abhaile.dedyn.io` for LibreSpeed, retaining its existing unauthenticated LAN-utility
+behavior for LAN/WireGuard users. Do not infer that it is suitable for unrestricted WAN access.
+Grafana, Prometheus, Alertmanager, Smokeping and Uptime Kuma administration remain internal.
+A separate household status page is an open choice, not an approved route in this scope.
 
 ## Acceptance Criteria
 
+- [ ] Monitoring documentation and operational guidance state the accepted phobos-outage blind
+  spot and do not claim independent host-failure detection or notification.
+
+- [ ] LibreSpeed has an additional `speed.abhaile.dedyn.io` route with a trusted certificate;
+  speed-test requests work from LAN and WireGuard clients, without changing internal ingress.
+
+- [ ] No monitoring administration UI is added to Caddy-DMZ by this change.
+
 - [ ] Detail `service.yaml` definitions for all services in this group
+
 - [ ] Render produces valid quadlet units (.container, .volume, .image) for all containerized
   services
+
 - [ ] Render produces systemd unit files for host-network services (node-exporter,
   podman-exporter, promtail) on both hosts
+
 - [ ] Prometheus `prometheus.yml` is rendered with correct scrape jobs for all targets
   assigned to the same host
+
 - [ ] Loki config includes syslog receiver on UDP 514 and TCP 1514
+
 - [ ] Promtail config ships journal and log files to Loki with correct labels
+
 - [ ] Monitoring captures GitOps runner status from systemd, runner state files, and/or
   journald so checkout, render, apply, rollback, and dirty-worktree failures are diagnosable
+
 - [ ] Filesystem available-space and inode alerts cover both hosts; phobos `/srv` warns before
   the SPEC-2026-015 guard threshold, and Frigate storage inhibition produces an actionable
   notification with manual recovery guidance.
+
 - [ ] DNS monitoring captures CoreDNS resolver health, CoreDNS query logs for client
   attribution, and Blocky filtering metrics/statistics
+
 - [ ] DNS dashboards or runbooks support identifying noisy clients, suspicious query patterns,
   and clients that should move from clean DNS policy to filtered DNS policy
+
 - [ ] Each service in scope has an observability profile covering health, metrics, logs,
   attribution needs, dependency health, state freshness, and actionable alert/runbook coverage
+
+- [ ] The internal Grafana route presents native sign-in. Verify successful login and that
+  unauthenticated users cannot access protected dashboards.
+
 - [ ] Grafana provisioning includes Prometheus and Loki datasource definitions
+
 - [ ] Blackbox exporter config includes probe modules and target lists for internal, DMZ, and
   external endpoints
+
 - [ ] SNMP exporter config includes per-device modules for ER605, switches, and APs
+
 - [ ] Vault-agent templates exist for Grafana admin password, Alertmanager notification
   credentials, and SNMP community strings
+
 - [ ] Caddy ingress blocks are rendered for Grafana, Uptime Kuma, LibreSpeed, Smokeping,
   Prometheus, and Alertmanager
+
 - [ ] DNS records in `config/network.yaml` resolve correctly for all monitoring services
+
 - [ ] `config/mapping.yaml` updated with monitoring service assignments for both hosts
+
 - [ ] Smokeping targets config rendered with gateway, upstream DNS, WAN, and inter-host
   entries
+
 - [ ] Unit tests cover render output for each service type
+
 - [ ] Integration tests verify full monitoring stack renders without errors for both hosts
+
 - [ ] No secrets appear in rendered output
 
 ### Evidence
@@ -450,8 +519,8 @@ For each completed criterion, include:
 - Uptime Kuma monitor definitions — configured via UI after deployment.
 - Optional exporters (chrony-exporter, smartctl-exporter, ups-exporter, custom nftables
   exporter) — defer until core stack is operational.
-- High-availability (multi-instance Prometheus/Loki) — single-host deployment is sufficient
-  for this homelab scale.
+- High-availability monitoring and independent phobos-outage notifications — explicitly deferred
+  for the initial deployment; see Known Gaps and Risks.
 - Log retention automation (compaction, deletion) — Loki handles this internally per config.
 
 ## Open Questions
@@ -469,10 +538,6 @@ For each completed criterion, include:
    proposed. Should services declare a `metrics_port` field in `service.yaml` to make
    Prometheus config generation fully automatic, or maintain an explicit scrape job list in
    Prometheus config?
-
-1. **Host placement:** This spec places all centralized monitoring on phobos. Should any
-   services (Loki, Prometheus) run on deimos instead to balance load, or does consolidation
-   on the primary host simplify operations?
 
 1. **Promtail deployment model:** Run as a host systemd service (access to journal natively)
    or as a privileged container with journal bind-mount? The skeleton `service.yaml` uses

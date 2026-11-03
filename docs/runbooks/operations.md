@@ -21,6 +21,10 @@ machinectl shell abhaile@ /bin/systemctl --user restart vault-agent.service
 test -f /srv/vault/agent/out/.ready && echo "OK" || echo "NOT READY"
 ```
 
+For DNS, certificate and LAN/WireGuard ingress diagnosis, see the
+[DNS and ingress access runbook](dns-and-ingress.md). DMZ access is not synonymous with
+public Internet exposure.
+
 ## Quick Reference
 
 ### Workstation Validation
@@ -501,7 +505,7 @@ Service unreachable?
 │   │        ip link show ipvlan-l2 || systemctl restart systemd-networkd
 │   │        Verify: ip -4 addr show dev ipvlan-l2 | grep "inet "
 │   └── NO → Continue below
-├── Only external (DMZ) access broken, internal works?
+├── Only DMZ ingress broken, internal ingress works?
 │   ├── YES → Check caddy-dmz and VLAN 100:
 │   │        systemctl status caddy-dmz.service
 │   │        ip link show ipvlan-l2.100

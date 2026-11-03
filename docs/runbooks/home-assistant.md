@@ -66,6 +66,21 @@ Do not reset devices, re-pair them, install another broker or attach the coordin
 through ZHA. If devices do not appear, check Zigbee2MQTT logs and the MQTT integration
 before changing network or broker configuration.
 
+## Caddy-DMZ Access
+
+Before deploying the route, open **Settings > System > Network > HTTP server**.
+Keep forwarded-header support enabled and add `172.20.100.200` alongside the existing
+trusted proxy `172.20.20.200`. Apply and confirm the settings after Home Assistant
+restarts. Verify the internal URL still works.
+
+After reconciliation, open `https://home-assistant.abhaile.dedyn.io` on the LAN and
+again over WireGuard from outside the LAN. Verify the certificate is trusted, native
+login succeeds, and dashboard state updates live. Test Companion app access and confirm
+the internal URL still works. If Home Assistant reports an untrusted proxy, check its
+logs for the actual connection source before changing the trusted proxy list.
+
+See the [DNS and ingress runbook](dns-and-ingress.md) for resolver and WireGuard checks.
+
 ## References
 
 - [Container installation](https://www.home-assistant.io/installation/linux/)

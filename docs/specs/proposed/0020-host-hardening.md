@@ -8,7 +8,7 @@ title: Host Hardening
 status: proposed
 owner: moonpie
 created: 2026-06-05
-updated: 2026-06-05
+updated: 2026-11-03
 related_adrs:
   - 0005-service-authoring-model
   - 0006-secrets-model-and-bootstrap-artifacts
@@ -22,14 +22,11 @@ scope:
 ## Context
 
 Both hosts currently run with no stateful firewall, no egress restrictions, and default kernel
-parameters. The old TODO tracked six hardening areas under "Host Hardening & Observability":
-nftables (default deny, service-specific rules), per-UID egress routing for qBittorrent via
-Gluetun, fail2ban configuration with nftables actions, CIS-lite baseline (rp_filter, SYN
-cookies, SSH hardening), filesystem configuration (noatime), and DoH/DoT blocklist management.
+parameters. The old TODO tracked hardening areas under "Host Hardening & Observability":
+nftables (default deny, service-specific rules), fail2ban configuration with nftables actions, CIS-lite baseline (rp_filter, SYN
+cookies, SSH hardening), and filesystem configuration (noatime).
 
-The services-networking spec (SPEC-2026-018) defines the kill-switch interface contract: the
-host-hardening spec must enforce per-UID egress restrictions and a policy routing table so
-Gluetun-bound traffic cannot leak to the default route. This spec owns that implementation.
+Gluetun owns torrent VPN leak protection under [SPEC-2026-018](0018-services-networking.md).
 
 fail2ban already has a `service.yaml` stub declaring `systemd.network: host` with an empty
 composition block. It runs as a host-level systemd service (not containerised) and needs
@@ -38,24 +35,21 @@ nftables integration for ban actions.
 The key architectural decision is how nftables rules enter the render pipeline. The existing
 `system/` renderer handles systemd-networkd units and resolved config. nftables rulesets are
 structurally similar (declarative files placed atomically), but they require rule ordering,
-per-host service awareness, and coordination with the kill-switch contract.
+and per-host service awareness.
 
 ## Requirements
 
 - [ ] Render a deterministic nftables ruleset per host with default-deny ingress and restricted egress
 - [ ] Generate per-service ingress rules derived from `config/network.yaml` and `config/mapping.yaml` (open only ports each host actually serves)
-- [ ] Implement per-UID egress routing and nftables rules enforcing the kill-switch contract from SPEC-2026-018 on deimos
 - [ ] Render fail2ban configuration with nftables ban actions
 - [ ] Render CIS-lite sysctl baseline (rp_filter, SYN cookies, TCP hardening, SSH kernel params) per host
 - [ ] Render filesystem mount options (noatime) into fstab or mount drop-ins
-- [ ] Define DoH/DoT blocklist refresh mechanism compatible with the existing Blocky/CoreDNS filtering stack
 
 ## Constraints
 
 - Render must remain unprivileged and deterministic — no live host state reads.
 - nftables rules must be expressible from data already in `config/` (service addresses, ports, VLAN topology). No new external data sources.
 - fail2ban runs on the host network (already declared in its `service.yaml` stub). It is not containerised.
-- The kill-switch rules apply only on deimos (where gluetun runs per SPEC-2026-018). phobos does not run VPN egress services.
 - Rule ordering must be deterministic across renders — same input produces identical rule file byte-for-byte.
 - Rendered nftables rules must not include timestamps, counters, or runtime state.
 - CrowdSec integration (if later deployed) must be additive — the base ruleset must accommodate an nftables set that CrowdSec can populate without re-rendering.
@@ -97,15 +91,6 @@ table inet filter {
 
   chain output {
     type filter hook output priority 0; policy accept;
-    # Per-UID VPN kill-switch rules (deimos only)
-  }
-}
-
-# deimos only:
-table inet vpn-kill-switch {
-  chain output {
-    type filter hook output priority 0;
-    # UID-based or cgroup-based egress restriction for gluetun
   }
 }
 ```
@@ -121,21 +106,6 @@ The renderer derives ingress rules from:
 For each service assigned to a host, the renderer generates `accept` rules for that service's
 declared ports, bound to its /32 address. This keeps the ruleset minimal — only ports for
 services actually deployed on the host are opened.
-
-### Per-UID Egress Routing (deimos, kill-switch)
-
-Implements the contract from SPEC-2026-018:
-
-1. **ip rule** entries directing traffic from the gluetun container's UID/cgroup to routing
-   table `vpn`.
-1. **nftables output chain** dropping egress from the gluetun source IP (`172.20.20.239`)
-   that is not destined for: the VPN endpoint IP(s), local VLAN CIDRs, or the gateway.
-1. **Rendered artifacts:** a policy routing drop-in (`/etc/iproute2/rt_tables.d/vpn.conf`)
-   and corresponding nftables rules in the host's ruleset.
-
-The VPN endpoint IP is declared in a config extension (either in gluetun's `service.yaml` or
-a dedicated `config/hardening/<host>.yaml` — see open questions). The renderer substitutes
-it into the nftables rule.
 
 ### fail2ban Integration
 
@@ -210,16 +180,11 @@ Rendered as a systemd mount drop-in or fstab snippet to enforce `noatime` on dat
 The exact mechanism depends on whether hosts use fstab or systemd mount units (to be confirmed
 during implementation). The renderer outputs the declarative desired state; apply enforces it.
 
-### DoH/DoT Blocklist
+### DNS Filtering Boundary
 
-The existing Blocky service handles DNS-level ad/malware blocking with OISD lists. DoH/DoT
-blocklist management at the host level means ensuring that clients cannot bypass the local DNS
-resolver by reaching external DoH/DoT servers directly.
-
-This is enforced via nftables: drop outbound TCP/UDP to port 443 and 853 that is not destined
-for the host's own resolvers or explicitly allowed endpoints. The rule sits in the output chain
-and exempts traffic from the DNS service UIDs (CoreDNS, Blocky) that legitimately need upstream
-resolution.
+CoreDNS applies source-subnet policy through the mirrored resolver pair described in
+[SPEC-2026-021](0021-network-devices.md). Enforcement against alternate client resolvers
+is deferred. Host hardening leaves ordinary HTTPS egress outside DNS filtering rules.
 
 ### Render Pipeline Integration
 
@@ -250,11 +215,9 @@ _To be recorded during implementation._
 
 - [ ] Detail nftables ruleset structure and rendering approach
 - [ ] Render per-host nftables.conf with default-deny ingress, service-derived allow rules, and deterministic ordering
-- [ ] Per-UID/cgroup egress kill-switch rules render for deimos, satisfying the SPEC-2026-018 contract
 - [ ] fail2ban jail and action configuration renders with nftables set-based bans
 - [ ] CIS-lite sysctl drop-in renders for both hosts
 - [ ] SSH hardening drop-in renders for both hosts
-- [ ] DoH/DoT egress blocking rules included in nftables output chain
 - [ ] nftables ruleset includes empty named sets for fail2ban and CrowdSec (runtime-populated)
 - [ ] Filesystem noatime configuration renders for both hosts
 - [ ] Render output is byte-for-byte deterministic (no timestamps, no counter state)
@@ -299,29 +262,16 @@ For each completed criterion, include:
    wants its own table (`crowdsec`) — should the rendered ruleset accommodate this, or should
    CrowdSec's own deployment create its table independently?
 
-1. **Kill-switch matching strategy:** SPEC-2026-018 open question 2 asks whether to use
-   UID-based or cgroup-based matching for container egress. Rootful containers run as root,
-   making UID matching unreliable. cgroup v2 path matching (`socket cgroupv2 level N ...`) is
-   more precise but requires cgroup awareness in nftables. Which approach, and should the
-   config schema declare the matching identifier?
-
-1. **Config location for hardening parameters:** Should per-host hardening knobs (VPN
-   endpoint IPs, SSH allow-lists, custom sysctl overrides) live in `config/hosts/<host>/host.yaml`
+1. **Config location for hardening parameters:** Should per-host hardening knobs (SSH allow-lists, custom sysctl overrides) live in `config/hosts/<host>/host.yaml`
    under a new `composition.hardening` key, or in a dedicated `config/hardening/<host>.yaml`
    file? The former keeps host config consolidated; the latter avoids bloating `host.yaml`.
-
-1. **DoH/DoT blocklist scope:** The current design blocks outbound 443/853 except for
-   legitimate DNS service egress. This could break services that legitimately reach HTTPS
-   endpoints (Caddy ACME, Vault, container image pulls). Should the block apply only to
-   non-service UIDs (user sessions, IoT VLAN traffic forwarding), or use a destination-based
-   allowlist for known DNS-over-HTTPS providers?
 
 ## References
 
 - `config/services/fail2ban/service.yaml` (stub — `systemd.network: host`, empty composition)
 - `config/network.yaml` — VLAN topology, service /32 addresses
 - `config/mapping.yaml` — service-to-host assignments
-- `docs/specs/proposed/0018-services-networking.md` (SPEC-2026-018 — kill-switch contract definition)
+- `docs/specs/proposed/0018-services-networking.md` (SPEC-2026-018 — Gluetun leak protection)
 - `docs/specs/proposed/0019-services-utilities.md` (SPEC-2026-019 — CrowdSec service definition and bouncer outputs)
 - `src/abhaile/renderers/` — existing renderer modules (networkd, resolved, services)
 - `.old_docs/TODO.md` — Phase 3 "Host Hardening & Observability" items
