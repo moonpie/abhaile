@@ -22,7 +22,7 @@ composition:
       blocks:
         - zigbee2mqtt/caddy/internal-ingress.txt
   container:
-    image: ghcr.io/koenkk/zigbee2mqtt:2.14.2
+    image: ghcr.io/koenkk/zigbee2mqtt:2.14.3
     pull_policy: missing
     named_volumes:
       - name: data

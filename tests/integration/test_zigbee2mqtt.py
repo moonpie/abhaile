@@ -39,7 +39,7 @@ def test_zigbee2mqtt_preserves_mutable_configuration_and_orders_secure_startup(
         )
     directory = tmp_path / "services/zigbee2mqtt"
     quadlet = (directory / "etc/containers/systemd/zigbee2mqtt.container").read_text()
-    assert "Image=ghcr.io/koenkk/zigbee2mqtt:2.14.2" in quadlet
+    assert "Image=ghcr.io/koenkk/zigbee2mqtt:2.14.3" in quadlet
     assert "--ip=172.20.20.223" in quadlet
     assert "--umask=0077" in quadlet
     assert "Environment=Z2M_ONBOARD_NO_SERVER=1" in quadlet

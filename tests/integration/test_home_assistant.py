@@ -35,7 +35,7 @@ def test_home_assistant_preserves_configuration_and_uses_isolated_network(tmp_pa
     quadlet = (
         tmp_path / "services/home-assistant/etc/containers/systemd/home-assistant.container"
     ).read_text()
-    assert "Image=ghcr.io/home-assistant/home-assistant:2026.10.4" in quadlet
+    assert "Image=ghcr.io/home-assistant/home-assistant:2026.11.0" in quadlet
     assert "Network=services.network" in quadlet
     assert "--ip=172.20.20.221" in quadlet
     assert "--umask=0077" in quadlet

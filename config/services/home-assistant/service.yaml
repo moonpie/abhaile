@@ -11,7 +11,7 @@ composition:
       blocks:
         - home-assistant/caddy/internal-ingress.txt
   container:
-    image: ghcr.io/home-assistant/home-assistant:2026.10.4
+    image: ghcr.io/home-assistant/home-assistant:2026.11.0
     pull_policy: missing
     named_volumes:
       - name: config

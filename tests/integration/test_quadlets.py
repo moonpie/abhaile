@@ -253,7 +253,7 @@ class TestQuadretsIntegration:
         assert "WantedBy=abhaile-secrets-ready.service" in authelia_content
         assert "WantedBy=multi-user.target" not in authelia_content
 
-        assert "Image=docker.io/authelia/authelia:4.39.13" in authelia_content
+        assert "Image=docker.io/authelia/authelia:4.39.28" in authelia_content
         assert "Pull=missing" in authelia_content
 
         # Verify authelia image quadlet is not rendered
@@ -281,7 +281,7 @@ class TestQuadretsIntegration:
         assert "Notify=healthy" in redis_content
         assert "StopSignal=SIGTERM" in redis_content
         assert "StopTimeout=60" in redis_content
-        assert "Image=docker.io/library/redis:8.2.2-alpine" in redis_content
+        assert "Image=docker.io/library/redis:8.2.11-alpine" in redis_content
         assert "Pull=missing" in redis_content
         assert "WantedBy=abhaile-secrets-ready.service" in redis_content
         assert "WantedBy=multi-user.target" not in redis_content

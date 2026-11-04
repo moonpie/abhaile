@@ -6,7 +6,7 @@ and trusted proxy configuration.
 
 ## Ownership and Runtime
 
-Home Assistant Container 2026.10.4 uses `172.20.20.221:8123` on the existing Services
+Home Assistant Container 2026.11.0 uses `172.20.20.221:8123` on the existing Services
 VLAN. The complete `/config` directory persists under `/srv/home-assistant/config`.
 Home Assistant owns its configuration, integrations, registries, credentials and
 SQLite database. GitOps manages the container and directory metadata, not those files.
