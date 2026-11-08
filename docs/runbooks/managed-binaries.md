@@ -7,7 +7,7 @@ software declarations remain render-only.
 
 Declare a binary in `config/hosts/<host>/software/downloads/<id>.yaml` and
 reference its ID through host `composition.software.downloads`. For example,
-the following is the planned SOPS adoption declaration; it is not yet enrolled:
+the following is the SOPS 3.13.1 adoption declaration:
 
 ```yaml
 id: sops

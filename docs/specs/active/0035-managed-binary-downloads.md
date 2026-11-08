@@ -117,27 +117,27 @@ distribution requires a separately reviewed extension.
 
 ## Acceptance Criteria
 
-- [ ] Schema rejects mixed declarative and command-oriented forms and invalid URLs,
+- [x] Schema rejects mixed declarative and command-oriented forms and invalid URLs,
   checksums, destinations and modes. Schema validation restricts destination
   syntax to direct children of `/usr/local/bin`; live checks reject non-regular targets.
 - [ ] SOPS renders deterministically as a managed resource on both hosts, with
   declaration identity distinct from payload checksum and metadata.
-- [ ] Matching installations and metadata-only repair make no upstream requests,
+- [x] Matching installations and metadata-only repair make no upstream requests,
   including when the upstream host is unavailable.
-- [ ] Check mode reports absent, mismatched and matching binaries without mutation
+- [x] Check mode reports absent, mismatched and matching binaries without mutation
   or downloads.
-- [ ] Apply installs or updates atomically and a second apply is idempotent.
-- [ ] Download failure, checksum mismatch and unexpected paths preserve installed
+- [x] Apply installs or updates atomically and a second apply is idempotent.
+- [x] Download failure, checksum mismatch and unexpected paths preserve installed
   software; publication uses the existing runner lock and cleans temporary files.
-- [ ] Ordinary integrity checks detect binary content and metadata drift.
-- [ ] Runner recovery tests cover an interrupted upgrade, restoration from the
+- [x] Ordinary integrity checks detect binary content and metadata drift.
+- [x] Runner recovery tests cover an interrupted upgrade, restoration from the
   previous declaration, unavailable upstream during restoration, and retention
   during failed first adoption without deleting an existing bootstrap executable.
-- [ ] Unsupported removal, destination changes and conflicting managed targets
+- [x] Unsupported removal, destination changes and conflicting managed targets
   are rejected safely before managed mutation.
-- [ ] Existing command-oriented download, build and command definitions preserve
+- [x] Existing command-oriented download, build and command definitions preserve
   their render-only behavior.
-- [ ] ADR 0013, bootstrap guidance and software documentation explain the supported
+- [x] ADR 0013, bootstrap guidance and software documentation explain the supported
   resource and recovery boundaries, including the upstream dependency for rollback.
 - [ ] The support-only revision is last-successful on both hosts before enrollment;
   both then establish a checksum-verified managed SOPS 3.13.1 baseline before upgrade.
@@ -150,8 +150,20 @@ distribution requires a separately reviewed extension.
 Record implementation commits, automated checks and operator validation
 against each completed criterion.
 
-The support-only delivery implements the resource family without enrolling SOPS.
-Host deployment and subsequent adoption/upgrade evidence remain pending.
+Implementation reference for completed criteria: commit `b94c3b2652c4e6d4dffbd67a5f4a646e1e5d4166`
+(`feat: add managed host binary download support`). Test references below provide
+validation evidence for those criteria.
+
+Both hosts accepted that support-only revision on 2026-11-08. Deimos completed
+with `full-new-commit`, exit 0, 65 audited entries and a clean post-full result;
+Phobos completed with `full-new-commit`, exit 0, 191 audited entries and a clean
+post-full result. Both reported zero drift/uncertainty and no rollback.
+
+Before enrollment, the operator confirmed `/usr/local/bin/sops` on both hosts
+matches the 3.13.1 checksum
+`620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a`.
+The next delivery declares that same binary as managed. Adoption reconciliation
+and the subsequent 3.13.3 upgrade remain pending.
 
 Validation on 2026-11-08: `make lint`, all 580 fast unit tests, the 166-test
 focused regression set, and deterministic renders of both hosts passed. The
