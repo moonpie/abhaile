@@ -1,0 +1,48 @@
+- name: Validate managed binary declarations
+  ansible.builtin.assert:
+    that:
+      - item.kind == 'host.binary'
+      - item.target_path is match('^/usr/local/bin/[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - not item.is_directory | default(false)
+      - item.apply_hints is mapping
+      - item.apply_hints.url is match('^https://[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?/[^\s]+$')
+      - item.apply_hints.payload_sha256 is match('^[0-9a-f]{64}$')
+      - item.apply_hints.owner_user == 'root'
+      - item.apply_hints.owner_group == 'root'
+      - item.apply_hints.mode in ['0700', '0750', '0755']
+    fail_msg: Managed binary declaration violates the standalone executable boundary
+    quiet: true
+  loop: "{{ abhaile_binary_entries }}"
+  loop_control:
+    label: "{{ item.target_path }}"
+- name: Inspect binary destination parents
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    follow: false
+    get_checksum: false
+  loop: [/usr, /usr/local, /usr/local/bin]
+  register: abhaile_binary_parents
+- name: Require existing protected binary destination parents
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir | default(false)
+      - not item.stat.islnk | default(false)
+      - item.stat.uid == 0
+      - item.stat.gid == 0
+      - item.stat.mode in ['0755', '0750', '0700']
+    fail_msg: Binary destination parents must be real root-owned protected directories
+    quiet: true
+  loop: "{{ abhaile_binary_parents.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+- name: Validate all rendered declarations and target types before publication
+  ansible.builtin.include_role:
+    name: manifest_entry_preflight
+  vars:
+    abhaile_preflight_entries: "{{ abhaile_binary_entries }}"
+- name: Reconcile standalone executables
+  ansible.builtin.include_tasks: binary.yml
+  loop: "{{ abhaile_binary_entries }}"
+  loop_control:
+    loop_var: abhaile_binary_entry
+    label: "{{ abhaile_binary_entry.target_path }}"

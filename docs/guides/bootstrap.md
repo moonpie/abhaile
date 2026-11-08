@@ -62,9 +62,10 @@ environment, and enables `systemd-networkd` and `systemd-resolved`.
 
 The minimum tooling includes `python3-apt` and Ansible so ordinary roles can install declared
 standard packages. Those roles also establish declared users/groups and supported rootless
-foundations before their dependent files and services. Software action records do not become an
-arbitrary command runner: downloads, command-oriented builds and commands remain unexecuted.
-Existing managed Quadlet builds are a separate supported path. Record any remaining hardware,
+foundations before their dependent files and services. Declarative standalone binary downloads
+can be managed through the [bounded binary role](../runbooks/managed-binaries.md); keep bootstrap
+and host SOPS pins/checksums aligned. Command-oriented downloads, builds and commands remain
+unexecuted. Existing managed Quadlet builds are a separate supported path. Record any remaining hardware,
 driver, firmware or unsupported acquisition prerequisites before enrollment.
 
 Bootstrap passes the explicit `abhaile_bootstrap_enrollment: true` flag for the initial protected

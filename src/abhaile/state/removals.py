@@ -99,6 +99,14 @@ def classify_manifest_removals(
         "missing": [],
         "blocked": [],
     }
+    for target in sorted(set(source) & set(desired)):
+        if included_kinds is not None and source[target]["kind"] not in included_kinds:
+            continue
+        if source[target]["kind"] != desired[target]["kind"] and "host.binary" in {
+            source[target]["kind"],
+            desired[target]["kind"],
+        }:
+            result["blocked"].append({"target_path": target, "reason": "binary-kind-change"})
     for target in sorted(set(source) - set(desired)):
         entry = source[target]
         kind = entry["kind"]
@@ -119,6 +127,10 @@ def classify_manifest_removals(
                 )
             continue
         if file_residue_kinds is not None and kind in file_residue_kinds:
+            continue
+
+        if kind == "host.binary":
+            result["blocked"].append({**classification, "reason": "binary-removal-unsupported"})
             continue
 
         live_digest = _live_digest(target)

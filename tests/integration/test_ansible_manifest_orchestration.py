@@ -439,3 +439,12 @@ def test_manifest_orchestration_uses_fixed_dependency_order() -> None:
         if task.get("ansible.builtin.include_tasks") == "caddy_owner.yml"
     )
     assert caddy_index < phases.index(("rootful_quadlet_files", "activate.yml"))
+
+
+@pytest.mark.integration
+def test_selection_accepts_managed_binary_family(tmp_path: Path) -> None:
+    """Include downloaded executables exactly once in the canonical inventory."""
+    entry = _entry("host.binary", "host-binary:example")
+    entry["target_path"] = "/usr/local/bin/example"
+    code, stdout, stderr = _run_selection(tmp_path, [entry])
+    assert code == 0, stdout + stderr

@@ -1635,3 +1635,102 @@ class TestRunnerExitCodes:
         # depending on whether hostname matches. Since hostname likely
         # doesn't match phobos/deimos in CI, expect exit 3.
         assert result.returncode in (1, 3)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "managed_baseline,restore_available", [(False, True), (True, True), (True, False)]
+)
+def test_binary_candidate_recovery_preserves_authority(
+    runner_repo: Path, managed_baseline: bool, restore_available: bool
+) -> None:
+    """Use the real runner to retain first adoption or restore a managed predecessor."""
+    env = _prepare_successful_runner(runner_repo)
+    _install_manifest_fixture_renderer(runner_repo, env)
+    target = runner_repo.parent / "installed-binary"
+    target.write_text("old")
+    _write_manifest_fixture(runner_repo, target, include_entry=managed_baseline)
+    manifest_path = runner_repo / "manifest-source.json"
+    manifest = json.loads(manifest_path.read_text())
+    if managed_baseline:
+        manifest["entries"][0]["kind"] = "host.binary"
+    manifest_path.write_text(json.dumps(manifest))
+    (runner_repo / "binary-version").write_text("old")
+    baseline = _commit_and_push(runner_repo, "binary support baseline")
+    state = runner_repo.parent / "output/runner"
+    (state / "last-successful-commit").write_text(baseline + "\n")
+    manifest["entries"] = [
+        {
+            "render_path": "software/downloads/example.yaml",
+            "target_path": str(target),
+            "kind": "host.binary",
+            "owner_ref": "host-binary:example",
+            "sha256": hashlib.sha256(b"descriptor").hexdigest(),
+            "size": 10,
+            "apply_hints": {"payload_sha256": hashlib.sha256(b"new").hexdigest()},
+        }
+    ]
+    manifest_path.write_text(json.dumps(manifest))
+    (runner_repo / "binary-version").write_text("new")
+    candidate = _commit_and_push(runner_repo, "enroll or upgrade binary")
+    env.update(
+        {
+            "BINARY_TEST_TARGET": str(target),
+            "BINARY_TEST_CANDIDATE": candidate,
+            "BINARY_TEST_RESTORE": "yes" if restore_available else "no",
+        }
+    )
+    _make_runner_executable(
+        Path(env["ABHAILE_ANSIBLE_PLAYBOOK"]),
+        """#!/usr/bin/env python3
+import json, os, pathlib, subprocess, sys
+if "--check" in sys.argv:
+    sys.exit(0)
+sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+entries = json.loads(pathlib.Path("manifest-source.json").read_text())["entries"]
+if entries:
+    if sha != os.environ["BINARY_TEST_CANDIDATE"] and os.environ["BINARY_TEST_RESTORE"] == "no":
+        sys.exit(1)
+    pathlib.Path(os.environ["BINARY_TEST_TARGET"]).write_text(pathlib.Path("binary-version").read_text())
+sys.exit(1 if sha == os.environ["BINARY_TEST_CANDIDATE"] else 0)
+""",
+    )
+    result = _run_runner(runner_repo, env)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (state / "last-successful-commit").read_text().strip() == baseline
+    assert (state / "failed-target").read_text().strip() == candidate
+    if restore_available:
+        assert "recovery: SUCCESS" in result.stdout
+        assert not (state / "current-run").exists()
+        assert target.read_text() == ("old" if managed_baseline else "new")
+    else:
+        assert "recovery: FAILED" in result.stdout
+        assert (state / "current-run").read_text().strip() == candidate
+        assert target.read_text() == "new"
+
+
+@pytest.mark.integration
+def test_binary_removal_is_blocked_before_runner_mutation(runner_repo: Path) -> None:
+    """Refuse ordinary removal even when the installed payload is already absent."""
+    env = _prepare_successful_runner(runner_repo)
+    _install_manifest_fixture_renderer(runner_repo, env)
+    target = runner_repo.parent / "missing-binary"
+    _write_manifest_fixture(runner_repo, target, include_entry=True)
+    manifest_path = runner_repo / "manifest-source.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["entries"][0]["kind"] = "host.binary"
+    manifest_path.write_text(json.dumps(manifest))
+    baseline = _commit_and_push(runner_repo, "managed binary baseline")
+    state = runner_repo.parent / "output/runner"
+    (state / "last-successful-commit").write_text(baseline + "\n")
+    _write_manifest_fixture(runner_repo, target, include_entry=False)
+    _commit_and_push(runner_repo, "unsupported binary removal")
+    trace = runner_repo.parent / "live-trace"
+    env["ABHAILE_TRACE"] = str(trace)
+    _write_live_ansible(env, 'echo live >> "${ABHAILE_TRACE}"')
+    result = _run_runner(runner_repo, env)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "binary-removal-unsupported" in result.stdout + result.stderr
+    assert not trace.exists()
+    assert not (state / "current-run").exists()
+    assert (state / "last-successful-commit").read_text().strip() == baseline

@@ -236,3 +236,38 @@ def test_recovery_retains_candidate_package_inventory_without_cleanup(
     assert [entry["target_path"] for entry in result["identity_matches"]] == [str(ordinary)]
     assert packages.read_text() == live_packages
     assert ordinary.read_text() == "candidate=yes\n"
+
+
+@pytest.mark.parametrize("exists", [True, False])
+def test_binary_removal_requires_explicit_recovery_residue(tmp_path: Path, exists: bool) -> None:
+    """Ordinary removal is blocked, while first-adoption recovery retains bytes."""
+    target = tmp_path / "binary"
+    if exists:
+        target.write_text("payload")
+    desired, previous = tmp_path / "desired.json", tmp_path / "previous.json"
+    _manifest(desired, "phobos", [])
+    _manifest(previous, "phobos", [_entry(target, "descriptor", kind="host.binary")])
+    ordinary = classify_manifest_removals(desired, previous)
+    assert ordinary["blocked"][0]["reason"] == "binary-removal-unsupported"
+    recovery = classify_candidate_only_files(desired, previous, file_residue_kinds={"host.binary"})
+    assert recovery["host"] == "phobos"
+    assert not recovery["identity_matches"]
+    assert not recovery["missing"]
+    assert not recovery["blocked"]
+    assert target.exists() == exists
+
+
+@pytest.mark.parametrize(
+    "source_kind,desired_kind",
+    [("host.binary", "service.config"), ("service.config", "host.binary")],
+)
+def test_binary_cannot_replace_another_managed_kind(
+    tmp_path: Path, source_kind: str, desired_kind: str
+) -> None:
+    """A shared path must not bypass the unsupported binary removal boundary."""
+    target = tmp_path / "binary"
+    desired, previous = tmp_path / "desired.json", tmp_path / "previous.json"
+    _manifest(desired, "phobos", [_entry(target, "new", kind=desired_kind)])
+    _manifest(previous, "phobos", [_entry(target, "old", kind=source_kind)])
+    result = classify_manifest_removals(desired, previous)
+    assert result["blocked"] == [{"target_path": str(target), "reason": "binary-kind-change"}]

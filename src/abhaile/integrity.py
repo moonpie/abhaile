@@ -148,6 +148,18 @@ def _validate_entries(entries: list[Any], *, expected_host: str) -> None:
             raise ValueError("Duplicate integrity manifest entry identity")
         render_paths.add(render_path)
         target_paths.add(target_path)
+        if kind == "host.binary":
+            hints = entry.get("apply_hints")
+            if (
+                not isinstance(hints, dict)
+                or not isinstance(hints.get("payload_sha256"), str)
+                or not _SHA256_PATTERN.fullmatch(hints["payload_sha256"])
+                or hints.get("owner_user") != "root"
+                or hints.get("owner_group") != "root"
+                or hints.get("mode") not in {"0700", "0750", "0755"}
+                or is_directory
+            ):
+                raise ValueError("Invalid managed binary identity")
         if kind in FOUNDATION_KINDS:
             foundations.add((kind, target_path))
             hints = entry.get("apply_hints")
@@ -237,6 +249,17 @@ def _audit_entry(entry: dict[str, Any]) -> Literal["clean", "drift", "uncertaint
         return _audit_directory_metadata(before, entry)
     if not stat.S_ISREG(before.st_mode):
         return "drift"
+    if entry.get("kind") == "host.binary":
+        hints = entry["apply_hints"]
+        if before.st_size > MAX_HASH_BYTES:
+            return "uncertainty"
+        if (before.st_uid, before.st_gid, stat.S_IMODE(before.st_mode)) != (
+            0,
+            0,
+            int(hints["mode"], 8),
+        ):
+            return "drift"
+        return _audit_regular_file(path, before, hints["payload_sha256"], before.st_size)
     if expected_size > MAX_HASH_BYTES:
         return "uncertainty"
     if before.st_size != expected_size:

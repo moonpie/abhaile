@@ -31,6 +31,8 @@
   tags: [manifest_selection]
 - name: Select fixed manifest resource families
   ansible.builtin.set_fact:
+    abhaile_binary_entries: >-
+      {{ abhaile_manifest.entries | selectattr('kind', 'equalto', 'host.binary') | list }}
     abhaile_directory_entries: >-
       {{ abhaile_manifest.entries | selectattr('kind', 'equalto', 'service.directory') | list }}
     abhaile_reserved_host_access_entries: >-
@@ -157,6 +159,7 @@
   vars:
     selected_entry_count: "{{ selected_families | map('length') | sum }}"
     selected_families:
+      - "{{ abhaile_binary_entries }}"
       - "{{ abhaile_directory_entries }}"
       - "{{ abhaile_reserved_host_access_entries }}"
       - "{{ abhaile_rootful_systemd_entries }}"
@@ -204,6 +207,10 @@
     abhaile_host_foundation_entries: "{{ abhaile_reserved_host_access_entries }}"
   when: abhaile_reserved_host_access_entries | length > 0 or abhaile_host_foundation_cleanup_entries | length >
     0
+- name: Converge declared standalone binaries before consumers
+  ansible.builtin.include_role:
+    name: managed_binaries
+  when: abhaile_binary_entries | length > 0
 - name: Converge managed directories
   ansible.builtin.include_role:
     name: managed_directories

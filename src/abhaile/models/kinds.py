@@ -5,6 +5,7 @@ from __future__ import annotations
 KIND_FAMILIES: dict[str, frozenset[str]] = {
     "systemd": frozenset({"systemd.unit", "systemd.dropin", "resolved.config", "resolved.dropin"}),
     "user": frozenset({"host.sysusers", "host.sudoers", "host.authorized_keys"}),
+    "binary": frozenset({"host.binary"}),
     "package": frozenset({"host.packages"}),
     "coredns": frozenset({"coredns.config", "coredns.zone"}),
     "caddy": frozenset({"caddy.config"}),

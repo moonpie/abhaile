@@ -17,6 +17,8 @@ remains unchanged.
 2026-10-30: Amended for bounded host and service provisioning under active Spec 0034.
 Implementation and acceptance evidence remain tracked by that spec.
 
+2026-11-08: Amended for bounded standalone binary downloads under active Spec 0035.
+
 Supersedes ADR 0012.
 
 ## Context
@@ -195,6 +197,28 @@ authority. Package acquisition, account creation and runtime data are not claime
 reversibly undone by Git rollback. Preserve the existing family-specific cleanup and inert-residue
 rules; incompatible or irreversible cases remain operator concerns. Changes to recovery behavior
 still require the staged compatibility delivery described above.
+
+### Standalone binary provisioning amendment
+
+[Spec 0035](../specs/active/0035-managed-binary-downloads.md) adds pinned standalone
+executables directly under `/usr/local/bin` to the supported manifest families.
+Use native Ansible inspection, checksum-verified temporary downloads and atomic
+publication under the existing runner lock. Matching content and metadata-only
+repairs require no upstream access. Packages and Quadlet builds retain their
+existing handling; arbitrary software command lists remain render-only.
+
+The manifest identifies the rendered declaration separately from the installed
+payload checksum and metadata. Ordinary integrity audits the executable itself.
+Recovery reconciles the previous declaration and may require downloading its
+release. Unavailable upstream can prevent rollback; preserve the installed
+executable and existing recovery markers when that happens. No persistent payload
+cache, backup registry or additional recovery authority is introduced.
+
+A failed first adoption retains the executable when the last-successful manifest
+has no entry; it does not reconstruct previously unmanaged bytes. Ordinary removal,
+destination changes and resource-kind replacement remain unsupported. Deploy
+compatible family and residue support on both hosts before enrolling a binary,
+then establish the existing SOPS version as managed before upgrading it.
 
 ### Migration boundary
 

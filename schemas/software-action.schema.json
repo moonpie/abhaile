@@ -3,7 +3,10 @@
   "title": "Abhaile Host Software Action Schema",
   "description": "Schema for config/hosts/<host>/software/{downloads,builds,commands}/*.yaml",
   "type": "object",
-  "required": ["id", "name", "commands"],
+  "required": [
+    "id",
+    "name"
+  ],
   "properties": {
     "id": {
       "type": "string",
@@ -23,7 +26,68 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "binary": {
+      "type": "object",
+      "required": [
+        "url",
+        "sha256",
+        "destination",
+        "owner_user",
+        "owner_group",
+        "mode"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^https://[A-Za-z0-9][A-Za-z0-9.-]*(?::[0-9]+)?/[^\\s]+$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "destination": {
+          "type": "string",
+          "pattern": "^/usr/local/bin/[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "owner_user": {
+          "const": "root"
+        },
+        "owner_group": {
+          "const": "root"
+        },
+        "mode": {
+          "enum": [
+            "0700",
+            "0750",
+            "0755"
+          ]
+        }
+      },
+      "additionalProperties": false
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "oneOf": [
+    {
+      "required": [
+        "commands"
+      ],
+      "not": {
+        "required": [
+          "binary"
+        ]
+      }
+    },
+    {
+      "required": [
+        "binary"
+      ],
+      "not": {
+        "required": [
+          "commands"
+        ]
+      }
+    }
+  ]
 }

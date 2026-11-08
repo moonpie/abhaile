@@ -71,11 +71,34 @@ def render_software_artifacts(
                     f"expected id '{ref}', got '{spec_id}'"
                 )
 
+            if "binary" in spec and key != "downloads":
+                raise RenderError(
+                    f"Declarative binaries are supported only in downloads: {source_path}"
+                )
+
             rendered_path = category_output_dir / f"{ref}.yaml"
             rendered_path.write_text(
                 yaml.safe_dump(spec, sort_keys=False, default_flow_style=False),
                 encoding="utf-8",
             )
+
+            if "binary" in spec and collector is not None and rendered_root is not None:
+                binary = spec["binary"]
+                collector.register_artifact(
+                    render_path=rendered_path.relative_to(rendered_root).as_posix(),
+                    target_path=binary["destination"],
+                    kind="host.binary",
+                    owner_ref=f"host-binary:{ref}",
+                    content=rendered_path.read_text(encoding="utf-8"),
+                    apply_hints={
+                        "url": binary["url"],
+                        "payload_sha256": binary["sha256"],
+                        "owner_user": binary["owner_user"],
+                        "owner_group": binary["owner_group"],
+                        "mode": binary["mode"],
+                    },
+                )
+                collector.register_owner(name=f"host-binary:{ref}")
 
 
 def _collect_software_refs(

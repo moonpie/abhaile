@@ -388,14 +388,15 @@ if desired and removal_source:
     network_kinds = {"networkd.netdev", "networkd.network", "networkd.dropin"}
     if cleanup_scope == "network":
         included_kinds = network_kinds
-    elif cleanup_scope != "all":
+    elif cleanup_scope not in {"all", "recovery"}:
         raise SystemExit(f"Unsupported cleanup scope: {cleanup_scope}")
     classification = classify_manifest_removals(
         Path(desired),
         Path(removal_source),
         included_kinds=included_kinds,
         directory_residue_kinds={"networkd.dropin", "service.directory"},
-        file_residue_kinds={"caddy.config", "host.packages", "vault.template"},
+        file_residue_kinds={"caddy.config", "host.packages", "vault.template"}
+        | ({"host.binary"} if cleanup_scope == "recovery" else set()),
     )
     if classification["blocked"]:
         blocked = ", ".join(
@@ -460,10 +461,11 @@ run_pipeline_for_checked_out_commit() {
     local host="$1" target_sha="$2" rendered_root="$3"
     local desired_manifest="${4:-}" removal_source_manifest="${5:-}"
     local mutation_sha="${6-$target_sha}"
+    local cleanup_scope="${7:-all}"
     local vars_file="${rendered_root}/ansible-vars.json"
     do_render "$host" "$rendered_root" \
         && write_ansible_vars "$host" "$rendered_root" "$vars_file" \
-            "$desired_manifest" "$removal_source_manifest" \
+            "$desired_manifest" "$removal_source_manifest" "$cleanup_scope" \
         && do_ansible_check "$vars_file" \
         && { [[ -z "$mutation_sha" ]] || mark_mutation "$mutation_sha"; } \
         && do_ansible_apply "$vars_file" \
@@ -527,7 +529,7 @@ recover_last_successful() {
     fi
     if run_pipeline_for_checked_out_commit "$host" "$last_good_sha" "$last_successful_root" \
         "${last_successful_root}/rendered/manifest.json" "$candidate_manifest" \
-        "$recovery_marker"; then
+        "$recovery_marker" "recovery"; then
         state_call clear_matching_current_run "$marker_to_clear"
         if [[ "$preserve_failed" != "true" ]]; then
             local failed_sha

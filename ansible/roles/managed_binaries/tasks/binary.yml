@@ -1,0 +1,28 @@
+- name: Inspect installed executable content
+  ansible.builtin.stat:
+    path: "{{ abhaile_binary_entry.target_path }}"
+    follow: false
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: abhaile_binary_live
+- name: Report a pending binary download without contacting upstream
+  ansible.builtin.debug:
+    msg: "Binary content requires installation: {{ abhaile_binary_entry.target_path }}"
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - abhaile_binary_live.stat.checksum | default('') != abhaile_binary_entry.apply_hints.payload_sha256
+- name: Download and publish mismatched binary content
+  ansible.builtin.include_tasks: publish.yml
+  when:
+    - not ansible_check_mode
+    - abhaile_binary_live.stat.checksum | default('') != abhaile_binary_entry.apply_hints.payload_sha256
+- name: Converge matching executable metadata locally
+  ansible.builtin.file:
+    path: "{{ abhaile_binary_entry.target_path }}"
+    state: file
+    owner: "{{ abhaile_binary_entry.apply_hints.owner_user }}"
+    group: "{{ abhaile_binary_entry.apply_hints.owner_group }}"
+    mode: "{{ abhaile_binary_entry.apply_hints.mode }}"
+    follow: false
+  when: abhaile_binary_live.stat.checksum | default('') == abhaile_binary_entry.apply_hints.payload_sha256

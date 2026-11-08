@@ -276,3 +276,68 @@ def test_audit_1000_small_files_within_budget(tmp_path: Path) -> None:
 
     assert result.success is True
     assert time.monotonic() - started < 5
+
+
+def test_binary_audit_uses_payload_identity_and_live_size(tmp_path: Path, monkeypatch: Any) -> None:
+    """Audit executable bytes independently of the rendered descriptor size."""
+    target = tmp_path / "binary"
+    payload = b"executable payload"
+    target.write_bytes(payload)
+    target.chmod(0o755)
+    entry = _entry(target, b"declaration", kind="host.binary")
+    entry["apply_hints"] = {
+        "payload_sha256": hashlib.sha256(payload).hexdigest(),
+        "owner_user": "root",
+        "owner_group": "root",
+        "mode": "0755",
+    }
+    real_lstat = Path.lstat
+
+    def root_metadata(path: Path) -> os.stat_result:
+        values = list(real_lstat(path))
+        values[4:6] = [0, 0]
+        return os.stat_result(values)
+
+    monkeypatch.setattr(Path, "lstat", root_metadata)
+    assert integrity._audit_entry(entry) == "clean"
+    target.write_bytes(b"changed")
+    assert integrity._audit_entry(entry) == "drift"
+    target.write_bytes(payload)
+    target.chmod(0o700)
+    assert integrity._audit_entry(entry) == "drift"
+    target.chmod(0o755)
+    monkeypatch.setattr(integrity, "MAX_HASH_BYTES", len(payload) - 1)
+    assert integrity._audit_entry(entry) == "uncertainty"
+
+
+def test_binary_audit_detects_owner_drift(tmp_path: Path) -> None:
+    """Reject executable ownership that differs from the fixed root identity."""
+    target = tmp_path / "binary"
+    target.write_bytes(b"payload")
+    target.chmod(0o755)
+    entry = _entry(target, b"declaration", kind="host.binary")
+    entry["apply_hints"] = {
+        "payload_sha256": hashlib.sha256(b"payload").hexdigest(),
+        "owner_user": "root",
+        "owner_group": "root",
+        "mode": "0755",
+    }
+    if os.getuid() != 0 or os.getgid() != 0:
+        assert integrity._audit_entry(entry) == "drift"
+
+
+@pytest.mark.parametrize(
+    "hints",
+    [
+        {},
+        {"payload_sha256": "invalid"},
+        {"payload_sha256": "a" * 64, "owner_user": "other", "owner_group": "root", "mode": "0755"},
+    ],
+)
+def test_binary_manifest_rejects_invalid_payload_metadata(tmp_path: Path, hints: Any) -> None:
+    """Do not admit malformed binary metadata as an ordinary clean audit."""
+    entry = _entry(tmp_path / "binary", b"descriptor", kind="host.binary")
+    entry["apply_hints"] = hints
+    manifest = _manifest(tmp_path / "manifest.json", [entry])
+    with pytest.raises(ValueError, match="managed binary identity"):
+        audit_manifest(manifest, "ordinary", expected_host="test")

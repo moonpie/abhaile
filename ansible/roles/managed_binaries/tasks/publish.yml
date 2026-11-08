@@ -1,0 +1,36 @@
+- name: Stage and verify a standalone executable
+  block:
+    - name: Create a private staging directory beside the executable
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ abhaile_binary_entry.target_path | dirname }}"
+        prefix: .abhaile-binary-
+      register: abhaile_binary_stage
+      changed_when: false
+    - name: Download the pinned payload and verify its checksum
+      ansible.builtin.get_url:
+        url: "{{ abhaile_binary_entry.apply_hints.url }}"
+        dest: "{{ abhaile_binary_stage.path }}/payload"
+        checksum: "sha256:{{ abhaile_binary_entry.apply_hints.payload_sha256 }}"
+        owner: "{{ abhaile_binary_entry.apply_hints.owner_user }}"
+        group: "{{ abhaile_binary_entry.apply_hints.owner_group }}"
+        mode: "{{ abhaile_binary_entry.apply_hints.mode }}"
+        timeout: 30
+      changed_when: false
+    - name: Publish the verified executable atomically
+      ansible.builtin.copy:
+        src: "{{ abhaile_binary_stage.path }}/payload"
+        dest: "{{ abhaile_binary_entry.target_path }}"
+        remote_src: true
+        owner: "{{ abhaile_binary_entry.apply_hints.owner_user }}"
+        group: "{{ abhaile_binary_entry.apply_hints.owner_group }}"
+        mode: "{{ abhaile_binary_entry.apply_hints.mode }}"
+        follow: false
+        unsafe_writes: false
+  always:
+    - name: Remove temporary download files after completion or handled failure
+      ansible.builtin.file:
+        path: "{{ abhaile_binary_stage.path }}"
+        state: absent
+      when: abhaile_binary_stage.path is defined
+      changed_when: false
