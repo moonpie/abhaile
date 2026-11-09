@@ -43,7 +43,7 @@ class TestQuadretsIntegration:
         assert container.exists()
         assert not (service_dir / "blocky-a.image").exists()
         container_content = container.read_text(encoding="utf-8")
-        assert "Image=ghcr.io/0xerr0r/blocky:v0.27.0" in container_content
+        assert "Image=ghcr.io/0xerr0r/blocky:v0.35.0" in container_content
         assert "Pull=missing" in container_content
 
         # Verify volume files for shared volumes
