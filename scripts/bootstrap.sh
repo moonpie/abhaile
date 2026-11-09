@@ -6,8 +6,8 @@ set -euo pipefail
 
 # --- Configuration -----------------------------------------------------------
 
-readonly SOPS_VERSION="v3.13.1"
-readonly SOPS_SHA256="620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a"
+readonly SOPS_VERSION="v3.13.3"
+readonly SOPS_SHA256="e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b"
 readonly SOPS_URL="https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64"
 readonly VAULT_VERSION="1.21.4"
 

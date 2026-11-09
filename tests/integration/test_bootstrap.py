@@ -86,11 +86,11 @@ class TestBootstrapPreflight:
     def test_sops_checksum_matches_pinned_release(self) -> None:
         """Bootstrap pins the verified SOPS release checksum."""
         script = BOOTSTRAP_SCRIPT.read_text(encoding="utf-8")
-        assert 'readonly SOPS_VERSION="v3.13.1"' in script
+        assert 'readonly SOPS_VERSION="v3.13.3"' in script
         assert 'grep -qx "sops ${SOPS_VERSION#v}"' in script
         expected_sha = (
             'readonly SOPS_SHA256="'
-            "620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a"
+            "e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b"
             '"'
         )
         assert expected_sha in script

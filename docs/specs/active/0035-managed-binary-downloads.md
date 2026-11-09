@@ -8,7 +8,7 @@ title: Managed Binary Downloads
 status: active
 owner: moonpie
 created: 2026-11-05
-updated: 2026-11-08
+updated: 2026-11-09
 related_adrs:
   - 0008-host-infrastructure-authoring-model
   - 0013-last-successful-ansible-reconciliation
@@ -21,8 +21,8 @@ scope:
 
 ## Context
 
-Commit `24cd875` updated the SOPS download pin to 3.13.3. Both hosts
-still report 3.13.1 because reconciliation renders command-oriented
+Commit `24cd875` updated the SOPS download pin to 3.13.3. At that time, both hosts
+reported 3.13.1 because reconciliation rendered command-oriented
 download definitions without executing them. The operator requires
 reconciliation to manage this binary on 2026-11-05.
 
@@ -120,7 +120,7 @@ distribution requires a separately reviewed extension.
 - [x] Schema rejects mixed declarative and command-oriented forms and invalid URLs,
   checksums, destinations and modes. Schema validation restricts destination
   syntax to direct children of `/usr/local/bin`; live checks reject non-regular targets.
-- [ ] SOPS renders deterministically as a managed resource on both hosts, with
+- [x] SOPS renders deterministically as a managed resource on both hosts, with
   declaration identity distinct from payload checksum and metadata.
 - [x] Matching installations and metadata-only repair make no upstream requests,
   including when the upstream host is unavailable.
@@ -139,7 +139,7 @@ distribution requires a separately reviewed extension.
   their render-only behavior.
 - [x] ADR 0013, bootstrap guidance and software documentation explain the supported
   resource and recovery boundaries, including the upstream dependency for rollback.
-- [ ] The support-only revision is last-successful on both hosts before enrollment;
+- [x] The support-only revision is last-successful on both hosts before enrollment;
   both then establish a checksum-verified managed SOPS 3.13.1 baseline before upgrade.
 - [ ] Both hosts report SOPS 3.13.3 with the declared checksum after reconciliation.
 - [ ] An existing age-encrypted artifact decrypts successfully with plaintext
@@ -162,8 +162,19 @@ post-full result. Both reported zero drift/uncertainty and no rollback.
 Before enrollment, the operator confirmed `/usr/local/bin/sops` on both hosts
 matches the 3.13.1 checksum
 `620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a`.
-The next delivery declares that same binary as managed. Adoption reconciliation
-and the subsequent 3.13.3 upgrade remain pending.
+Enrollment commit `041cef77c9ed816a95a2555361908f10b80065ae` declared that same
+binary as managed. Phobos completed its adoption at 2026-11-09T00:02:42Z with
+`full-new-commit`, exit 0, 193 audited entries and a clean post-full result.
+Deimos subsequently passed `fast-clean` at 2026-11-09T00:04:42Z with that commit
+as last-successful, exit 0 and 68 audited entries. Both reported zero drift and
+uncertainty; the operator confirmed the original checksum remains installed on
+both hosts. Both-host rendering and eight renderer tests passed before enrollment.
+This establishes the managed 3.13.1 baseline before the 3.13.3 upgrade.
+
+The upgrade changes the declaration and bootstrap pin together to 3.13.3, using
+the upstream Linux amd64 checksum
+`e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b`.
+Host upgrade and age-decryption validation remain pending.
 
 Validation on 2026-11-08: `make lint`, all 580 fast unit tests, the 166-test
 focused regression set, and deterministic renders of both hosts passed. The

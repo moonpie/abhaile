@@ -7,14 +7,14 @@ software declarations remain render-only.
 
 Declare a binary in `config/hosts/<host>/software/downloads/<id>.yaml` and
 reference its ID through host `composition.software.downloads`. For example,
-the following is the SOPS 3.13.1 adoption declaration:
+the following is the pinned SOPS declaration:
 
 ```yaml
 id: sops
 name: Install SOPS binary
 binary:
-  url: https://github.com/getsops/sops/releases/download/v3.13.1/sops-v3.13.1.linux.amd64
-  sha256: 620a9d7e3352ababeca6908cea24a6e8b14ce89a448ddbd3f94f1ef3398f470a
+  url: https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+  sha256: e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b
   destination: /usr/local/bin/sops
   owner_user: root
   owner_group: root
