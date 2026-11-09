@@ -281,7 +281,13 @@ class TestQuadretsIntegration:
         assert "Notify=healthy" in redis_content
         assert "StopSignal=SIGTERM" in redis_content
         assert "StopTimeout=60" in redis_content
-        assert "Image=docker.io/library/redis:8.2.11-alpine" in redis_content
+        authelia_config = read_yaml(authelia_yaml)
+        redis_config = next(
+            container["container"]
+            for container in authelia_config["composition"]["pod"]["containers"]
+            if container["name"] == "redis"
+        )
+        assert f"Image={redis_config['image']}" in redis_content.splitlines()
         assert "Pull=missing" in redis_content
         assert "WantedBy=abhaile-secrets-ready.service" in redis_content
         assert "WantedBy=multi-user.target" not in redis_content
