@@ -369,7 +369,13 @@ class TestQuadretsIntegration:
 
         mongodb_content = mongodb.read_text()
         assert "Pod=omada-controller-app.pod" in mongodb_content
-        assert "Image=docker.io/library/mongo:8.0.26" in mongodb_content
+        omada_config = read_yaml(omada_yaml)
+        mongodb_config = next(
+            container["container"]
+            for container in omada_config["composition"]["pod"]["containers"]
+            if container["name"] == "mongodb"
+        )
+        assert f"Image={mongodb_config['image']}" in mongodb_content.splitlines()
         assert "Pull=missing" in mongodb_content
         assert "After=abhaile-secrets-ready.service omada-mongodb-env.service" in mongodb_content
         assert "Requires=abhaile-secrets-ready.service omada-mongodb-env.service" in (
