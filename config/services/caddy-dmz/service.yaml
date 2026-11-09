@@ -3,7 +3,7 @@ podman:
   user: root
   network: ipvlan-l2
 build:
-  output_image: localhost/caddy-desec:2.10.2
+  output_image: localhost/caddy-desec:2.11.9
   pull_policy: missing
   inputs:
     - caddy-dmz/quadlets/build.build
