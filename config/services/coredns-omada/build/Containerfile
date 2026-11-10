@@ -26,7 +26,7 @@ RUN go get github.com/dougbw/coredns_omada@${COREDNS_OMADA_VERSION}
 RUN make
 
 # --- Dist stage ---
-FROM docker.io/library/alpine:3.20 AS dist
+FROM docker.io/library/alpine:3.24.4 AS dist
 RUN adduser -S -D -H -h /nonexistent -s /sbin/nologin coredns
 COPY --from=build /src/coredns/coredns /coredns
 ENTRYPOINT ["/coredns"]

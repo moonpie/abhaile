@@ -22,7 +22,14 @@ Application authentication is independent of certificate trust and routing.
 
 ## DNS Behavior
 
-### CoreDNS installation
+### CoreDNS build upgrades
+
+CoreDNS runs as a native host binary extracted from the `coredns-omada` build.
+Update the CoreDNS source tag, external Omada plugin, and Go builder together;
+the plugin's Go module requirements can change the resolved dependency graph.
+Check the compiled binary's version, build module information, and plugin list.
+The Alpine distribution stage packages the binary for installation; it is not
+the running DNS service's operating system.
 
 The installer stages the binary alongside `/usr/local/bin/coredns`, sets mode
 `0755`, and atomically renames it over the destination. A running daemon keeps
@@ -31,6 +38,27 @@ the old executable in place and removes the temporary file.
 
 Deploy the atomic installer as its own baseline before changing build versions.
 Confirm it is last-successful on both hosts so recovery also uses the safe installer.
+
+For the 1.15.0 build, the declared dependencies are Omada plugin 1.9.1,
+Go 1.27.3, and Alpine 3.24.4. The plugin includes a fix for client discovery with
+Omada Controller 6.2. Validate dynamic client records against the live controller
+after deployment; isolated static DNS checks cannot prove API compatibility.
+
+Roll out one DNS host at a time. Before pushing, pause the runner timer on the
+other host and confirm its runner is idle. Validate the first host before restoring
+the other timer. Keep one working resolver available while the other builds and
+restarts; independent runners do not provide a coordinated rolling deployment.
+The timer on the host being reconciled must remain active for its health checks.
+
+After each deployment, check the runner summary, `/usr/local/bin/coredns -version`,
+and `/usr/local/bin/coredns -plugins`. Query that resolver directly for a static
+service record, a known Omada client, the `dedyn.io` wildcard, the reserved VPN
+name, and recursive answers. Check filtered and clean views from their respective
+client networks, including AAAA/TXT forwarding. Preserve the old working build
+image until both hosts pass: give it a separate local tag before rebuilding, because
+the build replaces `localhost/coredns-omada:latest`. Merely avoiding image pruning
+does not retain the old tag. Reverting pins may require upstream access to rebuild;
+the retained image is available for an explicitly reviewed recovery if needed.
 
 ### Split-horizon answers
 
