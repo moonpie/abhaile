@@ -22,6 +22,18 @@ Application authentication is independent of certificate trust and routing.
 
 ## DNS Behavior
 
+### CoreDNS installation
+
+The installer stages the binary alongside `/usr/local/bin/coredns`, sets mode
+`0755`, and atomically renames it over the destination. A running daemon keeps
+its old executable until the build consumer restart. A failed staging copy leaves
+the old executable in place and removes the temporary file.
+
+Deploy the atomic installer as its own baseline before changing build versions.
+Confirm it is last-successful on both hosts so recovery also uses the safe installer.
+
+### Split-horizon answers
+
 Both CoreDNS instances override A queries for `abhaile.dedyn.io` and its subdomains to
 `172.20.100.200`. AAAA, TXT and other record types follow upstream resolution. External zone
 records in `config/network.yaml` are not published by the renderer.
