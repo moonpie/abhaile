@@ -50,7 +50,7 @@ composition:
     containers:
       - name: omada-controller
         container:
-          image: docker.io/mbentley/omada-controller:6.2.10.17
+          image: docker.io/mbentley/omada-controller:6.3.0.111
           pull_policy: missing
           named_volumes:
             - name: cert

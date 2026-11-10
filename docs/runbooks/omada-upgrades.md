@@ -12,6 +12,15 @@ the host kernel, so the image does not avoid that restriction.
 
 ## Pre-upgrade backup
 
+For the 6.2.10.17 to 6.3.0.111 controller rollout, retain MongoDB 8.0.34.
+The operator has approved reusing the verified cold archive
+`/root/abhaile-backups/omada-before-mongo-8.0.34/service.tar`, accepting loss of
+changes since that backup. It contains Omada 6.2.10.17 and MongoDB 8.0.26 data;
+the production data subsequently opened successfully under MongoDB 8.0.34.
+Recovery uses the complete untouched archive with controller 6.2.10.17 and
+MongoDB 8.0.34, not the modified restore-check copy. This is an explicit exception
+to the fresh-backup procedure below for this rollout.
+
 First export a controller backup from the Omada UI and store it securely off-host.
 Also take a cold filesystem backup of the complete service directory while both
 controller and MongoDB are stopped. This preserves the corresponding application
@@ -180,3 +189,12 @@ image and is healthy. Inspect startup logs for storage, authentication, or
 compatibility errors. Sign in to Omada, confirm managed devices remain connected,
 and check a known dynamic client DNS record through both CoreDNS servers.
 Take a new backup before any subsequent controller upgrade.
+
+For 6.3, open the ingress root URL in a private tab if an old bookmark or cached
+page fails: the login path changed to `/independent/index.html#login`.
+Check client details as well as device connectivity; client-detail failures have
+been reported for the 6.3 container. Confirm the known dynamic client record still
+resolves through both DNS servers after the controller has restarted.
+
+References: [container upgrade notes](https://github.com/mbentley/docker-omada-controller#5863---404s-and-blank-pages)
+and [client-detail issue](https://github.com/mbentley/docker-omada-controller/issues/835).

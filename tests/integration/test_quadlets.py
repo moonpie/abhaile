@@ -352,7 +352,13 @@ class TestQuadretsIntegration:
 
         controller_content = controller.read_text()
         assert "Pod=omada-controller-app.pod" in controller_content
-        assert "Image=docker.io/mbentley/omada-controller:6.2.10.17" in controller_content
+        omada_config = read_yaml(omada_yaml)
+        controller_config = next(
+            container["container"]
+            for container in omada_config["composition"]["pod"]["containers"]
+            if container["name"] == "omada-controller"
+        )
+        assert f"Image={controller_config['image']}" in controller_content.splitlines()
         assert "Pull=missing" in controller_content
         assert (
             "After=abhaile-secrets-ready.service omada-controller-env.service "
@@ -369,7 +375,6 @@ class TestQuadretsIntegration:
 
         mongodb_content = mongodb.read_text()
         assert "Pod=omada-controller-app.pod" in mongodb_content
-        omada_config = read_yaml(omada_yaml)
         mongodb_config = next(
             container["container"]
             for container in omada_config["composition"]["pod"]["containers"]
