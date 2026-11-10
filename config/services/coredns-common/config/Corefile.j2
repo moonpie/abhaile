@@ -25,6 +25,8 @@
         resolve_dhcp_reservations true
         stale_record_duration 24h
         ignore_startup_errors true
+        # Preserve static-zone fallback when Omada has no matching record.
+        fallthrough
     }
 }
 {% endfor %}

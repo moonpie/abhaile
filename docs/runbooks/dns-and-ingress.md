@@ -44,6 +44,15 @@ Go 1.27.3, and Alpine 3.24.4. The plugin includes a fix for client discovery wit
 Omada Controller 6.2. Validate dynamic client records against the live controller
 after deployment; isolated static DNS checks cannot prove API compatibility.
 
+Keep explicit `fallthrough` in the Omada block. Plugin 1.8.1 automatically passed
+missing records to the next handler; 1.9.1 requires this option. Without it, a
+successfully populated Omada zone can return NXDOMAIN for Git-managed static names
+and child/reverse SOA queries before the file plugin can answer. Plugin ordering
+is unchanged: Omada answers matching dynamic records first, and missing records
+fall back to the static files. This does not establish static-first precedence.
+Validate both dynamic and static answers after controller initialization; an
+unavailable controller does not exercise this path.
+
 Roll out one DNS host at a time. Before pushing, pause the runner timer on the
 other host and confirm its runner is idle. Validate the first host before restoring
 the other timer. Keep one working resolver available while the other builds and
